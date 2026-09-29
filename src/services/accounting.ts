@@ -1,6 +1,7 @@
 // Accounting Engine: Double-Entry Validation, Period Checking, Auto-Posting & Financial Statements
 import { erpDb, generateErpId } from './db';
 import { JournalEntry, JournalLine, Account, AccountingPeriod, isDebitNatureCategory } from '../types/erp';
+import { AuthorizationService, GuardOptions } from './authorization';
 
 export interface ValidationResult {
   valid: boolean;
@@ -118,6 +119,14 @@ export class AccountingEngine {
     userName: string = 'مدير النظام',
     isTest?: boolean
   ): { success: boolean; entry?: JournalEntry; error?: string } {
+    // RBAC: posting journals requires the 'post' action on the accounting module
+    const guard = AuthorizationService.enforce('accounting', 'post', { userId, userName, isTest } as GuardOptions);
+    if (!guard.allowed) {
+      return { success: false, error: guard.error };
+    }
+    userId = guard.userId;
+    userName = guard.userName || userName;
+
     const validation = this.validateJournalEntry(entryData);
     if (!validation.valid) {
       return { success: false, error: validation.errorAr };
@@ -187,6 +196,14 @@ export class AccountingEngine {
     userId: string = 'usr-admin',
     userName: string = 'مدير النظام'
   ): { success: boolean; reversalEntry?: JournalEntry; error?: string } {
+    // RBAC: reversing (cancelling) journals requires the 'cancel' action
+    const guard = AuthorizationService.enforce('accounting', 'cancel', { userId, userName } as GuardOptions);
+    if (!guard.allowed) {
+      return { success: false, error: guard.error };
+    }
+    userId = guard.userId;
+    userName = guard.userName || userName;
+
     const db = erpDb.getSnapshot();
     const original = db.journalEntries.find(j => j.id === originalEntryId);
 

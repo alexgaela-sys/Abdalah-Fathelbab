@@ -11,7 +11,8 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "audit": "tsx scripts/system_audit_27_points.ts",
-    "verify": "tsx scripts/verify_integrity.ts"
+    "verify": "tsx scripts/verify_integrity.ts",
+    "regression": "tsx scripts/regression_fixes.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -73,8 +73,13 @@ export function App() {
   };
 
   const handleRoleChange = (role: RoleName) => {
+    // Service-level restriction: only a Super Admin session may switch roles
+    const res = AuthService.updateSessionRole(role);
+    if (!res.success) {
+      alert(res.error || 'غير مصرح بتبديل الدور');
+      return;
+    }
     setCurrentRole(role);
-    AuthService.updateSessionRole(role);
     // If the new role cannot view the currently open tab, bounce to the dashboard
     if (!PermissionService.canView(role, activeTab)) {
       setActiveTab('dashboard');

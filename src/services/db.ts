@@ -7,7 +7,8 @@ import {
   PurchaseInvoiceLine, PurchaseReturn, InventoryTransaction, InventoryCount, 
   InventoryCountLine, Payment, PaymentAllocation, Cheque, BankAccount, BankTransaction, 
   TreasuryTransaction, Expense, CostCenter, Account, JournalEntry, AccountingPeriod, 
-  StandardCostRate, SalesForecast, AccountMapping, AuditLog, User, ExportShipment
+  StandardCostRate, SalesForecast, AccountMapping, AuditLog, User, ExportShipment,
+  isDebitNatureCategory
 } from '../types/erp';
 
 // -----------------------------------------------------------------------------
@@ -865,11 +866,55 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
   }
 ];
 
-// Production Bill of Materials (BOMs) - Empty until defined by administrator
-export const INITIAL_PRODUCTION_BOMS: { boms: BomHeader[]; bomLines: BomLine[] } = {
-  boms: [],
-  bomLines: [],
+/**
+ * Production Bill of Materials for the 11 seeded finished products.
+ * Each product gets an active V1 BOM (base: 1,000 cartons) built ONLY from
+ * raw/packaging materials that exist in INITIAL_PRODUCTION_ITEMS above —
+ * so manufacturing is possible immediately after a clean initialization.
+ * Quantities per 1,000 cartons: corn 800kg, oil 180kg, flavor sauce 45kg, cartons 1,000 pcs.
+ * The flavor line is matched to each product's actual seeded flavor sauce.
+ */
+const SINGLE_FLAVOR_BY_DIP: Record<string, string> = {
+  'Sweet Chili Dip': 'item-raw-flavor-sweet-chili',
+  'Spicy Grilled Dip': 'item-raw-flavor-spicy-grilled',
+  'Honey Mustard Dip': 'item-raw-flavor-honey-mustard',
+  'Smokey Burger Dip': 'item-raw-flavor-smokey-burger',
+  'Honey BBQ Dip': 'item-raw-flavor-honey-bbq',
 };
+
+function buildInitialBoms(): { boms: BomHeader[]; bomLines: BomLine[] } {
+  const boms: BomHeader[] = [];
+  const bomLines: BomLine[] = [];
+
+  INITIAL_PRODUCTION_ITEMS
+    .filter(i => i.itemType === 'finished_product')
+    .forEach(fp => {
+      const bomId = `bom-${fp.id}`;
+      boms.push({
+        id: bomId,
+        bomNumber: `BOM-${fp.code}-V1`,
+        finishedItemId: fp.id,
+        version: 1,
+        baseQuantity: 1000,
+        unitId: 'unit-carton',
+        active: true,
+        effectiveDate: '2026-01-01',
+        notes: `معادلة تصنيع 1000 كرتونة من ${fp.nameAr}`,
+      });
+
+      const flavorItemId = SINGLE_FLAVOR_BY_DIP[fp.flavor || ''] || 'item-raw-flavor-sweet-chili';
+      bomLines.push(
+        { id: `bline-${bomId}-1`, bomId, materialItemId: 'item-raw-corn', quantityRequired: 800, unitId: 'unit-kg' },
+        { id: `bline-${bomId}-2`, bomId, materialItemId: 'item-raw-oil', quantityRequired: 180, unitId: 'unit-kg' },
+        { id: `bline-${bomId}-3`, bomId, materialItemId: flavorItemId, quantityRequired: 45, unitId: 'unit-kg' },
+        { id: `bline-${bomId}-4`, bomId, materialItemId: 'item-pkg-carton', quantityRequired: 1000, unitId: 'unit-piece' }
+      );
+    });
+
+  return { boms, bomLines };
+}
+
+export const INITIAL_PRODUCTION_BOMS: { boms: BomHeader[]; bomLines: BomLine[] } = buildInitialBoms();
 
 export const INITIAL_BANK_ACCOUNTS: BankAccount[] = [
   {
@@ -1109,7 +1154,7 @@ class ERPDatabaseService {
           jv.lines.forEach(line => {
             const acc = draft.accounts.find(a => a.id === line.accountId);
             if (acc) {
-              const isDebitNormal = ['Assets', 'Cost of Goods Sold', 'Operating Expenses', 'Other Expenses'].includes(acc.category);
+              const isDebitNormal = isDebitNatureCategory(acc.category);
               if (isDebitNormal) {
                 acc.currentBalance += (line.debit - line.credit);
               } else {

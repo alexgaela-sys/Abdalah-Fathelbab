@@ -5,6 +5,7 @@ import { erpDb, generateErpId, nextDocNumber } from './db';
 import { ProductionOrder, ProductionConsumption, ProductionWaste, BomHeader, BomLine, Item, StandardCostRate, JournalLine } from '../types/erp';
 import { InventoryEngine } from './inventory';
 import { AccountingEngine } from './accounting';
+import { AuthorizationService } from './authorization';
 
 export interface ProductionCostBreakdown {
   standardMaterialCost: number;
@@ -258,6 +259,10 @@ export class ManufacturingEngine {
 
     const bom = db.boms.find(b => b.id === order.bomId);
     if (!bom) return { success: false, error: 'معادلة التصنيع (BOM) المرتبطة بأمر الإنتاج غير موجودة' };
+
+    // RBAC: issuing materials requires 'post' on manufacturing
+    const guard = AuthorizationService.enforce('manufacturing', 'post', { userId: params.userId, userName: params.userName, isTest: (order as { isTest?: boolean }).isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
 
     const scale = order.plannedQuantity / (bom.baseQuantity || 1);
     const bomLines = db.bomLines.filter(l => l.bomId === order.bomId);

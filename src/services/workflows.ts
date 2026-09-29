@@ -11,6 +11,7 @@ import {
 } from '../types/erp';
 import { InventoryEngine } from './inventory';
 import { AccountingEngine } from './accounting';
+import { AuthorizationService } from './authorization';
 
 interface JLine {
   id: string;
@@ -96,7 +97,13 @@ export class WorkflowService {
     }>;
     userId?: string;
     userName?: string;
+    isTest?: boolean;
   }): { success: boolean; invoice?: PurchaseInvoice; error?: string } {
+    // RBAC: creating purchase invoices requires 'create' on purchasing
+    const guard = AuthorizationService.enforce('purchasing', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+    params = { ...params, userId: guard.userId, userName: guard.userName };
+
     const db = erpDb.getSnapshot();
     const supplier = db.suppliers.find(s => s.id === params.supplierId);
     if (!supplier) return { success: false, error: 'المورد غير مسجل بالنظام' };
@@ -297,7 +304,13 @@ export class WorkflowService {
     }>;
     userId?: string;
     userName?: string;
+    isTest?: boolean;
   }): { success: boolean; invoice?: SalesInvoice; creditWarning?: string; error?: string } {
+    // RBAC: creating sales invoices requires 'create' on sales
+    const guard = AuthorizationService.enforce('sales', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+    params = { ...params, userId: guard.userId, userName: guard.userName };
+
     const db = erpDb.getSnapshot();
     const customer = db.customers.find(c => c.id === params.customerId);
     if (!customer) return { success: false, error: 'العميل غير مسجل بالنظام' };
@@ -579,7 +592,13 @@ export class WorkflowService {
     allocatedInvoiceIds?: string[];
     userId?: string;
     userName?: string;
+    isTest?: boolean;
   }): { success: boolean; payment?: Payment; error?: string } {
+    // RBAC: recording customer receipts requires 'create' on customers (AR)
+    const guard = AuthorizationService.enforce('customers', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+    params = { ...params, userId: guard.userId, userName: guard.userName };
+
     const db = erpDb.getSnapshot();
     const customer = db.customers.find(c => c.id === params.customerId);
     if (!customer) return { success: false, error: 'العميل غير مسجل' };
@@ -739,7 +758,13 @@ export class WorkflowService {
     notes?: string;
     userId?: string;
     userName?: string;
+    isTest?: boolean;
   }): { success: boolean; payment?: Payment; error?: string } {
+    // RBAC: supplier payments require 'create' on suppliers (AP)
+    const guard = AuthorizationService.enforce('suppliers', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+    params = { ...params, userId: guard.userId, userName: guard.userName };
+
     const db = erpDb.getSnapshot();
     const supplier = db.suppliers.find(s => s.id === params.supplierId);
     if (!supplier) return { success: false, error: 'المورد غير مسجل' };
@@ -1933,6 +1958,10 @@ export class WorkflowService {
     userName?: string;
     isTest?: boolean;
   }): { success: boolean; error?: string } {
+    // RBAC: cheque lifecycle transitions require 'post' on cheques (finance)
+    const guard = AuthorizationService.enforce('cheques', 'post', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
     const db = erpDb.getSnapshot();
     const cheque = db.cheques.find(c => c.id === params.chequeId);
     if (!cheque) return { success: false, error: 'الشيك غير موجود' };

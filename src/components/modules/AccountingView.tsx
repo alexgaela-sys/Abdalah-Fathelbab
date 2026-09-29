@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { AccountingEngine } from '../../services/accounting';
-import { JournalEntry, Account, AccountingPeriod } from '../../types/erp';
+import { JournalEntry, Account, AccountingPeriod, isDebitNatureCategory } from '../../types/erp';
 
 export const AccountingView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -135,7 +135,7 @@ export const AccountingView: React.FC = () => {
       };
     }
 
-    const isDebitNormal = ['Assets', 'Cost of Goods Sold', 'Operating Expenses', 'Other Expenses'].includes(selectedLedgerAccount.category);
+    const isDebitNormal = isDebitNatureCategory(selectedLedgerAccount.category);
     const fromDate = ledgerFromDate ? new Date(ledgerFromDate) : new Date('2000-01-01');
     const toDate = ledgerToDate ? new Date(ledgerToDate) : new Date('2099-12-31');
     toDate.setHours(23, 59, 59, 999);
@@ -643,11 +643,11 @@ export const AccountingView: React.FC = () => {
                     <td className="p-3 font-medium text-slate-600">{acc.category}</td>
                     <td className="p-3 text-center">
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                        ['Assets', 'Cost of Goods Sold', 'Operating Expenses', 'Other Expenses'].includes(acc.category)
+                        isDebitNatureCategory(acc.category)
                           ? 'bg-emerald-50 text-emerald-700'
                           : 'bg-indigo-50 text-indigo-700'
                       }`}>
-                        {['Assets', 'Cost of Goods Sold', 'Operating Expenses', 'Other Expenses'].includes(acc.category) ? 'مدين' : 'دائن'}
+                        {isDebitNatureCategory(acc.category) ? 'مدين' : 'دائن'}
                       </span>
                     </td>
                     <td className="p-3 text-center font-mono font-bold">

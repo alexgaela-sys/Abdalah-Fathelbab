@@ -1,6 +1,7 @@
 // Authentication & Session Service for Abdullah ERP
 import { erpDb, generateErpId } from './db';
 import { User, RoleName } from '../types/erp';
+import { AuthorizationService } from './authorization';
 
 const SESSION_KEY = 'abdullah_erp_auth_session';
 let memorySession: AuthSession | null = null;
@@ -76,9 +77,12 @@ export class AuthService {
       return { success: false, messageAr: 'هذا الحساب معطل حالياً، يرجى مراجعة المسؤول' };
     }
 
-    // Verify Password (default 12345 for admin)
-    const validPassword = matchedUser.password || '12345';
-    if (rawPassword !== validPassword && rawPassword !== '12345') {
+    // Verify password against the user's OWN stored password.
+    // SECURITY: no universal fallback. The seeded default '12345' is accepted
+    // ONLY for the initial admin bootstrap account (usr-admin), never for other users.
+    const isBootstrapAdmin = matchedUser.id === 'usr-admin';
+    const storedPassword = matchedUser.password || (isBootstrapAdmin ? '12345' : '');
+    if (!storedPassword || rawPassword !== storedPassword) {
       return { success: false, messageAr: 'كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى' };
     }
 
@@ -168,16 +172,27 @@ export class AuthService {
   }
 
   /**
-   * Switch active role for current session (if authorized super admin)
+   * Switch active role for the current session.
+   * SECURITY: restricted to a session whose CURRENT role is Super Admin, and
+   * the target role must be a valid RoleName. Prevents self-elevation by any
+   * other authenticated user.
    */
-  public static updateSessionRole(newRole: RoleName): void {
+  public static updateSessionRole(newRole: RoleName): { success: boolean; error?: string } {
     const current = this.getCurrentSession();
-    if (current) {
-      current.user.role = newRole;
-      memorySession = current;
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(SESSION_KEY, JSON.stringify(current));
-      }
+    if (!current) {
+      return { success: false, error: 'يلزم تسجيل الدخول لتبديل الدور' };
     }
+
+    const check = AuthorizationService.canSwitchRole(current.user.role, newRole);
+    if (!check.allowed) {
+      return { success: false, error: check.error };
+    }
+
+    current.user.role = newRole;
+    memorySession = current;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(current));
+    }
+    return { success: true };
   }
 }
