@@ -4,7 +4,7 @@ import {
   Calendar, Building2, User
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
-import { AccountingEngine } from '../../services/accounting';
+import { WorkflowService } from '../../services/workflows';
 import { Expense } from '../../types/erp';
 
 export const ExpensesView: React.FC = () => {
@@ -34,92 +34,32 @@ export const ExpensesView: React.FC = () => {
       alert('المبلغ يجب أن يكون أكبر من صفر');
       return;
     }
-
-    const count = db.expenses.length + 1;
-    const expenseNumber = `EXP-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
-    const expenseId = `exp-${Date.now()}`;
-    const totalAmount = Number(amount) + Number(vatAmount);
-
-    const creditAcc = paymentMethod === 'cash' ? 'acc-1101' : 'acc-1102';
-    const acc = db.accounts.find(a => a.id === glAccountId);
-
-    const journalLines = [
-      {
-        id: '',
-        journalEntryId: '',
-        accountId: glAccountId,
-        accountCode: acc?.code || '6101',
-        accountNameAr: acc?.nameAr || 'مصروفات تشغيلية',
-        debit: Number(amount),
-        credit: 0,
-        currency: 'EGP' as const,
-        originalAmount: Number(amount),
-        exchangeRate: 1,
-        costCenterId,
-        description: `إثبات مصروف: ${description}`,
-      },
-      ...(vatAmount > 0 ? [{
-        id: '',
-        journalEntryId: '',
-        accountId: 'acc-1113',
-        accountCode: '1113',
-        accountNameAr: 'ضريبة القيمة المضافة - مدخلات',
-        debit: Number(vatAmount),
-        credit: 0,
-        currency: 'EGP' as const,
-        originalAmount: Number(vatAmount),
-        exchangeRate: 1,
-        description: `ضريبة مدخلات مصروف ${expenseNumber}`,
-      }] : []),
-      {
-        id: '',
-        journalEntryId: '',
-        accountId: creditAcc,
-        accountCode: creditAcc === 'acc-1101' ? '1101' : '1102',
-        accountNameAr: creditAcc === 'acc-1101' ? 'الخزينة الرئيسية' : 'البنك',
-        debit: 0,
-        credit: totalAmount,
-        currency: 'EGP' as const,
-        originalAmount: totalAmount,
-        exchangeRate: 1,
-        description: `سداد مصروف ${expenseNumber}`,
-      }
-    ];
-
-    const jvRes = AccountingEngine.postJournal({
-      date,
-      reference: reference || expenseNumber,
-      description: `مصروف ${expenseNumber} - ${description}`,
-      sourceDocumentType: 'expense',
-      sourceDocumentId: expenseId,
-      lines: journalLines,
-    });
-
-    if (!jvRes.success) {
-      alert(jvRes.error || 'خطأ في ترحيل المصروف');
+    if (!description.trim()) {
+      alert('يرجى إدخال بيان المصروف');
       return;
     }
 
-    erpDb.mutate(draft => {
-      draft.expenses.push({
-        id: expenseId,
-        expenseNumber,
-        date,
-        glAccountId,
-        costCenterId,
-        salesRepId: salesRepId || undefined,
-        amount: Number(amount),
-        vatAmount: Number(vatAmount),
-        totalAmount,
-        paymentMethod,
-        bankAccountId: paymentMethod === 'bank' ? bankAccountId : undefined,
-        description,
-        reference,
-        journalEntryId: jvRes.entry?.id,
-      });
+    const res = WorkflowService.recordExpense({
+      date,
+      glAccountId,
+      costCenterId,
+      amount: Number(amount),
+      vatAmount: Number(vatAmount),
+      paymentMethod,
+      bankAccountId: paymentMethod === 'bank' ? bankAccountId : undefined,
+      salesRepId: salesRepId || undefined,
+      description: description.trim(),
+      reference: reference.trim() || undefined,
     });
 
+    if (!res.success) {
+      alert(res.error || 'خطأ في تسجيل المصروف');
+      return;
+    }
+
     setShowAddModal(false);
+    setDescription('');
+    setReference('');
   };
 
   return (

@@ -7,6 +7,7 @@ import {
 import { erpDb } from '../../services/db';
 import { BankAccount } from '../../types/erp';
 import { AccountingEngine } from '../../services/accounting';
+import { WorkflowService } from '../../services/workflows';
 
 export const BanksView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -180,179 +181,40 @@ export const BanksView: React.FC = () => {
       alert('المبلغ يجب أن يكون أكبر من صفر');
       return;
     }
-
-    const todayStr = txDate || new Date().toISOString().split('T')[0];
-    const ref = reference || `BNK-${Date.now().toString().slice(-6)}`;
-    const curBankGl = currentBank.glAccountId;
-
-    let journalLines: any[] = [];
-
-    if (txType === 'deposit') {
-      // Debit Bank / Credit Counterpart
-      journalLines = [
-        {
-          id: '',
-          journalEntryId: '',
-          accountId: curBankGl,
-          accountCode: glAccount?.code || '',
-          accountNameAr: currentBank.bankName,
-          debit: Number(amount),
-          credit: 0,
-          currency: currentBank.currency,
-          originalAmount: Number(amount),
-          exchangeRate: 1,
-          description: `إيداع بنكي: ${description}`,
-        },
-        {
-          id: '',
-          journalEntryId: '',
-          accountId: targetAccountId,
-          accountCode: db.accounts.find(a => a.id === targetAccountId)?.code || '',
-          accountNameAr: db.accounts.find(a => a.id === targetAccountId)?.nameAr || '',
-          debit: 0,
-          credit: Number(amount),
-          currency: currentBank.currency,
-          originalAmount: Number(amount),
-          exchangeRate: 1,
-          description: `${description} (${ref})`,
-        }
-      ];
-    } else if (txType === 'withdrawal') {
-      // Debit Counterpart / Credit Bank
-      journalLines = [
-        {
-          id: '',
-          journalEntryId: '',
-          accountId: targetAccountId,
-          accountCode: db.accounts.find(a => a.id === targetAccountId)?.code || '',
-          accountNameAr: db.accounts.find(a => a.id === targetAccountId)?.nameAr || '',
-          debit: Number(amount),
-          credit: 0,
-          currency: currentBank.currency,
-          originalAmount: Number(amount),
-          exchangeRate: 1,
-          description: `${description} (${ref})`,
-        },
-        {
-          id: '',
-          journalEntryId: '',
-          accountId: curBankGl,
-          accountCode: glAccount?.code || '',
-          accountNameAr: currentBank.bankName,
-          debit: 0,
-          credit: Number(amount),
-          currency: currentBank.currency,
-          originalAmount: Number(amount),
-          exchangeRate: 1,
-          description: `سحب بنكي: ${description}`,
-        }
-      ];
-    } else if (txType === 'bank_fee') {
-      // Debit Bank Charges 6109 / Credit Bank
-      journalLines = [
-        {
-          id: '',
-          journalEntryId: '',
-          accountId: 'acc-6109',
-          accountCode: '6109',
-          accountNameAr: 'مصاريف وعمولات بنكية',
-          debit: Number(amount),
-          credit: 0,
-          currency: currentBank.currency,
-          originalAmount: Number(amount),
-          exchangeRate: 1,
-          costCenterId: 'cc-admin',
-          description: `مصاريف وعمولات بنكية: ${description} (${ref})`,
-        },
-        {
-          id: '',
-          journalEntryId: '',
-          accountId: curBankGl,
-          accountCode: glAccount?.code || '',
-          accountNameAr: currentBank.bankName,
-          debit: 0,
-          credit: Number(amount),
-          currency: currentBank.currency,
-          originalAmount: Number(amount),
-          exchangeRate: 1,
-          description: `خصم عمولة بنكية: ${description}`,
-        }
-      ];
-    } else if (txType === 'transfer') {
-      // Transfer to target bank
-      const targetB = db.bankAccounts.find(b => b.id === targetBankId);
-      if (!targetB) {
-        alert('يرجى تحديد البنك المحول إليه');
-        return;
-      }
-      journalLines = [
-        {
-          id: '',
-          journalEntryId: '',
-          accountId: targetB.glAccountId,
-          accountCode: db.accounts.find(a => a.id === targetB.glAccountId)?.code || '',
-          accountNameAr: targetB.bankName,
-          debit: Number(amount),
-          credit: 0,
-          currency: targetB.currency,
-          originalAmount: Number(amount),
-          exchangeRate: 1,
-          description: `تحويل وارد من ${currentBank.bankName}: ${description}`,
-        },
-        {
-          id: '',
-          journalEntryId: '',
-          accountId: curBankGl,
-          accountCode: glAccount?.code || '',
-          accountNameAr: currentBank.bankName,
-          debit: 0,
-          credit: Number(amount),
-          currency: currentBank.currency,
-          originalAmount: Number(amount),
-          exchangeRate: 1,
-          description: `تحويل صادر إلى ${targetB.bankName}: ${description}`,
-        }
-      ];
-    }
-
-    const jvRes = AccountingEngine.postJournal({
-      date: todayStr,
-      reference: ref,
-      description: `حركة مصرفية ${ref} - ${description}`,
-      sourceDocumentType: 'bank_transaction',
-      lines: journalLines,
-    }, 'usr-admin', 'المشرف العام (Admin)');
-
-    if (!jvRes.success) {
-      alert(jvRes.error || 'خطأ في ترحيل الحركة المصرفية');
+    if (!description.trim()) {
+      alert('يرجى إدخال بيان الحركة');
       return;
     }
 
-    erpDb.mutate(draft => {
-      draft.bankTransactions.push({
-        id: `btx-${Date.now()}`,
-        transactionNumber: ref,
-        bankAccountId: currentBank.id,
-        date: todayStr,
-        type: txType,
-        amount: Number(amount),
-        currency: currentBank.currency,
-        reference: ref,
-        description,
-        journalEntryId: jvRes.entry?.id,
-      });
+    const todayStr = txDate || new Date().toISOString().split('T')[0];
+    const ref = reference || `BNK-${Date.now().toString().slice(-6)}`;
 
-      draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: 'usr-admin',
-        userName: 'المشرف العام (Admin)',
-        module: 'إدارة البنوك',
-        action: 'create',
-        recordId: ref,
-        description: `تسجيل حركة بنكية (${txType}) بمبلغ ${amount} ${currentBank.currency} على حساب ${currentBank.bankName}`,
-      });
+    // Bank fee posts against the mapped bank-charges account; deposits/withdrawals
+    // post against the user-selected counterpart account.
+    const counterAcc = txType === 'bank_fee'
+      ? AccountingEngine.getMappedAccountId('bank_fees', 'acc-6109')
+      : targetAccountId;
+
+    if (!counterAcc) {
+      alert('يرجى اختيار الحساب المحاسبي المقابل');
+      return;
+    }
+
+    const res = WorkflowService.recordBankTransaction({
+      bankAccountId: currentBank.id,
+      type: txType,
+      amount: Number(amount),
+      date: todayStr,
+      reference: ref,
+      description: description.trim(),
+      counterGlAccountId: counterAcc,
+      targetBankAccountId: txType === 'transfer' ? targetBankId : undefined,
     });
+
+    if (!res.success) {
+      alert(res.error || 'خطأ في تسجيل الحركة المصرفية');
+      return;
+    }
 
     setShowAddTxModal(false);
     setDescription('');

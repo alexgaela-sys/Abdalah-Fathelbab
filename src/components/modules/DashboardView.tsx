@@ -63,7 +63,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab, ope
 
   // 9. صافي الربح (Net profit: Total Revenue - COGS - Operating Expenses)
   const totalRevenue = db.accounts.filter(a => a.category === 'Revenue').reduce((sum, a) => sum + a.currentBalance, 0);
-  const totalCOGS = db.accounts.filter(a => a.category === 'Cost of Goods Sold').reduce((sum, a) => sum + a.currentBalance, 0);
+  const totalCOGS = db.accounts.filter(a => a.category === 'COGS').reduce((sum, a) => sum + a.currentBalance, 0);
   const totalExpenses = db.accounts.filter(a => a.category === 'Operating Expenses' || a.category === 'Other Expenses').reduce((sum, a) => sum + a.currentBalance, 0);
   const netProfit = totalRevenue - totalCOGS - totalExpenses;
 

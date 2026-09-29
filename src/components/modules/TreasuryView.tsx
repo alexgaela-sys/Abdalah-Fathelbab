@@ -5,7 +5,7 @@ import {
   CheckCircle2, AlertTriangle, Filter
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
-import { AccountingEngine } from '../../services/accounting';
+import { WorkflowService } from '../../services/workflows';
 
 export const TreasuryView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -181,111 +181,30 @@ export const TreasuryView: React.FC = () => {
       alert('المبلغ يجب أن يكون أكبر من صفر');
       return;
     }
-
-    const todayStr = txDate || new Date().toISOString().split('T')[0];
-    const count = db.treasuryTransactions.length + 1;
-    const receiptNumber = `CSH-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
-    const txId = `ctx-${Date.now()}`;
-
-    // Balanced Journal Entry:
-    // Cash Receipt: Debit 1101 (Treasury) / Credit Target Account
-    // Cash Payment: Debit Target Account / Credit 1101 (Treasury)
-    const isReceipt = type === 'cash_receipt';
-    const journalLines = isReceipt ? [
-      {
-        id: '',
-        journalEntryId: '',
-        accountId: 'acc-1101',
-        accountCode: '1101',
-        accountNameAr: 'الخزينة الرئيسية النقدية',
-        debit: Number(amount),
-        credit: 0,
-        currency: 'EGP' as const,
-        originalAmount: Number(amount),
-        exchangeRate: 1,
-        description: `توريد نقدية بالخزينة: ${description}`,
-      },
-      {
-        id: '',
-        journalEntryId: '',
-        accountId: targetAccId,
-        accountCode: db.accounts.find(a => a.id === targetAccId)?.code || '4101',
-        accountNameAr: db.accounts.find(a => a.id === targetAccId)?.nameAr || 'إيرادات متنوعة',
-        debit: 0,
-        credit: Number(amount),
-        currency: 'EGP' as const,
-        originalAmount: Number(amount),
-        exchangeRate: 1,
-        description: `${description} (${partyName})`,
-      }
-    ] : [
-      {
-        id: '',
-        journalEntryId: '',
-        accountId: targetAccId,
-        accountCode: db.accounts.find(a => a.id === targetAccId)?.code || '6101',
-        accountNameAr: db.accounts.find(a => a.id === targetAccId)?.nameAr || 'مصروفات نقدية',
-        debit: Number(amount),
-        credit: 0,
-        currency: 'EGP' as const,
-        originalAmount: Number(amount),
-        exchangeRate: 1,
-        costCenterId: 'cc-admin',
-        description: `${description} (${partyName})`,
-      },
-      {
-        id: '',
-        journalEntryId: '',
-        accountId: 'acc-1101',
-        accountCode: '1101',
-        accountNameAr: 'الخزينة الرئيسية النقدية',
-        debit: 0,
-        credit: Number(amount),
-        currency: 'EGP' as const,
-        originalAmount: Number(amount),
-        exchangeRate: 1,
-        description: `صرف نقدية من الخزينة: ${description}`,
-      }
-    ];
-
-    const jvRes = AccountingEngine.postJournal({
-      date: todayStr,
-      reference: receiptNumber,
-      description: `حركة خزينة نقدية ${receiptNumber} - ${description}`,
-      sourceDocumentType: 'treasury_transaction',
-      sourceDocumentId: txId,
-      lines: journalLines,
-    }, 'usr-admin', 'المشرف العام (Admin)');
-
-    if (!jvRes.success) {
-      alert(jvRes.error || 'خطأ في ترحيل قيد الخزينة');
+    if (!description.trim()) {
+      alert('يرجى إدخال بيان الحركة');
+      return;
+    }
+    if (!targetAccId) {
+      alert('يرجى اختيار الحساب المحاسبي المقابل');
       return;
     }
 
-    erpDb.mutate(draft => {
-      draft.treasuryTransactions.push({
-        id: txId,
-        receiptNumber,
-        type,
-        amount: Number(amount),
-        partyName,
-        date: todayStr,
-        description,
-        glAccountId: targetAccId,
-        journalEntryId: jvRes.entry?.id,
-      });
+    const todayStr = txDate || new Date().toISOString().split('T')[0];
 
-      draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: 'usr-admin',
-        userName: 'المشرف العام (Admin)',
-        module: 'إدارة الخزينة',
-        action: 'create',
-        recordId: txId,
-        description: `تسجيل حركة خزينة ${receiptNumber} (${isReceipt ? 'قبض' : 'صرف'}) بمبلغ ${amount} ج.م`,
-      });
+    const res = WorkflowService.recordTreasuryTransaction({
+      type,
+      amount: Number(amount),
+      date: todayStr,
+      description: description.trim(),
+      glAccountId: targetAccId,
+      partyName: partyName.trim() || undefined,
     });
+
+    if (!res.success) {
+      alert(res.error || 'خطأ في تسجيل حركة الخزينة');
+      return;
+    }
 
     setShowAddModal(false);
     setDescription('');

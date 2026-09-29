@@ -2,18 +2,60 @@ import React, { useState, useMemo } from 'react';
 import { 
   Users, Plus, Search, FileText, Phone, 
   MapPin, AlertTriangle, DollarSign, ArrowDownLeft,
-  Calendar, Printer, Download, Filter, CheckCircle2, RefreshCw
+  Calendar, Printer, Download, Filter, CheckCircle2, RefreshCw, Undo2
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
-import { Customer } from '../../types/erp';
+import { Customer, QualityDestination } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
 
 export const CustomersView: React.FC = () => {
   const db = erpDb.getSnapshot();
-  const [activeTab, setActiveTab] = useState<'list' | 'statement'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'statement' | 'returns'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState<Customer | null>(null);
+
+  // Sales Return form state
+  const [retCustomerId, setRetCustomerId] = useState('');
+  const [retItemId, setRetItemId] = useState('');
+  const [retQty, setRetQty] = useState(10);
+  const [retUnitPrice, setRetUnitPrice] = useState(100);
+  const [retReason, setRetReason] = useState('مرتجع بضاعة من العميل');
+  const [retDestination, setRetDestination] = useState<QualityDestination>('saleable');
+  const [retMessage, setRetMessage] = useState<string | null>(null);
+
+  const finishedProducts = db.items.filter(i => i.itemType === 'finished_product' && i.active);
+
+  // Post a sales return through the engine (reverses revenue/VAT/receivable, restocks goods)
+  const handlePostSalesReturn = () => {
+    setRetMessage(null);
+    if (!retCustomerId) { alert('يرجى اختيار العميل'); return; }
+    if (!retItemId) { alert('يرجى اختيار الصنف المرتجع'); return; }
+    if (Number(retQty) <= 0) { alert('كمية المرتجع يجب أن تكون أكبر من صفر'); return; }
+    if (Number(retUnitPrice) <= 0) { alert('يرجى إدخال سعر البيع الأصلي'); return; }
+
+    const item = db.items.find(i => i.id === retItemId);
+    const res = WorkflowService.postSalesReturn({
+      customerId: retCustomerId,
+      date: new Date().toISOString().split('T')[0],
+      reason: retReason.trim() || 'مرتجع بضاعة من العميل',
+      lines: [{
+        itemId: retItemId,
+        quantity: Number(retQty),
+        unitPrice: Number(retUnitPrice),
+        vatRate: item?.vatRate ?? 0.14,
+      }],
+      inspectionOverrides: { [retItemId]: retDestination },
+    });
+
+    if (!res.success) {
+      setRetMessage(`فشل الترحيل: ${res.error}`);
+      return;
+    }
+
+    setRetMessage(`نجاح الترحيل: تم إصدار مرتجع مبيعات برقم ${res.salesReturn?.returnNumber} بقيمة ${res.salesReturn?.totalAmount.toLocaleString('ar-EG')} ج.م`);
+    setRetQty(10);
+  };
 
   // Statement Filters
   const [statementCustomerId, setStatementCustomerId] = useState<string>(db.customers[0]?.id || '');
@@ -374,6 +416,15 @@ export const CustomersView: React.FC = () => {
           <FileText className="w-3.5 h-3.5" />
           <span>كشف حساب عميل تفصيلي (Statement)</span>
         </button>
+        <button
+          onClick={() => setActiveTab('returns')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'returns' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Undo2 className="w-3.5 h-3.5" />
+          <span>مرتجعات المبيعات ({db.salesReturns.length})</span>
+        </button>
       </div>
 
       {/* Reconciliation Alert Banner (Requirement 13) */}
@@ -485,6 +536,147 @@ export const CustomersView: React.FC = () => {
                             </button>
                           </div>
                         </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: SALES RETURNS (posting through WorkflowService) */}
+      {activeTab === 'returns' && (
+        <div className="space-y-4">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900">تسجيل وترحيل مرتجع مبيعات</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                يقوم النظام تلقائيًا بعكس الإيراد والضريبة والمديونية، وإعادة الكمية للمخزون وفق توجيه الجودة، مع عكس تكلفة البضاعة المباعة
+              </p>
+            </div>
+
+            {retMessage && (
+              <div className={`p-3 rounded-xl text-xs font-bold border ${retMessage.includes('نجاح') ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+                {retMessage}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">العميل *</label>
+                <select
+                  value={retCustomerId}
+                  onChange={(e) => setRetCustomerId(e.target.value)}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                >
+                  <option value="">اختر العميل</option>
+                  {db.customers.map(c => (
+                    <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">الصنف المرتجع *</label>
+                <select
+                  value={retItemId}
+                  onChange={(e) => {
+                    const it = finishedProducts.find(i => i.id === e.target.value);
+                    setRetItemId(e.target.value);
+                    if (it) setRetUnitPrice(it.sellingPriceWholesale || it.sellingPriceRetail || 100);
+                  }}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                >
+                  <option value="">اختر الصنف</option>
+                  {finishedProducts.map(i => (
+                    <option key={i.id} value={i.id}>{i.code} - {i.nameAr}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">الكمية المرتجعة</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={retQty}
+                  onChange={(e) => setRetQty(Number(e.target.value))}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">سعر البيع الأصلي (قبل الضريبة)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={retUnitPrice}
+                  onChange={(e) => setRetUnitPrice(Number(e.target.value))}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">توجيه الجودة</label>
+                <select
+                  value={retDestination}
+                  onChange={(e) => setRetDestination(e.target.value as QualityDestination)}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                >
+                  <option value="saleable">قابل للبيع (مخزون تام محلي)</option>
+                  <option value="raw_materials">خامات (إعادة تدوير)</option>
+                  <option value="damaged">توالف ومعيب</option>
+                  <option value="scrap">هالك / سكراب</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">سبب الإرجاع</label>
+                <input
+                  type="text"
+                  value={retReason}
+                  onChange={(e) => setRetReason(e.target.value)}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={handlePostSalesReturn}
+                disabled={!retCustomerId || !retItemId}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold text-xs shadow-md transition cursor-pointer"
+              >
+                ترحيل المرتجع وإصدار القيود
+              </button>
+            </div>
+          </div>
+
+          {/* Returns history */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-200">
+              <h3 className="font-bold text-xs text-slate-800">سجل مرتجعات المبيعات المرحّلة</h3>
+            </div>
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-100 text-slate-700 font-bold">
+                <tr>
+                  <th className="p-3">رقم المرتجع</th>
+                  <th className="p-3">العميل</th>
+                  <th className="p-3">التاريخ</th>
+                  <th className="p-3 text-center">الإجمالي</th>
+                  <th className="p-3 text-center">الحالة</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {db.salesReturns.length === 0 ? (
+                  <tr><td colSpan={5} className="py-8 text-center text-slate-400">لا توجد مرتجعات مسجلة</td></tr>
+                ) : (
+                  db.salesReturns.map(r => {
+                    const c = db.customers.find(x => x.id === r.customerId);
+                    return (
+                      <tr key={r.id} className="hover:bg-slate-50">
+                        <td className="p-3 font-bold font-mono">{r.returnNumber}</td>
+                        <td className="p-3">{c?.name || r.customerId}</td>
+                        <td className="p-3 font-mono">{r.date}</td>
+                        <td className="p-3 text-center font-mono">{r.totalAmount.toLocaleString('ar-EG')} ج.م</td>
+                        <td className="p-3 text-center">{r.status === 'posted' ? 'مرحّل' : r.status}</td>
                       </tr>
                     );
                   })

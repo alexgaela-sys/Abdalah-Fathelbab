@@ -6,6 +6,7 @@ import {
   KeyRound, Settings, History, Building2, LogOut, Shield, Package
 } from 'lucide-react';
 import { User } from '../../types/erp';
+import { PermissionService } from '../../services/permissions';
 
 export type NavTab = 
   | 'dashboard'
@@ -113,9 +114,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
         </div>
 
-        {/* Navigation List */}
+        {/* Navigation List — filtered by the current user's role permissions */}
         <nav className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-thin scrollbar-thumb-slate-800">
-          {navItems.map((item) => {
+          {navItems
+            .filter(item => !currentUser || PermissionService.canView(currentUser.role, item.id as NavTab))
+            .map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (

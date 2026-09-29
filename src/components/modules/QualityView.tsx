@@ -41,10 +41,16 @@ export const QualityView: React.FC = () => {
       alert('يرجى اختيار الصنف');
       return;
     }
+    if (!documentNumber.trim()) {
+      alert('يرجى إدخال رقم المستند المرجعي');
+      return;
+    }
 
-    const res = WorkflowService.recordQualityInspection({
+    // Routing-enabled inspection: rejected/conditional quantities physically move out of
+    // saleable inventory to the destination warehouse with an accounting reclassification.
+    const res = WorkflowService.recordQualityInspectionWithRouting({
       documentType,
-      documentNumber,
+      documentNumber: documentNumber.trim(),
       itemId,
       batchNumber,
       inspectedQuantity: Number(inspectedQty),
@@ -52,8 +58,9 @@ export const QualityView: React.FC = () => {
       inspectorName,
       result,
       destination,
-      reason,
-      notes,
+      sourceWarehouseId: 'wh-local',
+      reason: reason.trim() || undefined,
+      notes: notes.trim() || undefined,
     });
 
     if (!res.success) {

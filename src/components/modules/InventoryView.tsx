@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { InventoryEngine } from '../../services/inventory';
-import { AccountingEngine } from '../../services/accounting';
+import { WorkflowService } from '../../services/workflows';
 
 export const InventoryView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -113,48 +113,23 @@ export const InventoryView: React.FC = () => {
 
   const handleApproveCount = () => {
     const todayStr = new Date().toISOString().split('T')[0];
-    const countId = `cnt-${Date.now()}`;
-    const countNumber = `STK-CNT-${Date.now().toString().slice(-4)}`;
 
-    erpDb.mutate(draft => {
-      draft.inventoryCounts.push({
-        id: countId,
-        countNumber,
-        date: todayStr,
-        warehouseId: countWarehouseId,
-        status: 'posted',
-        approvedBy: 'مدير عام المخازن والمراجعة',
-      });
-
-      countLines.forEach(l => {
-        const varianceQty = l.physicalQty - l.systemQty;
-        if (varianceQty !== 0) {
-          draft.inventoryCountLines.push({
-            id: `cntl-${countId}-${l.itemId}`,
-            countId,
-            itemId: l.itemId,
-            systemQuantity: l.systemQty,
-            physicalQuantity: l.physicalQty,
-            varianceQuantity: varianceQty,
-            unitCost: l.unitCost,
-            varianceCost: varianceQty * l.unitCost,
-          });
-
-          // Create adjustment movement
-          InventoryEngine.recordMovement({
-            itemId: l.itemId,
-            warehouseId: countWarehouseId,
-            movementType: 'inventory_adjustment',
-            quantityIn: varianceQty > 0 ? varianceQty : 0,
-            quantityOut: varianceQty < 0 ? Math.abs(varianceQty) : 0,
-            unitCost: l.unitCost,
-            documentType: 'تسوية جرد فعلي',
-            documentNumber: countNumber,
-            notes: `فروق جرد فعلي (النظام: ${l.systemQty}، الفعلي: ${l.physicalQty})`,
-          });
-        }
-      });
+    const res = WorkflowService.postInventoryCount({
+      warehouseId: countWarehouseId,
+      date: todayStr,
+      approvedBy: 'مدير عام المخازن والمراجعة',
+      lines: countLines.map(l => ({
+        itemId: l.itemId,
+        systemQuantity: l.systemQty,
+        physicalQuantity: l.physicalQty,
+        unitCost: l.unitCost,
+      })),
     });
+
+    if (!res.success) {
+      alert(res.error || 'خطأ في ترحيل الجرد الفعلي');
+      return;
+    }
 
     setShowCountModal(false);
   };

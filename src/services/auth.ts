@@ -1,5 +1,5 @@
 // Authentication & Session Service for Abdullah ERP
-import { erpDb } from './db';
+import { erpDb, generateErpId } from './db';
 import { User, RoleName } from '../types/erp';
 
 const SESSION_KEY = 'abdullah_erp_auth_session';
@@ -82,13 +82,24 @@ export class AuthService {
       return { success: false, messageAr: 'كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى' };
     }
 
-    // Update lastLogin
+    // Update lastLogin + audit trail for the login action
     const nowIso = new Date().toISOString();
     erpDb.mutate(draft => {
       const target = draft.users.find(u => u.id === matchedUser!.id);
       if (target) {
         target.lastLogin = nowIso;
       }
+
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: nowIso,
+        userId: matchedUser!.id,
+        userName: matchedUser!.name,
+        module: 'الأمان والدخول',
+        action: 'login',
+        recordId: matchedUser!.id,
+        description: `تسجيل دخول ناجح للمستخدم (${matchedUser!.username}) بدور ${matchedUser!.role}`,
+      });
     });
 
     const session: AuthSession = {

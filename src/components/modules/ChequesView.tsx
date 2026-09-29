@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { Cheque, ChequeType, ChequeStatus } from '../../types/erp';
-import { AccountingEngine } from '../../services/accounting';
+import { WorkflowService } from '../../services/workflows';
 
 export const ChequesView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -67,119 +67,26 @@ export const ChequesView: React.FC = () => {
     });
   }, [activeCheques, statusFilter, searchQuery, db]);
 
-  // Action handlers
+  // Action handlers (routed through WorkflowService so every transition posts the correct GL effect)
   const handleUpdateStatus = (cheque: Cheque, newStatus: ChequeStatus) => {
     const todayStr = new Date().toISOString().split('T')[0];
 
-    if (newStatus === 'collected' && cheque.type === 'incoming') {
-      // Dr Bank acc-1102 / Cr Cheques under collection acc-1104
-      const jvRes = AccountingEngine.postJournal({
-        date: todayStr,
-        reference: `CHQ-COL-${cheque.chequeNumber}`,
-        description: `تحصيل وإيداع شيك رقم ${cheque.chequeNumber} بالبنك`,
-        sourceDocumentType: 'cheque',
-        sourceDocumentId: cheque.id,
-        lines: [
-          {
-            id: '',
-            journalEntryId: '',
-            accountId: 'acc-1102',
-            accountCode: '1102',
-            accountNameAr: 'بنك مصر - حساب جاري بالجنيه',
-            debit: cheque.amount,
-            credit: 0,
-            currency: cheque.currency,
-            originalAmount: cheque.amount,
-            exchangeRate: 1,
-            description: `إيداع شيك محصل رقم ${cheque.chequeNumber}`,
-          },
-          {
-            id: '',
-            journalEntryId: '',
-            accountId: 'acc-1104',
-            accountCode: '1104',
-            accountNameAr: 'أوراق قبض (شيكات تحت التحصيل)',
-            debit: 0,
-            credit: cheque.amount,
-            currency: cheque.currency,
-            originalAmount: cheque.amount,
-            exchangeRate: 1,
-            description: `تسوية أوراق قبض محصلة ${cheque.chequeNumber}`,
-          }
-        ],
-      }, 'usr-admin', 'المشرف العام (Admin)');
-
-      if (!jvRes.success) {
-        alert(jvRes.error || 'خطأ في ترحيل قيد التحصيل');
-        return;
-      }
-    } else if (newStatus === 'paid' && cheque.type === 'outgoing') {
-      // Dr Cheques payable acc-2102 / Cr Bank acc-1102
-      const jvRes = AccountingEngine.postJournal({
-        date: todayStr,
-        reference: `CHQ-PAY-${cheque.chequeNumber}`,
-        description: `صرف شيك ورقة دفع رقم ${cheque.chequeNumber} من البنك`,
-        sourceDocumentType: 'cheque',
-        sourceDocumentId: cheque.id,
-        lines: [
-          {
-            id: '',
-            journalEntryId: '',
-            accountId: 'acc-2102',
-            accountCode: '2102',
-            accountNameAr: 'أوراق دفع (شيكات صادرة للدفع)',
-            debit: cheque.amount,
-            credit: 0,
-            currency: cheque.currency,
-            originalAmount: cheque.amount,
-            exchangeRate: 1,
-            description: `صرف ورقة دفع شيك رقم ${cheque.chequeNumber}`,
-          },
-          {
-            id: '',
-            journalEntryId: '',
-            accountId: 'acc-1102',
-            accountCode: '1102',
-            accountNameAr: 'بنك مصر - حساب جاري بالجنيه',
-            debit: 0,
-            credit: cheque.amount,
-            currency: cheque.currency,
-            originalAmount: cheque.amount,
-            exchangeRate: 1,
-            description: `خصم شيك مصرف للمورد رقم ${cheque.chequeNumber}`,
-          }
-        ],
-      }, 'usr-admin', 'المشرف العام (Admin)');
-
-      if (!jvRes.success) {
-        alert(jvRes.error || 'خطأ في ترحيل قيد صرف الشيك');
-        return;
-      }
-    } else if (newStatus === 'bounced') {
-      // Cheque bounced / returned
-      if (!confirm(`هل أنت متأكد من تسجيل ارتداد الشيك رقم ${cheque.chequeNumber} وإعادته للطرف؟`)) {
+    if (newStatus === 'bounced' || newStatus === 'returned') {
+      if (!confirm(`هل أنت متأكد من تسجيل ارتداد الشيك رقم ${cheque.chequeNumber} وإعادته للطرف؟ سيتم ترحيل القيد المحاسبي العكسي.`)) {
         return;
       }
     }
 
-    erpDb.mutate(draft => {
-      const c = draft.cheques.find(x => x.id === cheque.id);
-      if (c) {
-        c.status = newStatus;
-        c.statusDate = todayStr;
-      }
-
-      draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: 'usr-admin',
-        userName: 'المشرف العام (Admin)',
-        module: 'إدارة الشيكات',
-        action: 'edit',
-        recordId: cheque.id,
-        description: `تحديث حالة الشيك ${cheque.chequeNumber} إلى: ${newStatus}`,
-      });
+    const res = WorkflowService.updateChequeStatus({
+      chequeId: cheque.id,
+      newStatus,
+      date: todayStr,
     });
+
+    if (!res.success) {
+      alert(res.error || 'خطأ في تحديث حالة الشيك');
+      return;
+    }
   };
 
   const handleCreateCheque = (e: React.FormEvent) => {
@@ -188,40 +95,32 @@ export const ChequesView: React.FC = () => {
       alert('يرجى إدخال رقم الشيك');
       return;
     }
+
     if (!partyId) {
       alert(`يرجى تحديد ${activeTab === 'incoming' ? 'العميل' : 'المورد'}`);
       return;
     }
+    if (Number(amount) <= 0) {
+      alert('مبلغ الشيك يجب أن يكون أكبر من صفر');
+      return;
+    }
 
-    const newCheque: Cheque = {
-      id: `chq-${Date.now()}`,
-      chequeNumber: chequeNumber.trim(),
+    const res = WorkflowService.registerCheque({
       type: activeTab,
-      partyType: activeTab === 'incoming' ? 'customer' : 'supplier',
       partyId,
+      chequeNumber: chequeNumber.trim(),
       bankName: bankName.trim(),
-      amount: Number(amount) || 0,
+      amount: Number(amount),
       currency,
       issueDate,
       dueDate,
-      status: activeTab === 'incoming' ? 'received' : 'issued',
-      statusDate: issueDate,
-      notes: notes.trim(),
-    };
-
-    erpDb.mutate(draft => {
-      draft.cheques.push(newCheque);
-      draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: 'usr-admin',
-        userName: 'المشرف العام (Admin)',
-        module: 'إدارة الشيكات',
-        action: 'create',
-        recordId: newCheque.id,
-        description: `تسجيل شيك ${activeTab === 'incoming' ? 'وارد' : 'صادر'} برقم ${newCheque.chequeNumber} بمبلغ ${newCheque.amount} ${newCheque.currency}`,
-      });
+      notes: notes.trim() || undefined,
     });
+
+    if (!res.success) {
+      alert(res.error || 'خطأ في تسجيل الشيك');
+      return;
+    }
 
     setShowAddModal(false);
     setChequeNumber('');

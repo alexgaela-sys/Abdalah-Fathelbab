@@ -4,6 +4,7 @@ import {
   Search, Anchor, FileCheck, CheckCircle2
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
+import { WorkflowService } from '../../services/workflows';
 import { ExportShipment } from '../../types/erp';
 
 export const ExportView: React.FC = () => {
@@ -33,41 +34,25 @@ export const ExportView: React.FC = () => {
       return;
     }
 
-    const egpValue = Number(usdRevenue) * Number(exchangeRate);
-    const totalCosts = Number(productCost) + Number(shippingCost) + Number(portCosts) + Number(customsCost) + Number(otherCosts);
-    const netProfitEGP = egpValue - totalCosts;
-    const profitMarginPercent = egpValue > 0 ? (netProfitEGP / egpValue) * 100 : 0;
-
-    const count = db.exportShipments.length + 1;
-    const shipmentNumber = `EXP-SHP-${new Date().getFullYear()}-${String(count).padStart(3, '0')}`;
-
-    const newShp: ExportShipment = {
-      id: `shp-${Date.now()}`,
-      shipmentNumber,
+    const res = WorkflowService.createExportShipment({
       customerId,
       shipmentDate,
       portOfOrigin,
       destinationPort,
-      containerNumber,
+      containerNumber: containerNumber.trim() || undefined,
       usdRevenue: Number(usdRevenue),
       exchangeRate: Number(exchangeRate),
-      egpValue,
       productCost: Number(productCost),
       shippingCost: Number(shippingCost),
       portCosts: Number(portCosts),
       customsCost: Number(customsCost),
       otherExportCosts: Number(otherCosts),
-      totalCosts,
-      netProfitEGP,
-      profitMarginPercent,
-      collectionStatus: 'pending',
-      collectedUsd: 0,
-      status: 'shipped',
-    };
-
-    erpDb.mutate(draft => {
-      draft.exportShipments.push(newShp);
     });
+
+    if (!res.success) {
+      alert(res.error || 'خطأ في تسجيل شحنة التصدير');
+      return;
+    }
 
     setShowAddModal(false);
   };

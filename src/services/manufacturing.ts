@@ -1,6 +1,8 @@
 // Manufacturing & Costing Engine: BOM calculation, Multi-day tracking, Standard Costing, Actual Costing, Variances
-import { erpDb } from './db';
-import { ProductionOrder, ProductionConsumption, ProductionWaste, BomHeader, BomLine, Item } from '../types/erp';
+// Standard rates are ALWAYS read from StandardCostRate records (never hardcoded in logic).
+// Actual conversion costs are taken from recorded production-order cost entries (never fabricated).
+import { erpDb, generateErpId, nextDocNumber } from './db';
+import { ProductionOrder, ProductionConsumption, ProductionWaste, BomHeader, BomLine, Item, StandardCostRate, JournalLine } from '../types/erp';
 import { InventoryEngine } from './inventory';
 import { AccountingEngine } from './accounting';
 
@@ -37,6 +39,32 @@ export interface ProductionCostBreakdown {
 
 export class ManufacturingEngine {
   /**
+   * Resolve the active standard rate for a cost type, optionally scoped to product family.
+   * Reads ONLY from StandardCostRate — no hardcoded 250/100/5/50/30 in logic.
+   */
+  private static getActiveRate(
+    db: { standardCostRates: StandardCostRate[] },
+    costType: StandardCostRate['costType'],
+    productFamily?: 'Single' | 'Duo',
+    onDate?: string
+  ): { rate: number; baseQuantity: number } {
+    const dateStr = onDate || new Date().toISOString().split('T')[0];
+    const candidates = db.standardCostRates.filter(r =>
+      r.costType === costType &&
+      r.status === 'active' &&
+      (!r.productFamily || !productFamily || r.productFamily === productFamily) &&
+      (!r.effectiveFrom || r.effectiveFrom <= dateStr) &&
+      (!r.effectiveTo || r.effectiveTo >= dateStr)
+    );
+    // Prefer family-specific rate, then most recently effective
+    const scoped = candidates.filter(r => r.productFamily === productFamily);
+    const pool = scoped.length > 0 ? scoped : candidates.filter(r => !r.productFamily);
+    if (pool.length === 0) return { rate: 0, baseQuantity: 1 };
+    const best = [...pool].sort((a, b) => (b.effectiveFrom || '').localeCompare(a.effectiveFrom || ''))[0];
+    return { rate: best.rate || 0, baseQuantity: best.baseQuantity || 1 };
+  }
+
+  /**
    * Calculate required materials for a production order based on BOM base quantity
    */
   public static calculateBomRequirements(bomId: string, plannedQuantity: number): Array<{
@@ -60,8 +88,10 @@ export class ManufacturingEngine {
 
     return lines.map(line => {
       const item = itemsMap.get(line.materialItemId);
-      const reqQty = Number((line.quantityRequired * scale).toFixed(3));
-      // Raw materials are in raw warehouse (wh-raw)
+      // Expected waste allowance is included in the requirement
+      const wasteFactor = 1 + ((line.wastePercentage || 0) / 100);
+      const reqQty = Number((line.quantityRequired * scale * wasteFactor).toFixed(3));
+      // Raw materials live in the raw-materials warehouse (WH-01)
       const stock = InventoryEngine.getItemBalance(line.materialItemId, 'wh-raw');
       return {
         materialItemId: line.materialItemId,
@@ -76,7 +106,10 @@ export class ManufacturingEngine {
   }
 
   /**
-   * Calculate full Standard vs Actual Cost Breakdown for a production order
+   * Calculate full Standard vs Actual Cost Breakdown for a production order.
+   * - Standard conversion costs: StandardCostRate x (produced qty / baseQuantity)
+   * - Actual material cost: recorded actual FIFO consumption
+   * - Actual conversion costs: recorded ProductionOrderCost entries (via mapped GL accounts)
    */
   public static calculateCostBreakdown(orderId: string): ProductionCostBreakdown {
     const db = erpDb.getSnapshot();
@@ -85,44 +118,91 @@ export class ManufacturingEngine {
     const rates = db.standardCostRates.filter(r => r.status === 'active');
 
     const totalProduced = (order?.producedQuantity || 0) + (order?.defectiveQuantity || 0) + (order?.scrapQuantity || 0);
-    const qtyRatio = totalProduced > 0 ? totalProduced / 1000 : (order?.plannedQuantity || 1000) / 1000;
+    const qtyBase = rates.find(r => r.costType === 'direct_labor')?.baseQuantity || 1000;
+    const qtyRatio = totalProduced > 0 ? totalProduced / qtyBase : 0;
 
-    // 1. Conversion rates per 1000 cartons
-    const laborRate = rates.find(r => r.costType === 'direct_labor')?.rate || 250;
-    const elecRate = rates.find(r => r.costType === 'electricity')?.rate || 100;
-    const gasRate = rates.find(r => r.costType === 'gas')?.rate || 5;
-    const maintRate = rates.find(r => r.costType === 'maintenance')?.rate || 50;
-    const superRate = rates.find(r => r.costType === 'supervision')?.rate || 30;
+    // ---- Standard conversion costs (from StandardCostRate, family-scoped) ----
+    const family = product?.productFamily;
+    const laborStd = this.getActiveRate(db, 'direct_labor', family);
+    const elecStd = this.getActiveRate(db, 'electricity', family);
+    const gasStd = this.getActiveRate(db, 'gas', family);
+    const maintStd = this.getActiveRate(db, 'maintenance', family);
+    const superStd = this.getActiveRate(db, 'supervision', family);
 
-    const standardLaborCost = laborRate * qtyRatio;
-    const standardElectricityCost = elecRate * qtyRatio;
-    const standardGasCost = gasRate * qtyRatio;
-    const standardMaintenanceCost = maintRate * qtyRatio;
-    const standardSupervisionCost = superRate * qtyRatio;
+    const standardLaborCost = laborStd.rate * (totalProduced / (laborStd.baseQuantity || 1));
+    const standardElectricityCost = elecStd.rate * (totalProduced / (elecStd.baseQuantity || 1));
+    const standardGasCost = gasStd.rate * (totalProduced / (gasStd.baseQuantity || 1));
+    const standardMaintenanceCost = maintStd.rate * (totalProduced / (maintStd.baseQuantity || 1));
+    const standardSupervisionCost = superStd.rate * (totalProduced / (superStd.baseQuantity || 1));
 
-    // Actual Consumptions
+    // ---- Actual material cost: from recorded FIFO consumption on this order ----
     const consumptions = db.productionConsumptions.filter(c => c.productionOrderId === orderId);
-    const actualMaterialCost = consumptions.reduce((sum, c) => sum + (c.actualQuantity * c.unitCost), 0);
-    const standardMaterialCost = consumptions.reduce((sum, c) => sum + (c.plannedQuantity * c.unitCost), 0) || (product?.standardCost ? product.standardCost * 0.7 * totalProduced : 0);
+    const actualMaterialCost = consumptions.reduce((sum, c) => sum + ((Number(c.actualQuantity) || 0) * (Number(c.unitCost) || 0)), 0);
+    const plannedMaterialCost = consumptions.reduce((sum, c) => sum + ((Number(c.plannedQuantity) || 0) * (Number(c.unitCost) || 0)), 0);
+    const standardMaterialCost = plannedMaterialCost || actualMaterialCost;
 
-    const materialQuantityVariance = consumptions.reduce((sum, c) => sum + ((c.actualQuantity - c.plannedQuantity) * c.unitCost), 0);
-    const materialPriceVariance = 0; // Material purchased at recorded FIFO cost
+    // Material QUANTITY variance: (actual qty - planned qty) x actual unit cost
+    const materialQuantityVariance = consumptions.reduce(
+      (sum, c) => sum + (((Number(c.actualQuantity) || 0) - (Number(c.plannedQuantity) || 0)) * (Number(c.unitCost) || 0)),
+      0
+    );
+    // Material PRICE variance: actual receipt price vs item standard cost
+    const materialPriceVariance = consumptions.reduce((sum, c) => {
+      const item = db.items.find(i => i.id === c.materialItemId);
+      const std = item?.standardCost || 0;
+      const act = Number(c.unitCost) || 0;
+      return sum + ((act - std) * (Number(c.actualQuantity) || 0));
+    }, 0);
 
-    // Actual conversion costs (pro-rated based on recorded actual consumptions or variances)
-    const actualLaborCost = standardLaborCost * 1.02; // Small realistic operational variance
-    const actualElectricityCost = standardElectricityCost * 0.98;
-    const actualGasCost = standardGasCost * 1.0;
-    const actualMaintenanceCost = standardMaintenanceCost * 1.05;
-    const actualSupervisionCost = standardSupervisionCost * 1.0;
+    // ---- Actual conversion costs: from posted GL cost entries on this order ----
+    // (converted conversion costs are applied from actual recorded expenses, never fabricated)
+    const actualConversionByAccount = new Map<string, number>();
+    db.journalEntries.forEach(jv => {
+      if (!jv.isPosted || jv.isReversed) return;
+      if (jv.sourceDocumentType !== 'production_conversion_cost' || jv.sourceDocumentId !== orderId) return;
+      jv.lines.forEach(l => {
+        const acc = db.accounts.find(a => a.id === l.accountId);
+        if (acc && !acc.isHeader) {
+          const debitNature = ['COGS', 'Operating Expenses', 'Other Expenses'].includes(acc.category);
+          // Conversion costs are debits; store net debit amount per account
+          actualConversionByAccount.set(
+            l.accountId,
+            (actualConversionByAccount.get(l.accountId) || 0) + (debitNature ? l.debit - l.credit : l.credit - l.debit)
+          );
+        }
+      });
+    });
 
-    const laborVariance = actualLaborCost - standardLaborCost;
-    const electricityVariance = actualElectricityCost - standardElectricityCost;
-    const gasVariance = actualGasCost - standardGasCost;
-    const maintenanceVariance = actualMaintenanceCost - standardMaintenanceCost;
-    const supervisionVariance = actualSupervisionCost - standardSupervisionCost;
+    const mapKeys = db.accountMappings || {};
+    const findActual = (keys: string[]): number => {
+      for (const k of keys) {
+        const accId = mapKeys[k];
+        if (accId && actualConversionByAccount.has(accId)) return actualConversionByAccount.get(accId)!;
+      }
+      return 0;
+    };
+
+    const actualLaborCost = findActual(['expenses_default', 'variance_direct_labor']);
+    const actualElectricityCost = findActual(['variance_electricity', 'expenses_default']);
+    const actualGasCost = findActual(['variance_gas', 'expenses_default']);
+    const actualMaintenanceCost = findActual(['variance_maintenance', 'expenses_default']);
+    const actualSupervisionCost = findActual(['variance_overhead', 'expenses_default']);
+
+    // If no conversion costs were recorded yet, actuals default to standard applied (zero variance)
+    const appliedActualLabor = actualLaborCost || standardLaborCost;
+    const appliedActualElectricity = actualElectricityCost || standardElectricityCost;
+    const appliedActualGas = actualGasCost || standardGasCost;
+    const appliedActualMaintenance = actualMaintenanceCost || standardMaintenanceCost;
+    const appliedActualSupervision = actualSupervisionCost || standardSupervisionCost;
+
+    const laborVariance = appliedActualLabor - standardLaborCost;
+    const electricityVariance = appliedActualElectricity - standardElectricityCost;
+    const gasVariance = appliedActualGas - standardGasCost;
+    const maintenanceVariance = appliedActualMaintenance - standardMaintenanceCost;
+    const supervisionVariance = appliedActualSupervision - standardSupervisionCost;
 
     const totalStandardCost = standardMaterialCost + standardLaborCost + standardElectricityCost + standardGasCost + standardMaintenanceCost + standardSupervisionCost;
-    const totalActualCost = actualMaterialCost + actualLaborCost + actualElectricityCost + actualGasCost + actualMaintenanceCost + actualSupervisionCost;
+    const totalActualCost = actualMaterialCost + appliedActualLabor + appliedActualElectricity + appliedActualGas + appliedActualMaintenance + appliedActualSupervision;
     const totalProductionVariance = totalActualCost - totalStandardCost;
 
     return {
@@ -130,25 +210,145 @@ export class ManufacturingEngine {
       actualMaterialCost,
       materialPriceVariance,
       materialQuantityVariance,
+
       standardLaborCost,
-      actualLaborCost,
+      actualLaborCost: appliedActualLabor,
       laborVariance,
+
       standardElectricityCost,
-      actualElectricityCost,
+      actualElectricityCost: appliedActualElectricity,
       electricityVariance,
+
       standardGasCost,
-      actualGasCost,
+      actualGasCost: appliedActualGas,
       gasVariance,
+
       standardMaintenanceCost,
-      actualMaintenanceCost,
+      actualMaintenanceCost: appliedActualMaintenance,
       maintenanceVariance,
+
       standardSupervisionCost,
-      actualSupervisionCost,
+      actualSupervisionCost: appliedActualSupervision,
       supervisionVariance,
+
       totalStandardCost,
       totalActualCost,
       totalProductionVariance,
     };
+  }
+
+  /**
+   * Issue raw/packaging materials from WH-01 to a production order (per BOM).
+   * Consumes FIFO batches at ACTUAL cost, records consumption lines with planned vs actual,
+   * and posts the WIP material issue journal (Raw Materials Inventory -> WIP/variance).
+   */
+  public static issueMaterialsToOrder(params: {
+    orderId: string;
+    lines?: Array<{ materialItemId: string; quantity: number }>; // optional override; defaults to BOM requirement
+    date: string;
+    userId: string;
+    userName: string;
+  }): { success: boolean; error?: string; totalActualCost?: number } {
+    const db = erpDb.getSnapshot();
+    const order = db.productionOrders.find(o => o.id === params.orderId);
+    if (!order) return { success: false, error: 'أمر الإنتاج غير موجود' };
+    if (order.status === 'completed' || order.status === 'cancelled') {
+      return { success: false, error: 'لا يمكن صرف خامات على أمر إنتاج مغلق أو ملغى' };
+    }
+
+    const bom = db.boms.find(b => b.id === order.bomId);
+    if (!bom) return { success: false, error: 'معادلة التصنيع (BOM) المرتبطة بأمر الإنتاج غير موجودة' };
+
+    const scale = order.plannedQuantity / (bom.baseQuantity || 1);
+    const bomLines = db.bomLines.filter(l => l.bomId === order.bomId);
+
+    // Determine required lines (explicit override or BOM-driven)
+    const requirements = (params.lines && params.lines.length > 0)
+      ? params.lines.map(l => ({ materialItemId: l.materialItemId, quantity: Number(l.quantity) || 0 }))
+      : bomLines.map(bl => {
+          const item = db.items.find(i => i.id === bl.materialItemId);
+          const wasteFactor = 1 + ((bl.wastePercentage || 0) / 100);
+          return {
+            materialItemId: bl.materialItemId,
+            quantity: Number((bl.quantityRequired * scale * wasteFactor).toFixed(3)),
+          };
+        });
+
+    if (requirements.length === 0) {
+      return { success: false, error: 'لا توجد بنود مواد في معادلة التصنيع' };
+    }
+
+    // ---- Pre-validate ALL stock (before ANY mutation) ----
+    for (const req of requirements) {
+      const item = db.items.find(i => i.id === req.materialItemId);
+      if (!item) return { success: false, error: `مادة في معادلة التصنيع غير معرفة بالنظام (${req.materialItemId})` };
+      if (req.quantity <= 0) return { success: false, error: `كمية الصرف يجب أن تكون أكبر من صفر للمادة (${item.nameAr})` };
+      const stock = InventoryEngine.getItemBalance(req.materialItemId, 'wh-raw');
+      if (stock < req.quantity) {
+        return { success: false, error: `الرصيد المتاح من (${item.nameAr}) بمستودع الخامات هو ${stock} ولا يكفي لصرف ${req.quantity}` };
+      }
+    }
+
+    const plannedByMaterial = new Map<string, number>();
+    bomLines.forEach(bl => {
+      const wasteFactor = 1 + ((bl.wastePercentage || 0) / 100);
+      plannedByMaterial.set(bl.materialItemId, Number((bl.quantityRequired * scale * wasteFactor).toFixed(3)));
+    });
+
+    let totalActualCost = 0;
+    const issueResults: Array<ReturnType<typeof InventoryEngine.recordMovement>> = [];
+
+    // ---- Validate + plan all issues first (pure), then execute ----
+    for (const req of requirements) {
+      const moveRes = InventoryEngine.recordMovement({
+        itemId: req.materialItemId,
+        warehouseId: 'wh-raw',
+        movementType: 'production_issue',
+        quantityIn: 0,
+        quantityOut: req.quantity,
+        unitCost: 0, // engine derives actual FIFO cost
+        documentType: 'صرف خامات لأمر إنتاج',
+        documentNumber: order.orderNumber,
+        notes: `صرف مواد لأمر إنتاج ${order.orderNumber}`,
+      });
+      if (!moveRes.success) return { success: false, error: moveRes.error };
+      issueResults.push(moveRes);
+      totalActualCost += moveRes.actualCost || 0;
+    }
+
+    // ---- Record consumption lines + audit (atomic mutate) ----
+    erpDb.mutate(draft => {
+      for (const req of requirements) {
+        const consumed = issueResults.shift();
+        const actualCost = consumed?.actualCost || 0;
+        const actualQty = req.quantity;
+        const unitCost = actualQty > 0 ? actualCost / actualQty : 0;
+
+        draft.productionConsumptions.push({
+          id: generateErpId('pc'),
+          productionOrderId: params.orderId,
+          materialItemId: req.materialItemId,
+          warehouseId: 'wh-raw',
+          plannedQuantity: plannedByMaterial.get(req.materialItemId) || actualQty,
+          actualQuantity: actualQty,
+          unitCost,
+          date: params.date,
+        });
+      }
+
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: params.userId,
+        userName: params.userName,
+        module: 'إدارة الإنتاج والتكاليف',
+        action: 'post',
+        recordId: params.orderId,
+        description: `صرف مواد خام لأمر الإنتاج ${order.orderNumber} بتكلفة فعلية ${totalActualCost.toLocaleString('ar-EG')} ج.م (FIFO متعدد التشغيلات)`,
+      });
+    });
+
+    return { success: true, totalActualCost };
   }
 
   /**
@@ -176,15 +376,40 @@ export class ManufacturingEngine {
     const product = db.items.find(i => i.id === order.productId);
     if (!product) return { success: false, error: 'منتج أمر الإنتاج غير موجود' };
 
-    const batchNumber = `PRD-${order.orderNumber}-${new Date(params.date).toLocaleDateString('en-CA').replace(/-/g, '')}`;
+    const goodQty = Number(params.goodQuantity) || 0;
+    const defectiveQty = Number(params.defectiveQuantity) || 0;
+    const scrapQty = Number(params.scrapQuantity) || 0;
+    if (goodQty <= 0 && defectiveQty <= 0 && scrapQty <= 0) {
+      return { success: false, error: 'يجب تسجيل كمية إنتاج (سليمة أو معيبة أو هالك) أكبر من صفر' };
+    }
+
+    const dateStr = params.date || new Date().toISOString().split('T')[0];
+    const batchNumber = `PRD-${order.orderNumber}-${dateStr.replace(/-/g, '')}`;
+
+    // Expiry strictly from the item's configured period
+    let expiryDate = '';
+    if (product.trackExpiry && product.expiryPeriodDays && product.expiryPeriodDays > 0) {
+      const base = new Date(dateStr);
+      base.setDate(base.getDate() + product.expiryPeriodDays);
+      expiryDate = base.toISOString().split('T')[0];
+    }
+
+    // Actual unit cost of finished goods = (actual material + applied conversion) / total units
+    const breakdown = this.calculateCostBreakdown(params.orderId);
+    const appliedConversion = breakdown.actualLaborCost + breakdown.actualElectricityCost + breakdown.actualGasCost
+      + breakdown.actualMaintenanceCost + breakdown.actualSupervisionCost;
+    const totalUnits = goodQty + defectiveQty + scrapQty;
+    const actualUnitCost = totalUnits > 0
+      ? (breakdown.actualMaterialCost + appliedConversion) / totalUnits
+      : (product.standardCost || 0);
 
     erpDb.mutate(draft => {
       const ord = draft.productionOrders.find(o => o.id === params.orderId);
       if (!ord) return;
 
-      ord.producedQuantity += params.goodQuantity;
-      ord.defectiveQuantity += params.defectiveQuantity;
-      ord.scrapQuantity += params.scrapQuantity;
+      ord.producedQuantity += goodQty;
+      ord.defectiveQuantity += defectiveQty;
+      ord.scrapQuantity += scrapQty;
       ord.remainingQuantity = Math.max(0, ord.plannedQuantity - ord.producedQuantity);
 
       if (ord.status === 'draft' || ord.status === 'released') {
@@ -192,36 +417,36 @@ export class ManufacturingEngine {
       }
 
       // Record Finished Goods to Destination Warehouse (Local or Export)
-      if (params.goodQuantity > 0) {
+      if (goodQty > 0) {
         InventoryEngine.recordMovement({
           itemId: ord.productId,
           warehouseId: ord.destinationWarehouseId,
           movementType: 'production_output',
-          quantityIn: params.goodQuantity,
+          quantityIn: goodQty,
           quantityOut: 0,
-          unitCost: product.standardCost || 50,
+          unitCost: actualUnitCost,
           documentType: 'أمر إنتاج تام',
           documentNumber: ord.orderNumber,
           batchNumber,
-          productionDate: params.date,
-          expiryDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          productionDate: dateStr,
+          expiryDate: expiryDate || undefined,
           notes: `إنتاج تام تشغيلة ${batchNumber}`,
         });
       }
 
       // Record Scrap if any
-      if (params.scrapQuantity > 0) {
+      if (scrapQty > 0) {
         const waste: ProductionWaste = {
-          id: `wst-${Date.now()}-scrap`,
+          id: generateErpId('wst'),
           productionOrderId: ord.id,
           materialItemId: ord.productId,
           batchNumber,
-          quantity: params.scrapQuantity,
+          quantity: scrapQty,
           wasteType: 'scrap',
           destinationWarehouseId: 'wh-scrap',
           reason: params.wasteReason || 'هالك خط تصنيع وتعبئة',
           actionTaken: 'to_scrap',
-          date: params.date,
+          date: dateStr,
           userId: params.userId,
         };
         draft.productionWastes.push(waste);
@@ -230,9 +455,9 @@ export class ManufacturingEngine {
           itemId: ord.productId,
           warehouseId: 'wh-scrap',
           movementType: 'scrap',
-          quantityIn: params.scrapQuantity,
+          quantityIn: scrapQty,
           quantityOut: 0,
-          unitCost: (product.standardCost || 50) * 0.1, // Scrap valued at 10%
+          unitCost: actualUnitCost * 0.1, // Scrap valued at 10% of production cost
           documentType: 'هالك إنتاج',
           documentNumber: ord.orderNumber,
           batchNumber,
@@ -241,20 +466,20 @@ export class ManufacturingEngine {
       }
 
       // Record Defective Output if any
-      if (params.defectiveQuantity > 0) {
+      if (defectiveQty > 0) {
         const isRecycle = params.defectiveAction === 'to_recycling';
         const targetWh = isRecycle ? 'wh-raw' : 'wh-damaged';
         const waste: ProductionWaste = {
-          id: `wst-${Date.now()}-def`,
+          id: generateErpId('wst'),
           productionOrderId: ord.id,
           materialItemId: ord.productId,
           batchNumber,
-          quantity: params.defectiveQuantity,
+          quantity: defectiveQty,
           wasteType: isRecycle ? 'recyclable' : 'damaged',
           destinationWarehouseId: targetWh,
           reason: params.wasteReason || 'معيب تصنيع قابل لإعادة التدوير',
           actionTaken: params.defectiveAction,
-          date: params.date,
+          date: dateStr,
           userId: params.userId,
         };
         draft.productionWastes.push(waste);
@@ -263,9 +488,9 @@ export class ManufacturingEngine {
           itemId: ord.productId,
           warehouseId: targetWh,
           movementType: isRecycle ? 'recycling' : 'scrap',
-          quantityIn: params.defectiveQuantity,
+          quantityIn: defectiveQty,
           quantityOut: 0,
-          unitCost: (product.standardCost || 50) * 0.5,
+          unitCost: actualUnitCost * 0.5,
           documentType: isRecycle ? 'إعادة تدوير إنتاج معيب' : 'توالف إنتاج',
           documentNumber: ord.orderNumber,
           batchNumber,
@@ -275,14 +500,14 @@ export class ManufacturingEngine {
 
       // Audit Log
       draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
+        id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
         userId: params.userId,
         userName: params.userName,
         module: 'إدارة الإنتاج والتكاليف',
         action: 'edit',
         recordId: ord.id,
-        description: `تسجيل إنتاج يومي لأمر الإنتاج ${ord.orderNumber}: تم إنتاج ${params.goodQuantity} كرتونة سليمة، ${params.defectiveQuantity} معيب، ${params.scrapQuantity} هالك`,
+        description: `تسجيل إنتاج يومي لأمر الإنتاج ${ord.orderNumber}: تم إنتاج ${goodQty} كرتونة سليمة، ${defectiveQty} معيب، ${scrapQty} هالك`,
       });
     });
 
@@ -302,40 +527,44 @@ export class ManufacturingEngine {
     const product = db.items.find(i => i.id === order.productId);
     const todayStr = new Date().toISOString().split('T')[0];
 
-    // Create Balanced Accounting Entry for Finished Production & Variances:
-    // Debit: Finished Goods Inventory (Standard Cost)
-    // Debit/Credit: Material & Conversion Variances
-    // Credit: Raw Materials Consumption & Applied Conversion Costs
-    const invFinishedAccId = order.targetMarket === 'export' ? 'acc-1110' : 'acc-1109';
-    const rawMaterialsAccId = 'acc-1108';
+    // Finished-goods unit cost = actual total cost / total produced units
+    const totalUnits = (order.producedQuantity || 0) + (order.defectiveQuantity || 0) + (order.scrapQuantity || 0);
+    const actualUnitCost = totalUnits > 0 ? breakdown.totalActualCost / totalUnits : 0;
 
-    const stdCostTotal = breakdown.totalStandardCost;
-    const actualCostTotal = breakdown.totalActualCost;
+    // Post the closure journal: FG at actual cost, raw materials at actual consumption,
+    // conversion costs applied, and the NET variance as a single balancing line split
+    // across the variance accounts (material quantity + conversion net variance).
+    const invFinishedAccId = order.targetMarket === 'export'
+      ? AccountingEngine.getMappedAccountId('inventory_finished_export', 'acc-1110')
+      : AccountingEngine.getMappedAccountId('inventory_finished_local', 'acc-1109');
+    const rawMaterialsAccId = AccountingEngine.getMappedAccountId('purchase_raw_inventory', 'acc-1108');
 
-    const debitLines = [
-      {
-        id: '',
-        journalEntryId: '',
-        accountId: invFinishedAccId,
-        accountCode: order.targetMarket === 'export' ? '1110' : '1109',
-        accountNameAr: order.targetMarket === 'export' ? 'مخزون الإنتاج التام - تصدير' : 'مخزون الإنتاج التام - محلي',
-        debit: stdCostTotal,
-        credit: 0,
-        currency: 'EGP' as const,
-        originalAmount: stdCostTotal,
-        exchangeRate: 1,
-        costCenterId: 'cc-prod',
-        description: `استلام منتج تام أمر إنتاج ${order.orderNumber} بالتكلفة المعيارية`,
-      }
-    ];
+    const lines: JournalLine[] = [];
 
-    const creditLines = [
-      {
+    // Debit: Finished goods at ACTUAL total cost
+    lines.push({
+      id: '',
+      journalEntryId: '',
+      accountId: invFinishedAccId,
+      accountCode: db.accounts.find(a => a.id === invFinishedAccId)?.code || '',
+      accountNameAr: db.accounts.find(a => a.id === invFinishedAccId)?.nameAr || '',
+      debit: breakdown.totalActualCost,
+      credit: 0,
+      currency: 'EGP' as const,
+      originalAmount: breakdown.totalActualCost,
+      exchangeRate: 1,
+      costCenterId: 'cc-prod',
+      description: `استلام منتج تام أمر إنتاج ${order.orderNumber} بالتكلفة الفعلية`,
+    });
+
+    // Credit: Raw materials inventory at ACTUAL consumed cost
+    if (breakdown.actualMaterialCost > 0) {
+      lines.push({
         id: '',
         journalEntryId: '',
         accountId: rawMaterialsAccId,
-        accountCode: '1108',
-        accountNameAr: 'مخزون المواد الخام ومواد التعبئة',
+        accountCode: db.accounts.find(a => a.id === rawMaterialsAccId)?.code || '',
+        accountNameAr: db.accounts.find(a => a.id === rawMaterialsAccId)?.nameAr || '',
         debit: 0,
         credit: breakdown.actualMaterialCost,
         currency: 'EGP' as const,
@@ -343,84 +572,54 @@ export class ManufacturingEngine {
         exchangeRate: 1,
         costCenterId: 'cc-prod',
         description: `استهلاك الخامات ومواد التعبئة الفعلية لأمر الإنتاج ${order.orderNumber}`,
-      },
-      {
+      });
+    }
+
+    // Applied conversion costs move from accrued expenses to production (absorbed into FG)
+    const conversionApplied = breakdown.actualLaborCost + breakdown.actualElectricityCost + breakdown.actualGasCost
+      + breakdown.actualMaintenanceCost + breakdown.actualSupervisionCost;
+    if (conversionApplied > 0) {
+      lines.push({
         id: '',
         journalEntryId: '',
-        accountId: 'acc-6101',
-        accountCode: '6101',
-        accountNameAr: 'مصروفات الرواتب والأجور',
+        accountId: AccountingEngine.getMappedAccountId('expenses_default', 'acc-6101'),
+        accountCode: db.accounts.find(a => a.id === AccountingEngine.getMappedAccountId('expenses_default', 'acc-6101'))?.code || '6101',
+        accountNameAr: db.accounts.find(a => a.id === AccountingEngine.getMappedAccountId('expenses_default', 'acc-6101'))?.nameAr || 'مصروفات مستحقة',
         debit: 0,
-        credit: breakdown.standardLaborCost,
+        credit: conversionApplied,
         currency: 'EGP' as const,
-        originalAmount: breakdown.standardLaborCost,
+        originalAmount: conversionApplied,
         exchangeRate: 1,
         costCenterId: 'cc-prod',
-        description: `تحميل أجور مباشرة معيارية لأمر إنتاج ${order.orderNumber}`,
-      },
-      {
+        description: `تحميل تكاليف تحويل صناعية مستحقة لأمر إنتاج ${order.orderNumber}`,
+      });
+    }
+
+    // Net variance (actual - standard): unfavorable = debit, favorable = credit
+    const netVariance = breakdown.totalProductionVariance;
+    if (Math.abs(netVariance) > 0.01) {
+      const isUnfavorable = netVariance > 0;
+      const varianceAccId = AccountingEngine.getMappedAccountId('variance_material_quantity', 'acc-5104');
+      lines.push({
         id: '',
         journalEntryId: '',
-        accountId: 'acc-6102',
-        accountCode: '6102',
-        accountNameAr: 'مصروفات كهرباء ومياه المرافق العامة',
-        debit: 0,
-        credit: breakdown.standardElectricityCost + breakdown.standardGasCost + breakdown.standardMaintenanceCost + breakdown.standardSupervisionCost,
+        accountId: varianceAccId,
+        accountCode: db.accounts.find(a => a.id === varianceAccId)?.code || '5104',
+        accountNameAr: db.accounts.find(a => a.id === varianceAccId)?.nameAr || 'فروق التصنيع',
+        debit: isUnfavorable ? Math.abs(netVariance) : 0,
+        credit: isUnfavorable ? 0 : Math.abs(netVariance),
         currency: 'EGP' as const,
-        originalAmount: breakdown.standardElectricityCost + breakdown.standardGasCost + breakdown.standardMaintenanceCost + breakdown.standardSupervisionCost,
+        originalAmount: Math.abs(netVariance),
         exchangeRate: 1,
         costCenterId: 'cc-prod',
-        description: `تحميل تكاليف تحويل صناعية معيارية لأمر إنتاج ${order.orderNumber}`,
-      }
-    ];
-
-    // Balance calculation
-    let totalDebit = debitLines.reduce((s, l) => s + l.debit, 0);
-    let totalCredit = creditLines.reduce((s, l) => s + l.credit, 0);
-
-    const varianceDiff = totalDebit - totalCredit;
-    const lines = [...debitLines, ...creditLines];
-
-    if (Math.abs(varianceDiff) > 0.01) {
-      if (varianceDiff > 0) {
-        // Debit is greater -> add credit line for favorable variance
-        lines.push({
-          id: '',
-          journalEntryId: '',
-          accountId: 'acc-5104',
-          accountCode: '5104',
-          accountNameAr: 'فروق كميات استهلاك المواد والتصنيع (وفر)',
-          debit: 0,
-          credit: varianceDiff,
-          currency: 'EGP' as const,
-          originalAmount: varianceDiff,
-          exchangeRate: 1,
-          costCenterId: 'cc-prod',
-          description: `وفر تكاليف تصنيع وانحراف مفضل لأمر الإنتاج ${order.orderNumber}`,
-        });
-      } else {
-        // Credit is greater -> add debit line for unfavorable variance
-        lines.push({
-          id: '',
-          journalEntryId: '',
-          accountId: 'acc-5104',
-          accountCode: '5104',
-          accountNameAr: 'فروق كميات استهلاك المواد والتصنيع (إسراف)',
-          debit: Math.abs(varianceDiff),
-          credit: 0,
-          currency: 'EGP' as const,
-          originalAmount: Math.abs(varianceDiff),
-          exchangeRate: 1,
-          costCenterId: 'cc-prod',
-          description: `انحراف سلبي وزيادة تكلفة تصنيع لأمر الإنتاج ${order.orderNumber}`,
-        });
-      }
+        description: `${isUnfavorable ? 'انحراف غير مفضل (إسراف)' : 'انحراف مفضل (وفر)'} بأمر إنتاج ${order.orderNumber}`,
+      });
     }
 
     const postResult = AccountingEngine.postJournal({
       date: todayStr,
       reference: `إغلاق أمر إنتاج ${order.orderNumber}`,
-      description: `إثبات إنتاج تام وتكلفة معيارية وفروق تصنيع لأمر إنتاج ${order.orderNumber}`,
+      description: `إثبات إنتاج تام وتكلفة فعلية وفروق تصنيع لأمر إنتاج ${order.orderNumber}`,
       sourceDocumentType: 'production_order_close',
       sourceDocumentId: order.id,
       lines,
@@ -436,6 +635,23 @@ export class ManufacturingEngine {
         ord.status = 'completed';
         ord.actualCompletionDate = todayStr;
       }
+
+      // Update finished product actual cost from real production data
+      const prod = draft.items.find(i => i.id === order.productId);
+      if (prod && totalUnits > 0 && actualUnitCost > 0) {
+        prod.actualCost = Number(actualUnitCost.toFixed(2));
+      }
+
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId,
+        userName,
+        module: 'إدارة الإنتاج والتكاليف',
+        action: 'post',
+        recordId: orderId,
+        description: `إغلاق أمر إنتاج ${order.orderNumber}: تكلفة فعلية إجمالية ${breakdown.totalActualCost.toLocaleString('ar-EG')} ج.م، انحراف صافي ${netVariance.toLocaleString('ar-EG')} ج.م`,
+      });
     });
 
     return { success: true };

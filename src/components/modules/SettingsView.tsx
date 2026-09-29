@@ -407,17 +407,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
             <thead className="bg-slate-100 text-slate-700 font-bold">
               <tr>
                 <th className="p-3.5">مفتاح الربط (Mapping Key)</th>
-                <th className="p-3.5">الحساب المربوط حالياً</th>
+                <th className="p-3.5">الحساب المربوط (قابل للتعديل)</th>
                 <th className="p-3.5 text-center">كود الحساب</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {Object.entries(db.accountMappings).map(([key, accId]) => {
                 const acc = db.accounts.find(a => a.id === accId);
+                const postable = db.accounts.filter(a => !a.isHeader);
                 return (
                   <tr key={key} className="hover:bg-slate-50">
                     <td className="p-3.5 font-mono font-bold text-slate-700">{key}</td>
-                    <td className="p-3.5 font-bold text-slate-900">{acc?.nameAr || accId}</td>
+                    <td className="p-3.5 font-bold text-slate-900">
+                      <select
+                        value={accId}
+                        onChange={(e) => {
+                          const newAccId = e.target.value;
+                          erpDb.mutate(draft => {
+                            draft.accountMappings[key] = newAccId;
+                          });
+                        }}
+                        className="w-full p-1.5 rounded-lg bg-slate-50 border border-slate-300 text-xs font-bold"
+                      >
+                        {postable.map(a => (
+                          <option key={a.id} value={a.id}>
+                            {a.nameAr} ({a.code})
+                          </option>
+                        ))}
+                      </select>
+                    </td>
                     <td className="p-3.5 text-center font-mono font-black text-amber-700">{acc?.code || '-'}</td>
                   </tr>
                 );

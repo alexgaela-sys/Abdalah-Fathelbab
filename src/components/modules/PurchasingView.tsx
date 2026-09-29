@@ -47,7 +47,10 @@ export const PurchasingView: React.FC = () => {
     const first = rawAndPackagingItems[0];
     if (!first) return;
     const today = new Date().toISOString().split('T')[0];
-    const expDate = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    // Expiry strictly from the item's configured period (never a hardcoded 180 days)
+    const expDate = first.trackExpiry && first.expiryPeriodDays && first.expiryPeriodDays > 0
+      ? new Date(Date.now() + first.expiryPeriodDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+      : '';
 
     setLines([
       ...lines,
@@ -56,7 +59,7 @@ export const PurchasingView: React.FC = () => {
         quantity: 100,
         unitId: first.baseUnitId,
         unitPrice: first.standardCost || 50,
-        batchNumber: `BAT-${today.replace(/-/g, '')}-${Math.floor(Math.random() * 900 + 100)}`,
+        batchNumber: '', // intentionally empty: user enters the supplier's real batch number
         productionDate: today,
         expiryDate: expDate,
         vatRate: first.vatRate,
@@ -104,6 +107,15 @@ export const PurchasingView: React.FC = () => {
     if (lines.length === 0) {
       setFormError('يجب إضافة أصناف ومواد خام للفاتورة');
       return;
+    }
+
+    // Batch numbers are mandatory for batch-tracked items (traceability requirement)
+    for (const l of lines) {
+      const itm = db.items.find(i => i.id === l.itemId);
+      if (itm?.trackBatch && !l.batchNumber.trim()) {
+        setFormError(`يرجى إدخال رقم تشغيلة للصنف (${itm.nameAr}) لأنه صنف متتبع بالتشغيلات`);
+        return;
+      }
     }
 
     const res = WorkflowService.createPurchaseInvoice({

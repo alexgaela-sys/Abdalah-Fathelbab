@@ -1,6 +1,6 @@
 // Accounting Engine: Double-Entry Validation, Period Checking, Auto-Posting & Financial Statements
-import { erpDb } from './db';
-import { JournalEntry, JournalLine, Account, AccountingPeriod } from '../types/erp';
+import { erpDb, generateErpId } from './db';
+import { JournalEntry, JournalLine, Account, AccountingPeriod, isDebitNatureCategory } from '../types/erp';
 
 export interface ValidationResult {
   valid: boolean;
@@ -115,7 +115,8 @@ export class AccountingEngine {
   public static postJournal(
     entryData: Omit<JournalEntry, 'id' | 'entryNumber' | 'isPosted' | 'totalDebit' | 'totalCredit' | 'createdUserId'>,
     userId: string = 'usr-admin',
-    userName: string = 'مدير النظام'
+    userName: string = 'مدير النظام',
+    isTest?: boolean
   ): { success: boolean; entry?: JournalEntry; error?: string } {
     const validation = this.validateJournalEntry(entryData);
     if (!validation.valid) {
@@ -131,7 +132,7 @@ export class AccountingEngine {
       const count = draft.journalEntries.length + 1;
       const entryNumber = `JV-${new Date().getFullYear()}-${String(count).padStart(5, '0')}`;
 
-      const newId = `jv-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+      const newId = generateErpId('jv');
       createdEntry = {
         ...entryData,
         id: newId,
@@ -141,6 +142,7 @@ export class AccountingEngine {
         totalDebit,
         totalCredit,
         createdUserId: userId,
+        isTest,
         lines: entryData.lines.map((l, idx) => ({
           ...l,
           id: `jvl-${newId}-${idx + 1}`,
@@ -150,14 +152,11 @@ export class AccountingEngine {
 
       draft.journalEntries.push(createdEntry);
 
-      // Update account balances
+      // Update account balances (single canonical nature rule from types/erp.ts)
       createdEntry.lines.forEach((line) => {
         const acc = draft.accounts.find(a => a.id === line.accountId);
         if (acc) {
-          // Standard balance update:
-          // For Assets & COGS & Expenses: Debit increases balance, Credit decreases
-          // For Liabilities & Equity & Revenue: Credit increases balance, Debit decreases
-          const isDebitNature = ['Assets', 'COGS', 'Operating Expenses', 'Other Expenses'].includes(acc.category);
+          const isDebitNature = isDebitNatureCategory(acc.category);
           const impact = isDebitNature ? (line.debit - line.credit) : (line.credit - line.debit);
           acc.currentBalance = (acc.currentBalance || 0) + impact;
         }
@@ -165,7 +164,7 @@ export class AccountingEngine {
 
       // Audit Log
       draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
+        id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
         userId,
         userName,
@@ -214,7 +213,7 @@ export class AccountingEngine {
 
       const reversalLines: JournalLine[] = origInDraft.lines.map((line, idx) => ({
         ...line,
-        id: `rev-line-${Date.now()}-${idx}`,
+        id: `rev-line-${originalEntryId}-${idx + 1}`,
         journalEntryId: '',
         debit: line.credit, // swap debit and credit
         credit: line.debit,
@@ -223,7 +222,7 @@ export class AccountingEngine {
 
       const count = draft.journalEntries.length + 1;
       const reversalNumber = `REV-${new Date().getFullYear()}-${String(count).padStart(5, '0')}`;
-      const revId = `rev-${Date.now()}`;
+      const revId = generateErpId('rev');
 
       reversalEntry = {
         id: revId,
@@ -245,11 +244,11 @@ export class AccountingEngine {
       origInDraft.reversedByEntryId = revId;
       draft.journalEntries.push(reversalEntry);
 
-      // Adjust account balances
+      // Adjust account balances (canonical nature rule)
       reversalEntry.lines.forEach(line => {
         const acc = draft.accounts.find(a => a.id === line.accountId);
         if (acc) {
-          const isDebitNature = ['Assets', 'COGS', 'Operating Expenses', 'Other Expenses'].includes(acc.category);
+          const isDebitNature = isDebitNatureCategory(acc.category);
           const impact = isDebitNature ? (line.debit - line.credit) : (line.credit - line.debit);
           acc.currentBalance = (acc.currentBalance || 0) + impact;
         }
@@ -257,7 +256,7 @@ export class AccountingEngine {
 
       // Audit Log
       draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
+        id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
         userId,
         userName,

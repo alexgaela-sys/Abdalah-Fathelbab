@@ -609,10 +609,22 @@ export type AccountCategory =
   | 'Equity'
   | 'Revenue'
   | 'COGS'
-  | 'Cost of Goods Sold'
   | 'Operating Expenses'
   | 'Other Income'
   | 'Other Expenses';
+
+/**
+ * Canonical debit-nature categories: increase with debits, decrease with credits.
+ * All other categories (Liabilities, Equity, Revenue, Other Income) increase with credits.
+ * Single source of truth for GL balance math across the entire system.
+ */
+export const DEBIT_NATURE_CATEGORIES: AccountCategory[] = [
+  'Assets', 'COGS', 'Operating Expenses', 'Other Expenses'
+];
+
+export function isDebitNatureCategory(category: AccountCategory): boolean {
+  return DEBIT_NATURE_CATEGORIES.includes(category);
+}
 
 export interface Account {
   id: string;

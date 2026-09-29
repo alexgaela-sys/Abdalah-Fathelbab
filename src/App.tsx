@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { erpDb } from './services/db';
 import { AuthService, AuthSession } from './services/auth';
 import { RoleName, User } from './types/erp';
+import { PermissionService } from './services/permissions';
 import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { LoginView } from './components/auth/LoginView';
@@ -66,6 +67,10 @@ export function App() {
   const handleRoleChange = (role: RoleName) => {
     setCurrentRole(role);
     AuthService.updateSessionRole(role);
+    // If the new role cannot view the currently open tab, bounce to the dashboard
+    if (!PermissionService.canView(role, activeTab)) {
+      setActiveTab('dashboard');
+    }
   };
 
   // If not logged in, show Login Screen

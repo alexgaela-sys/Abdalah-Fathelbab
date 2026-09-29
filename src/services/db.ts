@@ -10,6 +10,51 @@ import {
   StandardCostRate, SalesForecast, AccountMapping, AuditLog, User, ExportShipment
 } from '../types/erp';
 
+// -----------------------------------------------------------------------------
+// Deterministic Document Numbering & ID Generation (Centralized, Collision-free)
+// -----------------------------------------------------------------------------
+let idCounter = 0;
+let lastIdStamp = 0;
+
+/**
+ * Generates a unique, monotonically increasing ID with prefix.
+ * Replaces scattered Math.random() identity generation so financial/inventory
+ * records can never collide (e.g. two records created in the same millisecond).
+ */
+export function generateErpId(prefix: string): string {
+  idCounter += 1;
+  let stamp = Date.now();
+  if (stamp <= lastIdStamp) {
+    stamp = lastIdStamp + 1;
+  }
+  lastIdStamp = stamp;
+  return `${prefix}-${stamp.toString(36)}-${idCounter.toString(36).padStart(3, '0')}`;
+}
+
+/**
+ * Centralized document-number generator (SINV-2026-00001 style).
+ * Uses a deterministic sequence per document family so numbers never duplicate
+ * and remain ordered even when records are deleted.
+ */
+export function nextDocNumber(
+  draft: { [k: string]: unknown },
+  listKey: string,
+  prefix: string,
+  padLength: number = 5,
+  numberField: string = 'documentNumber'
+): string {
+  const list = (draft as Record<string, Array<Record<string, unknown>>>)[listKey];
+  let max = 0;
+  if (Array.isArray(list)) {
+    for (const rec of list) {
+      const num = String(rec?.[numberField] || '');
+      const match = num.match(/(\d+)$/);
+      if (match) max = Math.max(max, parseInt(match[1], 10));
+    }
+  }
+  return `${prefix}-${new Date().getFullYear()}-${String(max + 1).padStart(padLength, '0')}`;
+}
+
 export interface ERPDatabaseSchema {
   company: Company;
   warehouses: Warehouse[];
@@ -259,6 +304,7 @@ export const INITIAL_ACCOUNT_MAPPINGS: Record<string, string> = {
   expenses_default: 'acc-6101',
   rep_expense: 'acc-6106',
   export_costs: 'acc-6104',
+  bank_fees: 'acc-6109',
 };
 
 export const INITIAL_PERIODS: AccountingPeriod[] = [

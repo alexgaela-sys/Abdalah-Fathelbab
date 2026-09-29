@@ -78,14 +78,18 @@ export const RepresentativesView: React.FC = () => {
   };
 
   const handleSettleCustody = (custodyId: string) => {
-    if (confirm('تأكيد تسوية وإغلاق عهدة المندوب؟')) {
-      erpDb.mutate(draft => {
-        const c = draft.representativeCustodies.find(x => x.id === custodyId);
-        if (c) {
-          c.status = 'settled';
-          c.settleDate = new Date().toISOString().split('T')[0];
-        }
-      });
+    const cashInput = prompt('المبلغ النقدي المُحصل والمسلَّم مع تسوية العهدة (اتركه فارغاً أو صفراً إن لم يوجد):', '0');
+    if (cashInput === null) return;
+
+    const res = WorkflowService.settleRepCustody({
+      custodyId,
+      cashCollected: Number(cashInput) > 0 ? Number(cashInput) : undefined,
+      date: new Date().toISOString().split('T')[0],
+    });
+
+    if (!res.success) {
+      alert(res.error || 'خطأ في تسوية العهدة');
+      return;
     }
   };
 

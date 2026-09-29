@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   Factory, Plus, Play, CheckCircle2, AlertCircle, 
-  Layers, ChevronRight, Recycle, Trash2, Calendar
+  Layers, ChevronRight, Recycle, Trash2, Calendar, PackageOpen
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { ManufacturingEngine } from '../../services/manufacturing';
@@ -123,6 +123,24 @@ export const ManufacturingView: React.FC = () => {
     setShowDailyOutputModal(null);
   };
 
+  // Issue BOM raw/packaging materials from WH-01 to the production order (FIFO, actual cost)
+  const handleIssueMaterials = (order: ProductionOrder) => {
+    if (!confirm(`صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج ${order.orderNumber} وفق معادلة التصنيع؟`)) {
+      return;
+    }
+    const res = ManufacturingEngine.issueMaterialsToOrder({
+      orderId: order.id,
+      date: new Date().toISOString().split('T')[0],
+      userId: 'usr-admin',
+      userName: 'مدير الإنتاج',
+    });
+    if (!res.success) {
+      alert(res.error || 'خطأ في صرف خامات أمر الإنتاج');
+      return;
+    }
+    alert(`تم صرف المواد بنجاح بتكلفة فعلية ${res.totalActualCost?.toLocaleString('ar-EG') || '0'} ج.م`);
+  };
+
   const handleCloseOrder = (orderId: string) => {
     if (confirm('تأكيد إغلاق أمر الإنتاج نهائياً، واحتساب التكاليف المعيارية والفعلية وترحيل قيود الانحرافات بالدفاتر؟')) {
       const res = ManufacturingEngine.closeProductionOrder(orderId, 'usr-admin', 'مدير الإنتاج');
@@ -236,6 +254,16 @@ export const ManufacturingView: React.FC = () => {
                               إغلاق واحتساب التكاليف
                             </button>
                           </>
+                        )}
+                        {(ord.status === 'released' || ord.status === 'in_progress' || ord.status === 'draft') && (
+                          <button
+                            onClick={() => handleIssueMaterials(ord)}
+                            className="px-2 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-semibold rounded-lg text-xs flex items-center gap-1"
+                            title="صرف الخامات والتعبئة من مستودع الخامات وفق BOM"
+                          >
+                            <PackageOpen className="w-3 h-3" />
+                            صرف خامات
+                          </button>
                         )}
                         <button
                           onClick={() => setSelectedOrderDetails(ord)}
