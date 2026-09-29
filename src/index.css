@@ -104,6 +104,60 @@ input[type="number"] {
   text-align: left;
 }
 
+/* ============================================================
+   Mobile / PWA hardening (presentation only — no logic changes)
+   ============================================================ */
+
+/* Clip horizontal overflow without creating a scroll container,
+   so position: sticky headers keep working (unlike overflow-x: hidden). */
+html,
+body {
+  overflow-x: clip;
+}
+
+/* Modals: the card is the direct child of a fixed fullscreen overlay.
+   Cap it to the viewport and scroll internally so it can never extend
+   outside the screen on small devices. Desktop is unaffected because
+   modal content is shorter than the cap. */
+div.fixed.inset-0.z-50 > div {
+  max-height: min(92vh, 100dvh - 1.5rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Touch-friendly targets on coarse pointers (phones/tablets) */
+@media (pointer: coarse) {
+  .btn {
+    min-height: 42px;
+  }
+  .field-input {
+    min-height: 44px;
+  }
+  .nav-item {
+    min-height: 42px;
+  }
+  .tab-item {
+    min-height: 40px;
+  }
+}
+
+/* Small screens: tables scroll inside themselves instead of stretching
+   the page. display:block + overflow-x keeps columns readable via
+   nowrap and preserves row/striping rendering in Chromium/Android. */
+@media (max-width: 640px) {
+  main table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+  /* Comfortable base size for Arabic on small screens */
+  body {
+    font-size: 15px;
+  }
+}
+
 /* Global focus ring in brand color */
 *:focus-visible {
   outline: 2px solid var(--color-brand-500);
