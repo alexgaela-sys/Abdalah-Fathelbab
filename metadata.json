@@ -1,0 +1,8 @@
+{
+  "name": "Abdullah ERP - نظام عبد الله لإدارة الموارد والمصانع",
+  "description": "نظام تخطيط موارد متكامل باللغة العربية لإدارة التصنيع، المخازن، المبيعات والتصدير، التكاليف، وحسابات القيد المزدوج لشركة منتجات خفيفة (سناكس).",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
