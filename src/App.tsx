@@ -37,7 +37,15 @@ export function App() {
     return session ? session.user : null;
   });
 
-  const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  // Persist the last opened module so refreshes keep context (still permission-gated)
+  const [activeTab, setActiveTab] = useState<NavTab>(() => {
+    const saved = localStorage.getItem('snakdip_erp_active_tab') as NavTab | null;
+    return saved || 'dashboard';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('snakdip_erp_active_tab', activeTab);
+  }, [activeTab]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isTestRunnerOpen, setIsTestRunnerOpen] = useState(false);
   const [currentRole, setCurrentRole] = useState<RoleName>(() => {
@@ -73,13 +81,20 @@ export function App() {
     }
   };
 
+  // Guard persisted tab against roles that cannot view it (e.g. after logout/login as another role)
+  useEffect(() => {
+    if (currentUser && !PermissionService.canView(currentUser.role, activeTab)) {
+      setActiveTab('dashboard');
+    }
+  }, [currentUser, activeTab]);
+
   // If not logged in, show Login Screen
   if (!currentUser) {
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-['Cairo',sans-serif] flex flex-col antialiased" dir="rtl">
+    <div className="min-h-screen bg-cream-100 text-ink-900 font-sans flex flex-col antialiased" dir="rtl">
       {/* Sidebar */}
       <Sidebar
         activeTab={activeTab}

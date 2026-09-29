@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { 
-  Lock, User as UserIcon, Shield, Eye, EyeOff, 
-  CheckCircle2, AlertCircle, ArrowLeft, Building2, Factory, Sparkles
+import {
+  Lock, User as UserIcon, Shield, Eye, EyeOff,
+  AlertCircle, ArrowLeft, Building2, Factory
 } from 'lucide-react';
 import { AuthService } from '../../services/auth';
 import { User } from '../../types/erp';
@@ -41,51 +41,59 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 flex flex-col justify-center items-center p-4 sm:p-6 font-['Cairo',sans-serif] text-slate-100 antialiased relative overflow-hidden" dir="rtl">
-      {/* Background Ambient Glows */}
-      <div className="absolute top-1/4 -right-24 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 -left-24 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div
+      className="min-h-screen bg-cream-100 flex flex-col justify-center items-center p-4 sm:p-6 font-sans text-ink-900 antialiased relative overflow-hidden"
+      dir="rtl"
+    >
+      {/* SnakDip brand ambient shapes */}
+      <div className="absolute top-1/4 -right-24 w-96 h-96 bg-brand-100 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-1/4 -left-24 w-96 h-96 bg-cream-300/60 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 left-0 w-72 h-72 bg-brand-50 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="w-full max-w-md z-10 space-y-6">
+      <div className="w-full max-w-md z-10 space-y-6 animate-slide-up">
         {/* Brand & System Title */}
         <div className="text-center space-y-3">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-600 to-amber-400 text-slate-950 font-black text-3xl shadow-2xl shadow-amber-500/30 border border-amber-300/40">
-            ع
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-500 shadow-brand border border-brand-400/60">
+            <span className="font-black text-2xl text-white tracking-tight">
+              S<span className="text-ink-950">D</span>
+            </span>
           </div>
           <div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-wide">
-              Abdullah ERP
+            <h1 className="text-2xl sm:text-3xl font-black text-ink-900 tracking-tight">
+              SnakDip <span className="text-brand-600">ERP</span>
             </h1>
-            <p className="text-sm font-semibold text-amber-400 mt-0.5">
-              نظام عبد الله لإدارة الموارد والمصانع
+            <p className="text-sm font-bold text-cream-800 mt-0.5">
+              نظام سناك ديب لإدارة الموارد والمصانع
             </p>
-            <p className="text-xs text-slate-400 mt-1">
-              شركة عبد الله للصناعات الغذائية (ش.م.م) - النسخة الرئيسية
+            <p className="text-xs text-cream-600 mt-1 font-medium">
+              شركة SnakDip للصناعات الغذائية — النسخة الرئيسية
             </p>
           </div>
 
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700/80 text-xs text-emerald-400 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>النسخة الرئيسية المعتمدة - Production Release</span>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-cream-300 text-xs text-emerald-700 font-bold shadow-xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>النسخة الرئيسية المعتمدة — Production Release</span>
           </div>
         </div>
 
         {/* Login Card */}
-        <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5">
-          <div className="border-b border-slate-800/80 pb-3 flex items-center justify-between">
+        <div className="bg-white rounded-3xl border border-cream-200 shadow-card p-6 sm:p-8 space-y-5">
+          <div className="border-b border-cream-200 pb-3 flex items-center justify-between">
             <div>
-              <h2 className="text-base font-bold text-white">تسجيل الدخول للمسؤول</h2>
-              <p className="text-xs text-slate-400 mt-0.5">أدخل بيانات الحساب للوصول إلى لوحة التحكم</p>
+              <h2 className="text-base font-black text-ink-900">تسجيل الدخول</h2>
+              <p className="text-xs text-cream-600 mt-0.5 font-medium">
+                أدخل بيانات الحساب للوصول إلى لوحة التحكم
+              </p>
             </div>
-            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+            <div className="w-9 h-9 rounded-xl bg-brand-50 border border-brand-200 flex items-center justify-center text-brand-600">
               <Shield className="w-5 h-5" />
             </div>
           </div>
 
           {/* Error Alert */}
           {errorMsg && (
-            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2 animate-shake">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2 animate-shake font-semibold">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
               <span>{errorMsg}</span>
             </div>
           )}
@@ -93,9 +101,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Username */}
             <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-300">
-                اسم المستخدم (Username)
-              </label>
+              <label className="field-label">اسم المستخدم (Username)</label>
               <div className="relative">
                 <input
                   type="text"
@@ -103,22 +109,20 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="admin"
                   required
-                  className="w-full pl-3 pr-10 py-3 rounded-xl bg-slate-950/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-mono"
+                  className="field-input pl-3 pr-10 font-mono"
                 />
-                <UserIcon className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <UserIcon className="w-4 h-4 text-cream-500 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
             </div>
 
             {/* Password */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="block text-xs font-bold text-slate-300">
-                  كلمة المرور (Password)
-                </label>
+                <label className="field-label">كلمة المرور (Password)</label>
                 <button
                   type="button"
                   onClick={handleQuickFill}
-                  className="text-[11px] text-amber-400 hover:text-amber-300 transition"
+                  className="text-[11px] text-brand-600 hover:text-brand-700 font-bold transition cursor-pointer"
                 >
                   تعبئة بيانات الأدمن (admin / 12345)
                 </button>
@@ -130,13 +134,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="•••••"
                   required
-                  className="w-full pl-10 pr-10 py-3 rounded-xl bg-slate-950/70 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-mono tracking-wider"
+                  className="field-input pl-10 pr-10 font-mono tracking-wider"
                 />
-                <Lock className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Lock className="w-4 h-4 text-cream-500 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition p-1"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-cream-500 hover:text-ink-800 transition p-1"
                   tabIndex={-1}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -145,14 +149,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             </div>
 
             {/* Credentials Info Badge */}
-            <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-xs space-y-1">
-              <div className="flex items-center justify-between text-slate-300">
-                <span className="text-slate-400">حساب المشرف العام:</span>
-                <span className="font-mono font-bold text-amber-400">admin</span>
+            <div className="p-3 rounded-xl bg-cream-100 border border-cream-200 text-xs space-y-1 font-semibold">
+              <div className="flex items-center justify-between">
+                <span className="text-cream-700">حساب المشرف العام:</span>
+                <span className="font-mono font-black text-brand-700">admin</span>
               </div>
-              <div className="flex items-center justify-between text-slate-300">
-                <span className="text-slate-400">كلمة المرور الافتراضية:</span>
-                <span className="font-mono font-bold text-amber-400">12345</span>
+              <div className="flex items-center justify-between">
+                <span className="text-cream-700">كلمة المرور الافتراضية:</span>
+                <span className="font-mono font-black text-brand-700">12345</span>
               </div>
             </div>
 
@@ -160,13 +164,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/25 active:scale-[0.99] transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70"
+              className="w-full py-3 px-4 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-black text-sm shadow-brand active:scale-[0.99] transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70"
             >
               {isLoading ? (
-                <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
                 <>
-                  <span>دخول إلى النظام الرئيسي</span>
+                  <span>دخول إلى النظام</span>
                   <ArrowLeft className="w-4 h-4" />
                 </>
               )}
@@ -176,12 +180,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
         {/* Feature Badges Footer */}
         <div className="grid grid-cols-2 gap-3 text-center text-xs">
-          <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 text-slate-300 flex items-center gap-2 justify-center">
-            <Factory className="w-4 h-4 text-amber-400 shrink-0" />
+          <div className="p-3 rounded-2xl bg-white border border-cream-200 text-ink-800 flex items-center gap-2 justify-center font-bold shadow-xs">
+            <Factory className="w-4 h-4 text-brand-500 shrink-0" />
             <span>سجل المنتجات الـ 11 مهيأ</span>
           </div>
-          <div className="p-3 rounded-2xl bg-slate-900/60 border border-slate-800 text-slate-300 flex items-center gap-2 justify-center">
-            <Building2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div className="p-3 rounded-2xl bg-white border border-cream-200 text-ink-800 flex items-center gap-2 justify-center font-bold shadow-xs">
+            <Building2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>قيد مزدوج و 5 مستودعات</span>
           </div>
         </div>

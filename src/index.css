@@ -1,1 +1,247 @@
 @import "tailwindcss";
+
+/* ============================================================
+   SNAKDIP ERP — Brand Design System
+   Derived from snakdip.com: warm red-orange brand accents on a
+   clean cream base, playful but enterprise-grade, Arabic-first.
+   ============================================================ */
+
+@theme {
+  /* Typography */
+  --font-sans: "Cairo", "Tajawal", ui-sans-serif, system-ui, sans-serif;
+
+  /* SnakDip brand accent (tomato red-orange) */
+  --color-brand-50: #fff3f0;
+  --color-brand-100: #ffe1d9;
+  --color-brand-200: #ffc3b4;
+  --color-brand-300: #ff9d86;
+  --color-brand-400: #ff6f4f;
+  --color-brand-500: #fa4a1f;
+  --color-brand-600: #eb320e;
+  --color-brand-700: #c62509;
+  --color-brand-800: #9d200e;
+  --color-brand-900: #7e1f10;
+  --color-brand-950: #440b04;
+
+  /* SnakDip warm neutrals (cream paper, cocoa ink) */
+  --color-cream-50: #fffdf9;
+  --color-cream-100: #fdf8ef;
+  --color-cream-200: #f7ecd9;
+  --color-cream-300: #eddbbd;
+  --color-cream-400: #dfc496;
+  --color-cream-500: #d1ab6e;
+  --color-cream-600: #b78a4e;
+  --color-cream-700: #966b3f;
+  --color-cream-800: #7a5836;
+  --color-cream-900: #63482f;
+  --color-cream-950: #362416;
+
+  /* Dark sidebar ink (deep warm charcoal) */
+  --color-ink-700: #33302e;
+  --color-ink-800: #262422;
+  --color-ink-900: #1c1a19;
+  --color-ink-950: #131211;
+
+  /* Legacy palette remap: existing modules use slate/amber classes;
+     re-point them at the SnakDip palette for instant, consistent re-skin
+     without touching any module markup or logic. */
+  --color-slate-50: #fdf8ef;
+  --color-slate-100: #f7ecd9;
+  --color-slate-200: #eddbbd;
+  --color-slate-300: #dfc496;
+  --color-slate-400: #b39b7d;
+  --color-slate-500: #9c8467;
+  --color-slate-600: #85705a;
+  --color-slate-700: #6f5c48;
+  --color-slate-800: #262422;
+  --color-slate-900: #1c1a19;
+  --color-slate-950: #131211;
+
+  --color-amber-50: #fff3f0;
+  --color-amber-100: #ffe1d9;
+  --color-amber-200: #ffc3b4;
+  --color-amber-300: #ff9d86;
+  --color-amber-400: #ff6f4f;
+  --color-amber-500: #fa4a1f;
+  --color-amber-600: #eb320e;
+  --color-amber-700: #c62509;
+  --color-amber-800: #9d200e;
+  --color-amber-900: #7e1f10;
+  --color-amber-950: #440b04;
+
+  /* Brand shadow */
+  --shadow-brand: 0 8px 24px -8px rgba(250, 74, 31, 0.35);
+  --shadow-card: 0 1px 2px rgba(54, 36, 22, 0.05), 0 4px 16px -6px rgba(54, 36, 22, 0.08);
+
+  /* Animations */
+  --animate-fade-in: fade-in 0.25s ease-out both;
+  --animate-scale-in: scale-in 0.16s ease-out both;
+  --animate-shake: shake 0.3s ease-in-out;
+  --animate-slide-up: slide-up 0.3s ease-out both;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes scale-in {
+    from { opacity: 0; transform: scale(0.96) translateY(-4px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* Number inputs keep Latin digits aligned even in RTL documents */
+input[type="number"] {
+  direction: ltr;
+  text-align: left;
+}
+
+/* Global focus ring in brand color */
+*:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+@layer components {
+  /* ---------- Page header ---------- */
+  .page-title {
+    @apply text-lg sm:text-xl font-black text-ink-900 tracking-tight;
+  }
+  .page-subtitle {
+    @apply text-xs text-cream-700 font-medium mt-0.5;
+  }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold
+      transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer whitespace-nowrap;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold
+      transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer whitespace-nowrap
+      bg-brand-500 text-white shadow-brand hover:bg-brand-600;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold
+      transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer whitespace-nowrap
+      bg-white text-ink-800 border border-cream-300 hover:bg-cream-100 hover:border-cream-400;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold
+      transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer whitespace-nowrap
+      bg-transparent text-ink-700 hover:bg-cream-200/60;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold
+      transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer whitespace-nowrap
+      bg-rose-600 text-white hover:bg-rose-700;
+  }
+  .btn-dark {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold
+      transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none cursor-pointer whitespace-nowrap
+      bg-ink-900 text-white hover:bg-ink-800;
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs rounded-lg;
+  }
+
+  /* ---------- Cards ---------- */
+  .card {
+    @apply bg-white rounded-2xl border border-cream-200 shadow-card;
+  }
+
+  /* ---------- Inputs ---------- */
+  .field-label {
+    @apply block text-xs font-bold text-ink-800 mb-1.5;
+  }
+  .field-input {
+    @apply w-full px-3.5 py-2.5 rounded-xl bg-white border border-cream-300 text-sm text-ink-900
+      placeholder:text-cream-500 placeholder:font-normal transition-colors
+      focus:outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-500/20 disabled:bg-cream-100 disabled:text-cream-600;
+  }
+  select.field-input {
+    @apply cursor-pointer;
+  }
+
+  /* ---------- Status badges (design tokens for the whole app) ---------- */
+  .badge,
+  .badge-success,
+  .badge-warning,
+  .badge-error,
+  .badge-pending,
+  .badge-draft,
+  .badge-brand,
+  .badge-purple,
+  .badge-cream {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border whitespace-nowrap;
+  }
+  .badge-success { @apply bg-emerald-50 text-emerald-800 border-emerald-200; }
+  .badge-warning { @apply bg-amber-50 text-amber-800 border-amber-200; }
+  .badge-error { @apply bg-rose-50 text-rose-800 border-rose-200; }
+  .badge-pending { @apply bg-sky-50 text-sky-800 border-sky-200; }
+  .badge-draft { @apply bg-slate-100 text-slate-700 border-slate-200; }
+  .badge-brand { @apply bg-brand-50 text-brand-800 border-brand-200; }
+  .badge-purple { @apply bg-violet-50 text-violet-800 border-violet-200; }
+  .badge-cream { @apply bg-cream-100 text-cream-800 border-cream-300; }
+
+  /* ---------- Tables ---------- */
+  .data-table {
+    @apply w-full text-sm border-collapse;
+  }
+  .data-table thead th {
+    @apply text-right text-[11px] font-black text-cream-800 uppercase tracking-wide
+      bg-cream-100/80 px-3.5 py-3 border-b border-cream-300 whitespace-nowrap;
+  }
+  .data-table tbody td {
+    @apply px-3.5 py-3 border-b border-cream-100 text-ink-800 align-middle;
+  }
+  .data-table tbody tr {
+    @apply transition-colors hover:bg-brand-50/40;
+  }
+  .table-toolbar {
+    @apply flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3.5 border-b border-cream-200;
+  }
+
+  /* ---------- KPI cards ---------- */
+  .kpi-card {
+    @apply bg-white rounded-2xl border border-cream-200 shadow-card p-4 transition-all duration-200 hover:shadow-brand/20 hover:-translate-y-0.5 cursor-pointer;
+  }
+  .kpi-label {
+    @apply text-[11px] font-bold text-cream-700;
+  }
+  .kpi-value {
+    @apply text-lg sm:text-xl font-black text-ink-900 font-mono tabular-nums leading-tight mt-1.5;
+  }
+  .kpi-hint {
+    @apply text-[10px] text-cream-600 mt-1 font-medium;
+  }
+
+  /* ---------- Tabs ---------- */
+  .tab-bar {
+    @apply flex gap-1 p-1 rounded-2xl bg-cream-100 border border-cream-200 overflow-x-auto;
+  }
+  .tab-item {
+    @apply flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-cream-700
+      transition-all whitespace-nowrap cursor-pointer hover:bg-white/70;
+  }
+  .tab-item-active {
+    @apply bg-white text-brand-700 shadow-sm;
+  }
+
+  /* ---------- Sidebar nav item ---------- */
+  .nav-item {
+    @apply w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-semibold text-cream-300
+      transition-all text-right cursor-pointer hover:bg-white/5 hover:text-white;
+  }
+  .nav-item-active {
+    @apply bg-brand-500 !text-white font-bold shadow-brand hover:bg-brand-500 hover:!text-white;
+  }
+}
