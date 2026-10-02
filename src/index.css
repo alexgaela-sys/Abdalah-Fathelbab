@@ -299,3 +299,60 @@ div.fixed.inset-0.z-50 > div {
     @apply bg-brand-500 !text-white font-bold shadow-brand hover:bg-brand-500 hover:!text-white;
   }
 }
+
+/* ============================================================
+   PRINT MODE (F7 — invoice printing)
+   The printable document sits in a dedicated .print-area that is the only
+   thing visible when the print dialog opens. The app shell is hidden via
+   Tailwind print: variant classes in the components themselves, so this
+   block guarantees the printed output is clean and focused.
+ ============================================================ */
+@media print {
+  body {
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /* Hide the application shell (sidebar, header, modals) while printing. */
+  .print-area .app-shell,
+  .print-area .sidebar,
+  .print-area .header,
+  .print-area .modal,
+  .print-area .print-hidden {
+    display: none !important;
+  }
+
+  /* The print container takes the full page for a clean document. */
+  .print-area {
+    position: relative;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .print-area .print-only {
+    display: block !important;
+  }
+
+  /* Ensure print color is as designed. */
+  .print-area *,
+  .print-area *::before,
+  .print-area *::after {
+    background: transparent !important;
+    color: #000 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Avoid blank pages / page-breaks inside the document. */
+  .print-area table,
+  .print-area .print-doc {
+    page-break-inside: avoid;
+  }
+}
+
+/* Always-hide the print-only wrapper when not in print mode is handled by
+   the component itself via the print:hidden class. */
+.print-hidden {
+  display: none !important;
+}

@@ -448,6 +448,7 @@ export const PurchasingView: React.FC = () => {
                       <th className="p-2 w-24">السعر</th>
                       <th className="p-2 w-32">رقم التشغيلة</th>
                       <th className="p-2 w-28">تاريخ الصلاحية</th>
+                      <th className="p-2 w-20" title="نسبة الضريبة قابلة للتعديل لكل سطر (الافتراضي من بيانات الصنف)">ض.ق.م %</th>
                       <th className="p-2 w-24">الإجمالي</th>
                       <th className="p-2 w-10"></th>
                     </tr>
@@ -504,6 +505,18 @@ export const PurchasingView: React.FC = () => {
                               className="w-full p-1.5 rounded-lg border border-slate-300 text-xs"
                             />
                           </td>
+                          <td className="p-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max="1"
+                              value={line.vatRate}
+                              onChange={(e) => updateLine(idx, 'vatRate', Number(e.target.value))}
+                              title="نسبة ضريبة القيمة المضافة لهذا السطر — تُستخدم كقيمة افتراضية من بيانات الصنف ويمكن تعديلها حسب المورد (مورد خاضع / غير خاضع للضريبة)"
+                              className="w-full p-1.5 rounded-lg border border-slate-300 text-xs text-center font-mono"
+                            />
+                          </td>
                           <td className="p-2 font-mono font-bold">
                             {total.toFixed(2)} ج.م
                           </td>
@@ -525,7 +538,8 @@ export const PurchasingView: React.FC = () => {
               {/* Total */}
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center text-xs">
                 <span className="text-slate-500">
-                  ملاحظة: تضاف الكميات فورًا لمستودع المواد الخام مع إثبات قيد محاسبي دائن للمورد ومدين للمخزون
+                  ملاحظة: تضاف الكميات فورًا لمستودع المواد الخام مع إثبات قيد محاسبي دائن للمورد ومدين للمخزون.
+                  ضريبة القيمة المضافة تُؤخذ افتراضياً من بيانات الصنف ويمكن تعديلها لكل سطر حسب المورد (مدخلات إلى حساب 1113).
                 </span>
                 <div className="text-sm font-black text-slate-900 font-mono">
                   الإجمالي: {lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (1 + l.vatRate)), 0).toFixed(2)} ج.م

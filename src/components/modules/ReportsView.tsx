@@ -4,6 +4,7 @@ import {
   Calendar, Filter, PieChart, TrendingUp, Layers
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
+import { isDebitNatureCategory } from '../../types/erp';
 
 type ReportType = 
   | 'trial_balance'
@@ -19,9 +20,39 @@ export const ReportsView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [selectedReport, setSelectedReport] = useState<ReportType>('trial_balance');
 
+  // ---------- Period filter (F13: reports are period-aware, nothing is hidden) ----------
+  const firstOfMonth = new Date();
+  firstOfMonth.setDate(1);
+  const [fromDate, setFromDate] = useState(firstOfMonth.toISOString().split('T')[0]);
+  const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
+  const [allPeriods, setAllPeriods] = useState(true);
+
+  const inPeriod = (dateStr: string) => {
+    if (allPeriods) return true;
+    const d = new Date(dateStr);
+    const from = new Date(fromDate);
+    const to = new Date(toDate);
+    to.setHours(23, 59, 59, 999);
+    return d >= from && d <= to;
+  };
+
   const accounts = db.accounts.filter(a => !a.isHeader);
 
-  // 1. Trial Balance calculation
+  /** Signed balance (nature-aware) of an account over the selected period. Never clamped. */
+  const signedBalance = (acc: { id: string; category: string }, periodOnly: boolean) => {
+    let debit = 0;
+    let credit = 0;
+    db.journalEntries.filter(j => j.isPosted && (!periodOnly || inPeriod(j.date))).forEach(jv => {
+      jv.lines.filter(l => l.accountId === acc.id).forEach(l => {
+        debit += l.debit;
+        credit += l.credit;
+      });
+    });
+    return isDebitNatureCategory(acc.category as any) ? (debit - credit) : (credit - debit);
+  };
+
+  // 1. Trial Balance calculation — every movement, plus the SIGNED closing balance so
+  //    abnormal (negative) balances stay visible instead of being clamped to zero.
   const trialBalanceData = accounts.map(acc => {
     let totalDebit = 0;
     let totalCredit = 0;
@@ -33,63 +64,117 @@ export const ReportsView: React.FC = () => {
       });
     });
 
-    const isDebitNature = ['Assets', 'COGS', 'Operating Expenses', 'Other Expenses'].includes(acc.category);
-    const balance = isDebitNature ? (totalDebit - totalCredit) : (totalCredit - totalDebit);
+    const isDebitNature = isDebitNatureCategory(acc.category);
+    const net = isDebitNature ? (totalDebit - totalCredit) : (totalCredit - totalDebit);
 
     return {
       acc,
       totalDebit,
       totalCredit,
-      closingDebit: isDebitNature && balance > 0 ? balance : 0,
-      closingCredit: !isDebitNature && balance > 0 ? balance : 0,
+      net,
+      isDebitNature,
+      closingDebit: net >= 0 ? net : 0,
+      closingCredit: net < 0 ? Math.abs(net) : 0,
+      abnormal: net < 0,
     };
-  }).filter(r => r.totalDebit > 0 || r.totalCredit > 0 || r.closingDebit > 0 || r.closingCredit > 0);
+  }).filter(r => Math.abs(r.totalDebit) > 0.005 || Math.abs(r.totalCredit) > 0.005 || Math.abs(r.net) > 0.005);
 
   const tbTotalDebitMoves = trialBalanceData.reduce((s, r) => s + r.totalDebit, 0);
   const tbTotalCreditMoves = trialBalanceData.reduce((s, r) => s + r.totalCredit, 0);
   const tbTotalClosingDebit = trialBalanceData.reduce((s, r) => s + r.closingDebit, 0);
   const tbTotalClosingCredit = trialBalanceData.reduce((s, r) => s + r.closingCredit, 0);
+  const tbNetMoves = tbTotalDebitMoves - tbTotalCreditMoves;
+  const tbAbnormal = trialBalanceData.filter(r => r.abnormal);
 
-  // 2. Income Statement calculation
+  // 2. Income Statement — period-aware, signed (no Math.max clamping).
   const revenueAccounts = accounts.filter(a => a.category === 'Revenue');
-  const totalRevenue = revenueAccounts.reduce((s, a) => s + Math.max(0, a.currentBalance || 0), 0);
+  const revenueRows = revenueAccounts.map(a => ({ acc: a, balance: signedBalance(a, !allPeriods) }));
+  const totalRevenue = revenueRows.reduce((s, r) => s + r.balance, 0);
 
   const cogsAccounts = accounts.filter(a => a.category === 'COGS');
-  const totalCogs = cogsAccounts.reduce((s, a) => s + Math.max(0, a.currentBalance || 0), 0);
+  const cogsRows = cogsAccounts.map(a => ({ acc: a, balance: signedBalance(a, !allPeriods) }));
+  const totalCogs = cogsRows.reduce((s, r) => s + r.balance, 0);
   const grossProfit = totalRevenue - totalCogs;
 
-  const expenseAccounts = accounts.filter(a => a.category === 'Operating Expenses');
-  const totalOperatingExpenses = expenseAccounts.reduce((s, a) => s + Math.max(0, a.currentBalance || 0), 0);
+  const expenseAccounts = accounts.filter(a => a.category === 'Operating Expenses' || a.category === 'Other Expenses');
+  const expenseRows = expenseAccounts.map(a => ({ acc: a, balance: signedBalance(a, !allPeriods) }));
+  const totalOperatingExpenses = expenseRows.reduce((s, r) => s + r.balance, 0);
   const netOperatingIncome = grossProfit - totalOperatingExpenses;
 
-  // 3. Balance Sheet calculation
+  // 3. Balance Sheet — cumulative (all periods), signed, with an explicit imbalance line.
   const assetAccounts = accounts.filter(a => a.category === 'Assets');
-  const totalAssets = assetAccounts.reduce((s, a) => s + Math.max(0, a.currentBalance || 0), 0);
+  const assetRows = assetAccounts.map(a => ({ acc: a, balance: signedBalance(a, false) }));
+  const totalAssets = assetRows.reduce((s, r) => s + r.balance, 0);
 
   const liabilityAccounts = accounts.filter(a => a.category === 'Liabilities');
-  const totalLiabilities = liabilityAccounts.reduce((s, a) => s + Math.max(0, a.currentBalance || 0), 0);
+  const liabilityRows = liabilityAccounts.map(a => ({ acc: a, balance: signedBalance(a, false) }));
+  const totalLiabilities = liabilityRows.reduce((s, r) => s + r.balance, 0);
 
   const equityAccounts = accounts.filter(a => a.category === 'Equity');
-  const baseEquity = equityAccounts.reduce((s, a) => s + Math.max(0, a.currentBalance || 0), 0);
+  const equityRows = equityAccounts.map(a => ({ acc: a, balance: signedBalance(a, false) }));
+  const baseEquity = equityRows.reduce((s, r) => s + r.balance, 0);
+  // Current-period result flows into equity; the opening equity stays as booked.
   const totalEquity = baseEquity + netOperatingIncome;
+  const bsImbalance = totalAssets - (totalLiabilities + totalEquity);
 
-  // 4. Receivables Aging
-  const receivablesAging = db.customers.map(cust => {
-    const balance = cust.currentBalance || 0;
-    return {
-      cust,
-      current: balance * 0.7, // simulated aging split based on invoice dates
-      over30: balance * 0.2,
-      over60: balance * 0.1,
-      total: balance,
-    };
-  }).filter(r => r.total > 0);
+  // 4. Receivables Aging — derived from actual posted invoices minus actual allocations.
+  const allocatedFor = (invoiceId: string) => db.paymentAllocations
+    .filter(al => al.invoiceId === invoiceId && al.invoiceType === 'sales')
+    .reduce((s, al) => s + al.allocatedAmount, 0);
 
-  // 5. VAT Report (Input VAT 1113 vs Output VAT 2103)
-  const vatInputAcc = db.accounts.find(a => a.id === 'acc-1113');
-  const vatOutputAcc = db.accounts.find(a => a.id === 'acc-2103');
-  const inputVatBalance = vatInputAcc?.currentBalance || 0;
-  const outputVatBalance = vatOutputAcc?.currentBalance || 0;
+  const today = new Date();
+  const daysSince = (d: string) => Math.floor((today.getTime() - new Date(d).getTime()) / 86400000);
+
+  const receivablesAging = db.salesInvoices
+    .filter(i => i.status === 'posted')
+    .map(inv => {
+      const open = (inv.totalAmountEGP || 0) - allocatedFor(inv.id);
+      return { inv, open, age: daysSince(inv.date) };
+    })
+    .filter(r => Math.abs(r.open) > 0.01)
+    .reduce<Array<{ custId: string; b0_30: number; b31_60: number; b61_90: number; b90plus: number; credit: number; total: number }>>((acc, r) => {
+      const row = acc.find(x => x.custId === r.inv.customerId) || {
+        custId: r.inv.customerId, b0_30: 0, b31_60: 0, b61_90: 0, b90plus: 0, credit: 0, total: 0,
+      };
+      if (r.open > 0) {
+        if (r.age <= 30) row.b0_30 += r.open;
+        else if (r.age <= 60) row.b31_60 += r.open;
+        else if (r.age <= 90) row.b61_90 += r.open;
+        else row.b90plus += r.open;
+      } else {
+        // Credit balance (advance / overpayment) shown separately, never hidden.
+        row.credit += Math.abs(r.open);
+      }
+      row.total += r.open;
+      if (!acc.includes(row)) acc.push(row);
+      return acc;
+    }, [])
+    .map(r => ({ ...r, cust: db.customers.find(c => c.id === r.custId)! }))
+    .filter(r => r.cust);
+
+  const agingTotals = receivablesAging.reduce((acc, r) => ({
+    b0_30: acc.b0_30 + r.b0_30,
+    b31_60: acc.b31_60 + r.b31_60,
+    b61_90: acc.b61_90 + r.b61_90,
+    b90plus: acc.b90plus + r.b90plus,
+    credit: acc.credit + r.credit,
+    total: acc.total + r.total,
+  }), { b0_30: 0, b31_60: 0, b61_90: 0, b90plus: 0, credit: 0, total: 0 });
+
+  // 5. VAT Report — derived from the ACTUAL 1113/2103 journal lines in the period.
+  const vatLines = (accountId: string) => {
+    let balance = 0;
+    db.journalEntries.filter(j => j.isPosted && inPeriod(j.date)).forEach(jv => {
+      jv.lines.filter(l => l.accountId === accountId).forEach(l => { balance += l.debit - l.credit; });
+    });
+    return balance;
+  };
+  const inputVatDebits = db.journalEntries.filter(j => j.isPosted && inPeriod(j.date))
+    .flatMap(j => j.lines).filter(l => l.accountId === 'acc-1113');
+  const outputVatCredits = db.journalEntries.filter(j => j.isPosted && inPeriod(j.date))
+    .flatMap(j => j.lines).filter(l => l.accountId === 'acc-2103');
+  const inputVatBalance = vatLines('acc-1113');
+  const outputVatBalance = -vatLines('acc-2103'); // 2103 is a liability (credit nature)
   const netVatPayable = outputVatBalance - inputVatBalance;
 
   return (
@@ -110,6 +195,43 @@ export const ReportsView: React.FC = () => {
           <Printer className="w-4 h-4" />
           <span>طباعة التقرير (Print / PDF)</span>
         </button>
+      </div>
+
+      {/* Period filter */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col sm:flex-row sm:items-end gap-3">
+        <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+          <input
+            type="checkbox"
+            checked={allPeriods}
+            onChange={(e) => setAllPeriods(e.target.checked)}
+            className="w-4 h-4 accent-slate-900"
+          />
+          كل الفترات (تراكمي)
+        </label>
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <Calendar className="w-4 h-4" />
+          <span className="font-bold text-slate-700">من</span>
+          <input
+            type="date"
+            value={fromDate}
+            disabled={allPeriods}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs disabled:opacity-50"
+          />
+          <span className="font-bold text-slate-700">إلى</span>
+          <input
+            type="date"
+            value={toDate}
+            disabled={allPeriods}
+            onChange={(e) => setToDate(e.target.value)}
+            className="p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs disabled:opacity-50"
+          />
+        </div>
+        <p className="text-[11px] text-slate-500 sm:mr-auto">
+          {allPeriods
+            ? 'التقارير تُحسب على كامل الحركات المرحلة (تراكمي)'
+            : 'قائمة الدخل وضريبة القيمة المضافة تُحسب على الفترة المحددة فقط، بينما الميزانية وميزان المراجعة تظل تراكمية'}
+        </p>
       </div>
 
       {/* Report Selection Tabs */}
@@ -175,24 +297,35 @@ export const ReportsView: React.FC = () => {
                 <th className="p-3 text-center">مجموع الدائن</th>
                 <th className="p-3 text-center">رصيد مدين</th>
                 <th className="p-3 text-center">رصيد دائن</th>
+                <th className="p-3 text-center">صافي الرصيد (طبيعة الحساب)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-mono">
               {trialBalanceData.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400 font-sans">
+                  <td colSpan={7} className="py-12 text-center text-slate-400 font-sans">
                     لا توجد حركات مرحلة بميزان المراجعة بعد
                   </td>
                 </tr>
               ) : (
                 trialBalanceData.map(r => (
                   <tr key={r.acc.id} className="hover:bg-slate-50">
-                    <td className="p-3 font-bold">{r.acc.code}</td>
+                    <td className="p-3 font-bold">
+                      {r.acc.code}
+                      {r.abnormal && (
+                        <span className="mr-1 text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-bold" title="رصيد معاكس لطبيعة الحساب">
+                          رصيد عكسي
+                        </span>
+                      )}
+                    </td>
                     <td className="p-3 font-sans font-bold text-slate-800">{r.acc.nameAr}</td>
                     <td className="p-3 text-center">{r.totalDebit > 0 ? r.totalDebit.toLocaleString('ar-EG', { maximumFractionDigits: 2 }) : '-'}</td>
                     <td className="p-3 text-center">{r.totalCredit > 0 ? r.totalCredit.toLocaleString('ar-EG', { maximumFractionDigits: 2 }) : '-'}</td>
                     <td className="p-3 text-center font-bold text-emerald-700">{r.closingDebit > 0 ? r.closingDebit.toLocaleString('ar-EG', { maximumFractionDigits: 2 }) : '-'}</td>
                     <td className="p-3 text-center font-bold text-rose-700">{r.closingCredit > 0 ? r.closingCredit.toLocaleString('ar-EG', { maximumFractionDigits: 2 }) : '-'}</td>
+                    <td className={`p-3 text-center font-bold ${r.net < 0 ? 'text-amber-700' : 'text-slate-800'}`}>
+                      {r.net.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} {r.isDebitNature ? 'مدين' : 'دائن'}
+                    </td>
                   </tr>
                 ))
               )}
@@ -205,10 +338,27 @@ export const ReportsView: React.FC = () => {
                   <td className="p-3 text-center">{tbTotalCreditMoves.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
                   <td className="p-3 text-center text-emerald-800">{tbTotalClosingDebit.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
                   <td className="p-3 text-center text-rose-800">{tbTotalClosingCredit.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                  <td className="p-3 text-center">
+                    {(tbTotalClosingDebit - tbTotalClosingCredit).toLocaleString('ar-EG', { maximumFractionDigits: 2 })}
+                  </td>
                 </tr>
               </tfoot>
             )}
           </table>
+        </div>
+      )}
+
+      {tbAbnormal.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900">
+          <p className="font-bold mb-1">حسابات برصيد معاكس لطبيعتها ({tbAbnormal.length})</p>
+          <p className="mb-2">هذه الأرصدة ظاهرة أعلاه كما هي ولم يتم إخفاؤها أو تصفيرها:</p>
+          <ul className="space-y-0.5 font-mono">
+            {tbAbnormal.map(r => (
+              <li key={r.acc.id}>
+                • {r.acc.code} — {r.acc.nameAr}: {Math.abs(r.net).toLocaleString('ar-EG', { maximumFractionDigits: 2 })} {r.isDebitNature ? 'دائن' : 'مدين'} (عكس طبيعة الحساب)
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -218,7 +368,10 @@ export const ReportsView: React.FC = () => {
           <div className="text-center pb-4 border-b border-slate-200">
             <h3 className="text-base font-black text-slate-900">{db.company.nameAr}</h3>
             <h4 className="text-sm font-bold text-slate-700 mt-1">قائمة الدخل الشامل (الأرباح والخسائر)</h4>
-            <span className="text-xs text-slate-400">عن الفترة المنتهية في {new Date().toLocaleDateString('ar-EG')} - العملة: ج.م</span>
+            <span className="text-xs text-slate-400">
+              {allPeriods ? 'عن كامل الحركات المرحلة حتى ' : `عن الفترة من ${fromDate} إلى ${toDate} - `}
+              العملة: ج.م
+            </span>
           </div>
 
           <div className="space-y-4 text-xs font-sans">
@@ -229,10 +382,10 @@ export const ReportsView: React.FC = () => {
                 <span className="font-mono text-emerald-700">{totalRevenue.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م</span>
               </div>
               <div className="p-2 space-y-1 pr-6 font-mono text-slate-600">
-                {revenueAccounts.map(a => (
-                  <div key={a.id} className="flex justify-between">
-                    <span>{a.nameAr}</span>
-                    <span>{(a.currentBalance || 0).toLocaleString('ar-EG')}</span>
+                {revenueRows.map(r => (
+                  <div key={r.acc.id} className="flex justify-between">
+                    <span>{r.acc.nameAr}</span>
+                    <span>{r.balance.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</span>
                   </div>
                 ))}
               </div>
@@ -245,10 +398,10 @@ export const ReportsView: React.FC = () => {
                 <span className="font-mono text-rose-700">({totalCogs.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}) ج.م</span>
               </div>
               <div className="p-2 space-y-1 pr-6 font-mono text-slate-600">
-                {cogsAccounts.map(a => (
-                  <div key={a.id} className="flex justify-between">
-                    <span>{a.nameAr}</span>
-                    <span>{(a.currentBalance || 0).toLocaleString('ar-EG')}</span>
+                {cogsRows.map(r => (
+                  <div key={r.acc.id} className="flex justify-between">
+                    <span>{r.acc.nameAr}</span>
+                    <span>{r.balance.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</span>
                   </div>
                 ))}
               </div>
@@ -267,10 +420,10 @@ export const ReportsView: React.FC = () => {
                 <span className="font-mono text-rose-700">({totalOperatingExpenses.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}) ج.م</span>
               </div>
               <div className="p-2 space-y-1 pr-6 font-mono text-slate-600">
-                {expenseAccounts.map(a => (
-                  <div key={a.id} className="flex justify-between">
-                    <span>{a.nameAr}</span>
-                    <span>{(a.currentBalance || 0).toLocaleString('ar-EG')}</span>
+                {expenseRows.map(r => (
+                  <div key={r.acc.id} className="flex justify-between">
+                    <span>{r.acc.nameAr}</span>
+                    <span>{r.balance.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</span>
                   </div>
                 ))}
               </div>
@@ -293,7 +446,9 @@ export const ReportsView: React.FC = () => {
           <div className="text-center pb-4 border-b border-slate-200">
             <h3 className="text-base font-black text-slate-900">{db.company.nameAr}</h3>
             <h4 className="text-sm font-bold text-slate-700 mt-1">قائمة المركز المالي (الميزانية العمومية)</h4>
-            <span className="text-xs text-slate-400">كما في {new Date().toLocaleDateString('ar-EG')} - العملة: ج.م</span>
+            <span className="text-xs text-slate-400">
+              كما في {new Date().toLocaleDateString('ar-EG')} — تراكمية على كامل الحركات المرحلة - العملة: ج.م
+            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
@@ -304,10 +459,10 @@ export const ReportsView: React.FC = () => {
                 <span className="font-mono">{totalAssets.toLocaleString('ar-EG')} ج.م</span>
               </div>
               <div className="divide-y divide-slate-100 font-mono">
-                {assetAccounts.map(a => (
-                  <div key={a.id} className="py-1.5 flex justify-between text-slate-700">
-                    <span className="font-sans">{a.nameAr}</span>
-                    <span>{(a.currentBalance || 0).toLocaleString('ar-EG')}</span>
+                {assetRows.map(r => (
+                  <div key={r.acc.id} className="py-1.5 flex justify-between text-slate-700">
+                    <span className="font-sans">{r.acc.nameAr}</span>
+                    <span className={r.balance < 0 ? 'text-amber-700 font-bold' : ''}>{r.balance.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</span>
                   </div>
                 ))}
               </div>
@@ -324,10 +479,10 @@ export const ReportsView: React.FC = () => {
                 <span className="font-mono">{totalLiabilities.toLocaleString('ar-EG')} ج.م</span>
               </div>
               <div className="divide-y divide-slate-100 font-mono">
-                {liabilityAccounts.map(a => (
-                  <div key={a.id} className="py-1.5 flex justify-between text-slate-700">
-                    <span className="font-sans">{a.nameAr}</span>
-                    <span>{(a.currentBalance || 0).toLocaleString('ar-EG')}</span>
+                {liabilityRows.map(r => (
+                  <div key={r.acc.id} className="py-1.5 flex justify-between text-slate-700">
+                    <span className="font-sans">{r.acc.nameAr}</span>
+                    <span className={r.balance < 0 ? 'text-amber-700 font-bold' : ''}>{r.balance.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</span>
                   </div>
                 ))}
               </div>
@@ -337,21 +492,35 @@ export const ReportsView: React.FC = () => {
                 <span className="font-mono">{totalEquity.toLocaleString('ar-EG')} ج.م</span>
               </div>
               <div className="divide-y divide-slate-100 font-mono">
-                {equityAccounts.map(a => (
-                  <div key={a.id} className="py-1.5 flex justify-between text-slate-700">
-                    <span className="font-sans">{a.nameAr}</span>
-                    <span>{(a.currentBalance || 0).toLocaleString('ar-EG')}</span>
+                {equityRows.map(r => (
+                  <div key={r.acc.id} className="py-1.5 flex justify-between text-slate-700">
+                    <span className="font-sans">{r.acc.nameAr}</span>
+                    <span>{r.balance.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</span>
                   </div>
                 ))}
                 <div className="py-1.5 flex justify-between text-emerald-700 font-bold">
                   <span className="font-sans">أرباح الفترة الحالية</span>
-                  <span>{netOperatingIncome.toLocaleString('ar-EG')}</span>
+                  <span>{netOperatingIncome.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
 
               <div className="p-3 bg-slate-900 text-white font-black flex justify-between rounded-xl font-mono text-sm shadow-md">
                 <span className="font-sans">إجمالي الخصوم وحقوق الملكية:</span>
-                <span>{(totalLiabilities + totalEquity).toLocaleString('ar-EG')} ج.م</span>
+                <span>{(totalLiabilities + totalEquity).toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م</span>
+              </div>
+
+              {/* F13: the balance-sheet identity is shown explicitly, never forced. */}
+              <div className={`p-3 rounded-xl border font-mono text-xs font-bold flex justify-between ${
+                Math.abs(bsImbalance) < 0.01
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-amber-50 border-amber-300 text-amber-900'
+              }`}>
+                <span className="font-sans">
+                  {Math.abs(bsImbalance) < 0.01
+                    ? 'الميزانية متوازنة: الأصول = الخصوم + حقوق الملكية'
+                    : 'فرق غير موزون (معروض كما هو دون إخفاء)'}
+                </span>
+                <span>{(totalAssets - (totalLiabilities + totalEquity)).toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م</span>
               </div>
             </div>
           </div>
@@ -363,23 +532,26 @@ export const ReportsView: React.FC = () => {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-4 bg-slate-50 border-b border-slate-200">
             <h3 className="font-bold text-xs text-slate-800">تقرير أعمار ديون العملاء (Aging of Receivables)</h3>
-            <p className="text-[11px] text-slate-500">توزيع المستحقات حسب فترات الاستحقاق (أقل من 30 يوماً، 31-60 يوماً، أكثر من 60 يوماً)</p>
+            <p className="text-[11px] text-slate-500">
+              محسوب من فواتير البيع المرحّلة الفعلية مطروحاً منها التخصيصات المحصّلة فعلياً، buckets: 0-30 / 31-60 / 61-90 / +90 يوم
+            </p>
           </div>
 
           <table className="w-full text-right text-xs">
-            <thead className="bg-slate-100 text-slate-700 font-bold">
-              <tr>
-                <th className="p-3.5">العميل</th>
-                <th className="p-3.5 text-center">الرصيد الكلي</th>
-                <th className="p-3.5 text-center">سارٍ (0 - 30 يوم)</th>
-                <th className="p-3.5 text-center">متأخر (31 - 60 يوم)</th>
-                <th className="p-3.5 text-center">أكثر من 60 يوماً</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 font-mono">
+            <thead className="bg-slate-100 text-slate-700 font-bold">                <tr>
+                  <th className="p-3.5">العميل</th>
+                  <th className="p-3.5 text-center">الرصيد الكلي</th>
+                  <th className="p-3.5 text-center">سارٍ (0 - 30 يوم)</th>
+                  <th className="p-3.5 text-center">متأخر (31 - 60 يوم)</th>
+                  <th className="p-3.5 text-center">متأخر (61 - 90 يوم)</th>
+                  <th className="p-3.5 text-center">متحمل (أكثر من 90 يوم)</th>
+                  <th className="p-3.5 text-center">رصيد دائن (دفع مقدمة)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-mono">
               {receivablesAging.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-400 font-sans">
+                  <td colSpan={7} className="py-12 text-center text-slate-400 font-sans">
                     لا توجد مديونيات عملاء قائمة
                   </td>
                 </tr>
@@ -387,14 +559,31 @@ export const ReportsView: React.FC = () => {
                 receivablesAging.map((r, idx) => (
                   <tr key={idx} className="hover:bg-slate-50">
                     <td className="p-3.5 font-sans font-bold text-slate-900">{r.cust.name}</td>
-                    <td className="p-3.5 text-center font-black text-slate-900">{r.total.toLocaleString('ar-EG')} {r.cust.currency}</td>
-                    <td className="p-3.5 text-center text-emerald-700 font-bold">{r.current.toLocaleString('ar-EG')}</td>
-                    <td className="p-3.5 text-center text-amber-700 font-bold">{r.over30.toLocaleString('ar-EG')}</td>
-                    <td className="p-3.5 text-center text-rose-700 font-bold">{r.over60.toLocaleString('ar-EG')}</td>
+                    <td className={`p-3.5 text-center font-black ${r.total < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
+                      {r.total.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="p-3.5 text-center text-emerald-700 font-bold">{r.b0_30.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center text-amber-700 font-bold">{r.b31_60.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center text-orange-700 font-bold">{r.b61_90.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center text-rose-700 font-bold">{r.b90plus.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center text-slate-600 font-bold">{r.credit > 0 ? r.credit.toLocaleString('ar-EG', { maximumFractionDigits: 2 }) : '-'}</td>
                   </tr>
                 ))
               )}
             </tbody>
+            {receivablesAging.length > 0 && (
+              <tfoot className="bg-slate-100 font-mono font-black text-slate-900 border-t-2 border-slate-300">
+                <tr>
+                  <td className="p-3.5 font-sans">الإجمالي</td>
+                  <td className="p-3.5 text-center">{agingTotals.total.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                  <td className="p-3.5 text-center text-emerald-800">{agingTotals.b0_30.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                  <td className="p-3.5 text-center text-amber-800">{agingTotals.b31_60.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                  <td className="p-3.5 text-center text-orange-800">{agingTotals.b61_90.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                  <td className="p-3.5 text-center text-rose-800">{agingTotals.b90plus.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                  <td className="p-3.5 text-center text-slate-700">{agingTotals.credit.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       )}
@@ -404,7 +593,10 @@ export const ReportsView: React.FC = () => {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 max-w-2xl mx-auto space-y-4">
           <div className="text-center pb-3 border-b border-slate-200">
             <h3 className="font-bold text-sm text-slate-900">إقرار ضريبة القيمة المضافة المصرية (VAT 14%)</h3>
-            <p className="text-xs text-slate-500">مطابقة ضريبة المدخلات (مشتريات خامات) مع ضريبة المخرجات (مبيعات محلية)</p>
+            <p className="text-xs text-slate-500">
+              محسوب من قيود الدفاتر الفعلية على 1113 (مدخلات) و2103 (مخرجات) —
+              {allPeriods ? ' كل الفترات' : ` الفترة من ${fromDate} إلى ${toDate}`}
+            </p>
           </div>
 
           <div className="space-y-3 text-xs">
@@ -433,6 +625,12 @@ export const ReportsView: React.FC = () => {
               <span className={`text-base font-black ${netVatPayable >= 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
                 {netVatPayable.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م
               </span>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 font-mono">
+              <div>عدد قيود ضريبة المدخلات (1113) في الفترة: <span className="font-bold">{inputVatDebits.length}</span></div>
+              <div>عدد قيود ضريبة المخرجات (2103) في الفترة: <span className="font-bold">{outputVatCredits.length}</span></div>
+              <div>فواتير التصدير (صفرية الضريبة) لا تُنشئ قيود على 2103 بالتصميم.</div>
             </div>
           </div>
         </div>

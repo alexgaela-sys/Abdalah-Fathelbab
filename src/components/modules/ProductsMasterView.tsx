@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { Item, ProductFamily, ItemType } from '../../types/erp';
+import { MasterDataService } from '../../services/masterData';
 
 export const ProductsMasterView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -104,22 +105,11 @@ export const ProductsMasterView: React.FC = () => {
   const handleToggleActive = (item: Item) => {
     const actionLabel = item.active ? 'تعطيل' : 'إعادة تنشيط';
     if (confirm(`هل أنت متأكد من ${actionLabel} الصنف "${item.nameAr}"؟`)) {
-      erpDb.mutate(draft => {
-        const target = draft.items.find(i => i.id === item.id);
-        if (target) {
-          target.active = !target.active;
-        }
-        draft.auditLogs.push({
-          id: `aud-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          userId: 'usr-admin',
-          userName: 'المشرف العام (Admin)',
-          module: 'سجل الأصناف',
-          action: 'edit',
-          recordId: item.id,
-          description: `${actionLabel} الصنف ${item.code} - ${item.nameAr}`,
-        });
+      // F15: guarded service write (no direct UI mutation).
+      const res = MasterDataService.setItemActive(item.id, !item.active, {
+        userId: 'usr-admin', userName: 'المشرف العام (Admin)',
       });
+      if (!res.success) alert(res.error || 'تعذر تغيير حالة الصنف');
     }
   };
 
@@ -134,8 +124,8 @@ export const ProductsMasterView: React.FC = () => {
       return;
     }
 
-    const itemPayload: Item = {
-      id: modalMode === 'edit' && selectedItem ? selectedItem.id : `item-${Date.now()}`,
+    const itemPayload: Omit<Item, 'id'> & { id?: string } = {
+      id: modalMode === 'edit' && selectedItem ? selectedItem.id : undefined,
       code: code.trim().toUpperCase(),
       barcode: barcode.trim(),
       nameAr: nameAr.trim(),
@@ -159,36 +149,17 @@ export const ProductsMasterView: React.FC = () => {
       active,
     };
 
-    erpDb.mutate(draft => {
-      if (modalMode === 'create') {
-        draft.items.push(itemPayload);
-        draft.auditLogs.push({
-          id: `aud-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          userId: 'usr-admin',
-          userName: 'المشرف العام (Admin)',
-          module: 'سجل الأصناف',
-          action: 'create',
-          recordId: itemPayload.id,
-          description: `إنشاء صنف جديد ${itemPayload.code} - ${itemPayload.nameAr}`,
-        });
-      } else if (modalMode === 'edit' && selectedItem) {
-        const idx = draft.items.findIndex(i => i.id === selectedItem.id);
-        if (idx !== -1) {
-          draft.items[idx] = itemPayload;
-        }
-        draft.auditLogs.push({
-          id: `aud-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          userId: 'usr-admin',
-          userName: 'المشرف العام (Admin)',
-          module: 'سجل الأصناف',
-          action: 'edit',
-          recordId: itemPayload.id,
-          description: `تعديل بيانات الصنف ${itemPayload.code} - ${itemPayload.nameAr}`,
-        });
-      }
-    });
+    // F15: guarded service write (no direct UI mutation).
+    const saveRes = modalMode === 'create'
+      ? MasterDataService.createItem(itemPayload as Omit<Item, 'id'>, { userId: 'usr-admin', userName: 'المشرف العام (Admin)' })
+      : selectedItem
+        ? MasterDataService.updateItem({ ...itemPayload, id: selectedItem.id } as Item, { userId: 'usr-admin', userName: 'المشرف العام (Admin)' })
+        : { success: false as const, error: 'لم يتم تحديد صنف للتعديل' };
+
+    if (!saveRes.success) {
+      alert(saveRes.error || 'تعذر حفظ بيانات الصنف');
+      return;
+    }
 
     setModalMode(null);
   };

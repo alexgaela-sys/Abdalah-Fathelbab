@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { AuthService } from '../../services/auth';
+import { MasterDataService } from '../../services/masterData';
 import { RoleName, User } from '../../types/erp';
 
 interface UserProfileModalProps {
@@ -78,39 +79,25 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       }
     }
 
-    const previousData = { ...currentUser };
-    let updatedUser: User | null = null;
-
-    erpDb.mutate(draft => {
-      const u = draft.users.find(x => x.id === currentUser.id);
-      if (u) {
-        u.name = name.trim();
-        u.username = username.trim().toLowerCase();
-        u.email = email.trim();
-        u.phone = phone.trim();
-        u.role = role;
-        u.active = active;
-        u.avatar = avatar;
-        if (newPassword) {
-          u.password = newPassword.trim();
-        }
-        updatedUser = { ...u };
-      }
-
-      // Record Audit Log for every modification
-      draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: currentUser.id,
-        userName: currentUser.name,
-        module: 'الملف الشخصي والمستخدمين',
-        action: 'edit',
-        recordId: currentUser.id,
-        previousValue: JSON.stringify({ name: previousData.name, username: previousData.username, role: previousData.role }),
-        newValue: JSON.stringify({ name: name.trim(), username: username.trim(), role, passwordChanged: !!newPassword }),
-        description: `تعديل بيانات الملف الشخصي للمستخدم (${currentUser.name}) [تحديث الصلاحيات وكلمة المرور]`,
-      });
+    // F15: guarded service write. Role/active changes require 'users:edit';
+    // a plain user editing their own profile can never self-elevate.
+    const profileRes = MasterDataService.updateOwnProfile({
+      userId: currentUser.id,
+      name,
+      username,
+      email,
+      phone,
+      avatar,
+      newPassword: newPassword || undefined,
+      requestedRole: role,
+      requestedActive: active,
+      options: { userId: currentUser.id, userName: currentUser.name },
     });
+    if (!profileRes.success) {
+      setErrorMsg(profileRes.error || 'تعذر حفظ بيانات الملف الشخصي');
+      return;
+    }
+    const updatedUser: User | null = profileRes.user || null;
 
     if (updatedUser) {
       // Update session in localStorage

@@ -79,10 +79,18 @@ export const TreasuryView: React.FC = () => {
       partyName: string;
       debit: number; // مدين - مقبوضات
       credit: number; // دائن - مدفوعات
+      postingSequence: string; // رقم القيد المحاسبي (ترتيب الترحيل الفعلي)
       runningBalance: number;
     }
 
     const rawRows: Array<Omit<TreasuryRow, 'runningBalance'>> = [];
+
+    // F10: deterministic ordering. Map journal entry id -> entry number so that
+    // same-day rows fall back to the actual GL posting sequence, never to array order.
+    const postingSeqByJournalId = new Map<string, string>();
+    db.journalEntries.forEach(jv => {
+      if (jv.isPosted && !jv.isReversed) postingSeqByJournalId.set(jv.id, jv.entryNumber);
+    });
 
     // From treasuryTransactions table
     db.treasuryTransactions.forEach(tx => {
@@ -101,6 +109,7 @@ export const TreasuryView: React.FC = () => {
             partyName: tx.partyName || '-',
             debit: isReceipt ? tx.amount : 0,
             credit: !isReceipt ? tx.amount : 0,
+            postingSequence: (tx.journalEntryId && postingSeqByJournalId.get(tx.journalEntryId)) || '',
           });
         }
       }
@@ -127,14 +136,25 @@ export const TreasuryView: React.FC = () => {
                 partyName: p.partyId,
                 debit: isReceipt ? p.amountEGP : 0,
                 credit: !isReceipt ? p.amountEGP : 0,
+                postingSequence: (p.journalEntryId && postingSeqByJournalId.get(p.journalEntryId)) || '',
               });
             }
           }
         }
       });
 
-    // Sort chronologically
-    rawRows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    // F10: deterministic chronological ordering.
+    // date -> GL posting sequence -> document number -> stable generated id.
+    // No accounting value is touched here; only the row presentation order.
+    rawRows.sort((a, b) => {
+      const byDate = new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (byDate !== 0) return byDate;
+      const byPosting = (a.postingSequence || '').localeCompare(b.postingSequence || '', 'en', { numeric: true });
+      if (byPosting !== 0) return byPosting;
+      const byDoc = (a.documentNumber || '').localeCompare(b.documentNumber || '', 'en', { numeric: true });
+      if (byDoc !== 0) return byDoc;
+      return a.id.localeCompare(b.id);
+    });
 
     let running = opening;
     let totalDebit = 0;

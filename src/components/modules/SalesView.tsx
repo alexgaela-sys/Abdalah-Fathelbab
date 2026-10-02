@@ -6,9 +6,16 @@ import {
 import { erpDb } from '../../services/db';
 import { WorkflowService } from '../../services/workflows';
 import { SalesChannel, PaymentMethod } from '../../types/erp';
+import { priceFor, channelForCustomerType, currencyForChannel, warehouseForChannel } from '../../services/pricing';
+import { PermissionService } from '../../services/permissions';
+import { AuthService } from '../../services/auth';
+import InvoicePrint from './InvoicePrint';
 
 export const SalesView: React.FC = () => {
   const db = erpDb.getSnapshot();
+  // F15: UI gating — the service (AuthorizationService) remains the real boundary.
+  const sessionRole = AuthService.getCurrentSession()?.user.role || 'Viewer';
+  const canCreateSales = PermissionService.canCreate(sessionRole, 'sales');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
@@ -23,6 +30,10 @@ export const SalesView: React.FC = () => {
   const [exchangeRate, setExchangeRate] = useState(db.company.currentUsdExchangeRate);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
+  // F5: invoice-level tax treatment (default = current behavior: line rates govern)
+  const [taxTreatment, setTaxTreatment] = useState<'taxable' | 'exempt'>('taxable');
+  // F7: printable document state
+  const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null);
 
   // Invoice Lines
   const [lines, setLines] = useState<Array<{
@@ -31,6 +42,8 @@ export const SalesView: React.FC = () => {
     freeQuantity: number;
     unitPrice: number;
     vatRate: number;
+    /** F4: set when the user manually typed a price — re-pricing skips these lines. */
+    priceOverridden?: boolean;
   }>>([]);
 
   const [formError, setFormError] = useState<string | null>(null);
@@ -41,14 +54,12 @@ export const SalesView: React.FC = () => {
   const salesReps = db.salesReps.filter(r => r.active);
   const warehouses = db.warehouses.filter(w => w.type === 'local_finished' || w.type === 'export_finished');
 
-  const addLine = () => {
+  const addLine = (e: React.MouseEvent<HTMLButtonElement>, channelOverride?: SalesChannel) => {
+    e.preventDefault();
     const firstItem = finishedProducts[0];
     if (!firstItem) return;
-    const price = channel === 'retail' 
-      ? firstItem.sellingPriceRetail 
-      : channel === 'wholesale' 
-      ? firstItem.sellingPriceWholesale 
-      : firstItem.sellingPriceExportUSD;
+    const effectiveChannel = channelOverride || channel;
+    const price = priceFor(firstItem, effectiveChannel);
 
     setLines([
       ...lines,
@@ -57,7 +68,8 @@ export const SalesView: React.FC = () => {
         quantity: 10,
         freeQuantity: 0,
         unitPrice: price,
-        vatRate: channel === 'export' ? 0 : firstItem.vatRate,
+        vatRate: effectiveChannel === 'export' ? 0 : firstItem.vatRate,
+        priceOverridden: false,
       }
     ]);
   };
@@ -66,21 +78,39 @@ export const SalesView: React.FC = () => {
     setLines(lines.filter((_, i) => i !== index));
   };
 
+  /** F4: re-price existing lines for a new channel — skipping manually overridden prices. */
+  const repriceLinesForChannel = (
+    currentLines: typeof lines,
+    effectiveChannel: SalesChannel,
+    applyVat: boolean
+  ): typeof lines =>
+    currentLines.map(l => {
+      const itm = finishedProducts.find(i => i.id === l.itemId);
+      if (!itm) return l;
+      return {
+        ...l,
+        unitPrice: l.priceOverridden ? l.unitPrice : priceFor(itm, effectiveChannel),
+        vatRate: applyVat ? (effectiveChannel === 'export' ? 0 : itm.vatRate) : l.vatRate,
+      };
+    });
+
   const updateLine = (index: number, field: string, val: any) => {
     const updated = [...lines];
     const current = { ...updated[index], [field]: val };
 
-    // Auto update price when item changes
+    // Auto update price when item changes (adopts the channel price, clearing any override)
     if (field === 'itemId') {
       const itm = finishedProducts.find(i => i.id === val);
       if (itm) {
-        current.unitPrice = channel === 'retail' 
-          ? itm.sellingPriceRetail 
-          : channel === 'wholesale' 
-          ? itm.sellingPriceWholesale 
-          : itm.sellingPriceExportUSD;
+        current.unitPrice = priceFor(itm, channel);
         current.vatRate = channel === 'export' ? 0 : itm.vatRate;
+        current.priceOverridden = false;
       }
+    }
+
+    // Manual price edit marks the line as overridden (F4)
+    if (field === 'unitPrice') {
+      current.priceOverridden = true;
     }
 
     // Auto promotion helper: e.g. Buy 10 get 1 free
@@ -92,17 +122,56 @@ export const SalesView: React.FC = () => {
     setLines(updated);
   };
 
+  /** F3: selecting a customer automatically applies their type:
+   *  channel + currency + warehouse + (re)pricing of non-overridden lines. */
+  const applyCustomer = (custId: string) => {
+    setCustomerId(custId);
+    const cust = db.customers.find(c => c.id === custId);
+    if (!cust) return;
+    const derivedChannel = channelForCustomerType(cust.customerType);
+    const derivedCurrency = currencyForChannel(derivedChannel);
+    const derivedWarehouse = warehouseForChannel(derivedChannel);
+    setChannel(derivedChannel);
+    setCurrency(derivedCurrency);
+    setWarehouseId(derivedWarehouse);
+    if (derivedChannel !== 'export') setExchangeRate(db.company.currentUsdExchangeRate);
+    setLines(prev => repriceLinesForChannel(prev, derivedChannel, taxTreatment === 'taxable'));
+  };
+
+  /** Manual channel switch keeps currency/warehouse consistent and re-prices (F3/F4). */
+  const applyChannel = (ch: SalesChannel) => {
+    setChannel(ch);
+    setCurrency(currencyForChannel(ch));
+    setWarehouseId(warehouseForChannel(ch));
+    setLines(prev => repriceLinesForChannel(prev, ch, taxTreatment === 'taxable'));
+  };
+
+  /** F5: switching tax treatment re-applies per-line rates; exempt forces 0%. */
+  const applyTaxTreatment = (treatment: 'taxable' | 'exempt') => {
+    setTaxTreatment(treatment);
+    setLines(prev => prev.map(l => {
+      if (treatment === 'exempt') return { ...l, vatRate: 0 };
+      const itm = finishedProducts.find(i => i.id === l.itemId);
+      return { ...l, vatRate: channel === 'export' ? 0 : (itm ? itm.vatRate : l.vatRate) };
+    }));
+  };
+
   const handleOpenCreate = () => {
-    if (customers.length > 0) setCustomerId(customers[0].id);
-    setChannel('wholesale');
-    setWarehouseId('wh-local');
-    setCurrency('EGP');
+    let defaultChannel: SalesChannel = 'wholesale';
+    if (customers.length > 0) {
+      setCustomerId(customers[0].id);
+      defaultChannel = channelForCustomerType(customers[0].customerType);
+    }
+    setChannel(defaultChannel);
+    setWarehouseId(warehouseForChannel(defaultChannel));
+    setCurrency(currencyForChannel(defaultChannel));
+    setTaxTreatment('taxable');
     setExchangeRate(db.company.currentUsdExchangeRate);
     setLines([]);
     setFormError(null);
     setCreditAlert(null);
     setShowCreateModal(true);
-    setTimeout(() => addLine(), 50);
+    setTimeout(() => addLine({ preventDefault() {} } as React.MouseEvent<HTMLButtonElement>, defaultChannel), 50);
   };
 
   const handleSaveInvoice = () => {
@@ -128,6 +197,7 @@ export const SalesView: React.FC = () => {
       exchangeRate,
       date,
       notes,
+      taxTreatment,
       lines: lines.map(l => ({
         itemId: l.itemId,
         quantity: Number(l.quantity),
@@ -170,7 +240,13 @@ export const SalesView: React.FC = () => {
 
         <button
           onClick={handleOpenCreate}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-md transition"
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs shadow-md transition ${
+            canCreateSales
+              ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 cursor-pointer'
+              : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+          }`}
+          disabled={!canCreateSales}
+          title={canCreateSales ? '' : 'لا تملك صلاحية إنشاء فواتير مبيعات'}
         >
           <Plus className="w-4 h-4" />
           <span>فاتورة بيع جديدة</span>
@@ -293,7 +369,7 @@ export const SalesView: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 mb-1">العميل</label>
                   <select
                     value={customerId}
-                    onChange={(e) => setCustomerId(e.target.value)}
+                    onChange={(e) => applyCustomer(e.target.value)}
                     className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                   >
                     {customers.map(c => (
@@ -308,22 +384,24 @@ export const SalesView: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 mb-1">القناة البيعية</label>
                   <select
                     value={channel}
-                    onChange={(e) => {
-                      const ch = e.target.value as SalesChannel;
-                      setChannel(ch);
-                      if (ch === 'export') {
-                        setCurrency('USD');
-                        setWarehouseId('wh-export');
-                      } else {
-                        setCurrency('EGP');
-                        setWarehouseId('wh-local');
-                      }
-                    }}
+                    onChange={(e) => applyChannel(e.target.value as SalesChannel)}
                     className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                   >
                     <option value="wholesale">جملة (Wholesale)</option>
                     <option value="retail">تجزئة (Retail)</option>
                     <option value="export">تصدير (Export - USD)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">المعالجة الضريبية (VAT)</label>
+                  <select
+                    value={taxTreatment}
+                    onChange={(e) => applyTaxTreatment(e.target.value as 'taxable' | 'exempt')}
+                    className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                  >
+                    <option value="taxable">خاضع للضريبة (Taxable - حسب الصنف)</option>
+                    <option value="exempt">معفى / صفر ضريبة (Exempt - 0%)</option>
                   </select>
                 </div>
 
@@ -459,7 +537,15 @@ export const SalesView: React.FC = () => {
                             />
                           </td>
                           <td className="p-2">
-                            <span className="font-mono">{line.vatRate * 100}%</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={Math.round(line.vatRate * 100)}
+                              onChange={(e) => updateLine(idx, 'vatRate', Math.max(0, Number(e.target.value)) / 100)}
+                              title="نسبة ضريبة القيمة المضافة للبند (قابلة للتعديل - 0% أو 14%)"
+                              className="w-full p-1.5 rounded-lg border border-slate-300 text-xs text-center font-mono"
+                            />
                           </td>
                           <td className="p-2 font-mono font-bold">
                             {lineTotal.toFixed(2)} {currency}
@@ -574,7 +660,14 @@ export const SalesView: React.FC = () => {
               </table>
             </div>
 
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end pt-2 gap-2">
+              <button
+                onClick={() => setPrintInvoiceId(selectedInvoice.id)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-300"
+              >
+                <Printer className="w-4 h-4" />
+                طباعة الفاتورة
+              </button>
               <button
                 onClick={() => setSelectedInvoice(null)}
                 className="px-4 py-2 rounded-xl bg-slate-800 text-white font-bold text-xs"
@@ -584,6 +677,11 @@ export const SalesView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* F7: printable invoice document (browser print / PDF) */}
+      {printInvoiceId && (
+        <InvoicePrint invoiceId={printInvoiceId} onClose={() => setPrintInvoiceId(null)} />
       )}
     </div>
   );

@@ -7,6 +7,7 @@ import {
 import { erpDb } from '../../services/db';
 import { Supplier } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
+import { MasterDataService } from '../../services/masterData';
 
 export const SuppliersView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -50,34 +51,24 @@ export const SuppliersView: React.FC = () => {
       return;
     }
 
-    const newSup: Supplier = {
-      id: `sup-${Date.now()}`,
+    // F15: writes go through the guarded master-data service (AuthorizationService).
+    const res = MasterDataService.createSupplier({
       code,
-      name: name.trim(),
-      taxNumber: taxNumber.trim(),
-      contactPerson: contactPerson.trim(),
-      phone: phone.trim(),
-      address: address.trim(),
+      name,
+      taxNumber,
+      contactPerson,
+      phone,
+      address,
       paymentTerms,
       currency,
       openingBalance: Number(openingBalanceInput) || 0,
-      currentBalance: Number(openingBalanceInput) || 0,
-      active: true,
-    };
-
-    erpDb.mutate(draft => {
-      draft.suppliers.push(newSup);
-      draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: 'usr-admin',
-        userName: 'المشرف العام (Admin)',
-        module: 'إدارة الموردين',
-        action: 'create',
-        recordId: newSup.id,
-        description: `إنشاء مورد جديد: ${newSup.code} - ${newSup.name}`,
-      });
+      userId: 'usr-admin',
+      userName: 'المشرف العام (Admin)',
     });
+    if (!res.success) {
+      alert(res.error || 'تعذر حفظ بيانات المورد');
+      return;
+    }
 
     setShowAddModal(false);
     setName('');

@@ -11,8 +11,8 @@ interface LoginViewProps {
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('12345');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -32,12 +32,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         setErrorMsg(result.messageAr || 'تعذر تسجيل الدخول، يرجى التحقق من البيانات');
       }
     }, 200);
-  };
-
-  const handleQuickFill = () => {
-    setUsername('admin');
-    setPassword('12345');
-    setErrorMsg(null);
   };
 
   return (
@@ -107,7 +101,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="admin"
+                  placeholder="أدخل اسم المستخدم"
                   required
                   className="field-input pl-3 pr-10 font-mono"
                 />
@@ -117,22 +111,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
             {/* Password */}
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="field-label">كلمة المرور (Password)</label>
-                <button
-                  type="button"
-                  onClick={handleQuickFill}
-                  className="text-[11px] text-brand-600 hover:text-brand-700 font-bold transition cursor-pointer"
-                >
-                  تعبئة بيانات الأدمن (admin / 12345)
-                </button>
-              </div>
+              <label className="field-label">كلمة المرور (Password)</label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="•••••"
+                  placeholder="أدخل كلمة المرور"
                   required
                   className="field-input pl-10 pr-10 font-mono tracking-wider"
                 />
@@ -145,18 +130,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
-              </div>
-            </div>
-
-            {/* Credentials Info Badge */}
-            <div className="p-3 rounded-xl bg-cream-100 border border-cream-200 text-xs space-y-1 font-semibold">
-              <div className="flex items-center justify-between">
-                <span className="text-cream-700">حساب المشرف العام:</span>
-                <span className="font-mono font-black text-brand-700">admin</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-cream-700">كلمة المرور الافتراضية:</span>
-                <span className="font-mono font-black text-brand-700">12345</span>
               </div>
             </div>
 

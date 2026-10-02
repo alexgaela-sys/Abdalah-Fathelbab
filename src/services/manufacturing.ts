@@ -40,6 +40,77 @@ export interface ProductionCostBreakdown {
 
 export class ManufacturingEngine {
   /**
+   * Issue a production order (F15: RBAC-guarded service write, replacing the direct
+   * UI mutation the manufacturing screen used to perform).
+   *
+   * The existing business rule is PRESERVED and not weakened: a product with no
+   * ACTIVE BOM can never be produced.
+   */
+  public static createProductionOrder(params: {
+    productId: string;
+    plannedQuantity: number;
+    targetMarket: 'local' | 'export';
+    destinationWarehouseId: string;
+    expectedCompletionDate: string;
+    notes?: string;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; order?: ProductionOrder; error?: string } {
+    const guard = AuthorizationService.enforce('manufacturing', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    if (!params.productId) return { success: false, error: 'يرجى اختيار المنتج التام' };
+    if (!(Number(params.plannedQuantity) > 0)) return { success: false, error: 'الكمية المخططة يجب أن تكون أكبر من صفر' };
+
+    const db = erpDb.getSnapshot();
+    const product = db.items.find(i => i.id === params.productId);
+    if (!product) return { success: false, error: 'المنتج التام غير مسجل بالنظام' };
+
+    // The "no active BOM => no production" rule (unchanged).
+    const bom = db.boms.find(b => (b.finishedItemId || b.productId) === params.productId && b.active);
+    if (!bom) return { success: false, error: 'لا توجد معادلة تصنيع (BOM) نشطة لهذا المنتج' };
+
+    const count = db.productionOrders.length + 1;
+    const orderNumber = `PRD-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
+    const order: ProductionOrder = {
+      id: generateErpId('pord'),
+      orderNumber,
+      productId: params.productId,
+      bomId: bom.id,
+      plannedQuantity: Number(params.plannedQuantity),
+      producedQuantity: 0,
+      defectiveQuantity: 0,
+      scrapQuantity: 0,
+      remainingQuantity: Number(params.plannedQuantity),
+      startDate: new Date().toISOString().split('T')[0],
+      expectedCompletionDate: params.expectedCompletionDate,
+      status: 'released',
+      destinationWarehouseId: params.destinationWarehouseId,
+      targetMarket: params.targetMarket,
+      notes: params.notes,
+      createdUserId: guard.userId,
+      createdAt: new Date().toISOString(),
+    };
+
+    erpDb.mutate(draft => {
+      draft.productionOrders.push(order);
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'الإنتاج والتصنيع',
+        action: 'create',
+        recordId: order.id,
+        description: `إنشاء أمر إنتاج جديد رقم ${order.orderNumber} للمنتج ${product.nameAr} لكمية ${order.plannedQuantity} (المعادلة ${bom.bomNumber || bom.id})`,
+      });
+    });
+
+    return { success: true, order };
+  }
+
+  /**
    * Resolve the active standard rate for a cost type, optionally scoped to product family.
    * Reads ONLY from StandardCostRate — no hardcoded 250/100/5/50/30 in logic.
    */
@@ -656,6 +727,201 @@ export class ManufacturingEngine {
         action: 'post',
         recordId: orderId,
         description: `إغلاق أمر إنتاج ${order.orderNumber}: تكلفة فعلية إجمالية ${breakdown.totalActualCost.toLocaleString('ar-EG')} ج.م، انحراف صافي ${netVariance.toLocaleString('ar-EG')} ج.م`,
+      });
+    });
+
+    return { success: true };
+  }
+
+  // ===================== BOM MASTER DATA — F1 (guarded, additive) =====================
+
+  private static validateBomPayload(params: {
+    finishedItemId: string;
+    lines: Array<{ materialItemId: string; quantityRequired: number; unitId: string; wastePercentage?: number }>;
+    baseQuantity: number;
+  }): string | null {
+    const db = erpDb.getSnapshot();
+    const product = db.items.find(i => i.id === params.finishedItemId);
+    if (!product) return 'المنتج التام غير مسجل بالنظام';
+    if (product.itemType !== 'finished_product') return 'المعادلة تصم لمنتج تام فقط';
+    if (!(Number(params.baseQuantity) > 0)) return 'كمية الأساس يجب أن تكون أكبر من صفر';
+    if (!params.lines || params.lines.length === 0) return 'يجب إضافة بنود واحدة على الأقل للمعادلة';
+    for (const l of params.lines) {
+      const mat = db.items.find(i => i.id === l.materialItemId);
+      if (!mat) return `مادة في بنود المعادلة غير مسجلة (${l.materialItemId})`;
+      if (!(Number(l.quantityRequired) > 0)) return `كمية المادة (${mat.nameAr}) يجب أن تكون أكبر من صفر`;
+      if (l.wastePercentage !== undefined && (Number(l.wastePercentage) < 0 || Number(l.wastePercentage) > 100)) {
+        return `نسبة الهالك (${mat.nameAr}) يجب أن تكون بين 0 و 100`;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Create a NEW BOM version for a finished product (V(n+1)), deactivating the
+   * previously active version — exactly one active BOM per product.
+   * Existing seeded BOMs are never touched unless the same product is chosen.
+   */
+  public static createBomVersion(params: {
+    finishedItemId: string;
+    baseQuantity: number;
+    unitId: string;
+    effectiveDate: string;
+    notes?: string;
+    lines: Array<{ materialItemId: string; quantityRequired: number; unitId: string; wastePercentage?: number }>;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; bom?: BomHeader; error?: string } {
+    const guard = AuthorizationService.enforce('manufacturing', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    const payloadError = this.validateBomPayload(params);
+    if (payloadError) return { success: false, error: payloadError };
+
+    const db = erpDb.getSnapshot();
+    const product = db.items.find(i => i.id === params.finishedItemId)!;
+    const productBoms = db.boms.filter(b => b.finishedItemId === params.finishedItemId);
+    const nextVersion = Math.max(0, ...productBoms.map(b => Number(b.version) || 0)) + 1;
+    const bomId = generateErpId('bom');
+    const bomNumber = `BOM-${product.code}-V${nextVersion}`;
+    const newBom: BomHeader = {
+      id: bomId,
+      bomNumber,
+      finishedItemId: params.finishedItemId,
+      version: nextVersion,
+      baseQuantity: Number(params.baseQuantity),
+      unitId: params.unitId,
+      active: true,
+      effectiveDate: params.effectiveDate,
+      notes: params.notes,
+      isTest: params.isTest,
+    };
+
+    erpDb.mutate(draft => {
+      // One active BOM per finished product: deactivate the previous active version(s).
+      draft.boms
+        .filter(b => b.finishedItemId === params.finishedItemId && b.active && b.id !== bomId)
+        .forEach(b => { b.active = false; });
+      draft.boms.push(newBom);
+      params.lines.forEach((l, idx) => {
+        draft.bomLines.push({
+          id: `bline-${bomId}-${idx + 1}`,
+          bomId,
+          materialItemId: l.materialItemId,
+          quantityRequired: Number(l.quantityRequired),
+          unitId: l.unitId,
+          wastePercentage: l.wastePercentage !== undefined && l.wastePercentage !== null ? Number(l.wastePercentage) : undefined,
+        });
+      });
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'إدارة الإنتاج والتكاليف',
+        action: 'create',
+        recordId: bomId,
+        description: `إنشاء معادلة تصنيع جديدة ${bomNumber} للمنتج ${product.nameAr} (${params.lines.length} بنود) وإيقاف النسخة السابقة`,
+      });
+    });
+
+    return { success: true, bom: newBom };
+  }
+
+  /** Edit BOM header and/or lines of an existing version (RBAC-guarded). */
+  public static updateBom(params: {
+    bomId: string;
+    baseQuantity?: number;
+    unitId?: string;
+    effectiveDate?: string;
+    notes?: string;
+    lines?: Array<{ materialItemId: string; quantityRequired: number; unitId: string; wastePercentage?: number }>;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; error?: string } {
+    const guard = AuthorizationService.enforce('manufacturing', 'edit', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    const db = erpDb.getSnapshot();
+    const bom = db.boms.find(b => b.id === params.bomId);
+    if (!bom) return { success: false, error: 'المعادلة غير موجودة' };
+    const baseQuantity = params.baseQuantity !== undefined ? Number(params.baseQuantity) : bom.baseQuantity;
+    const lines = params.lines;
+    if (lines) {
+      const payloadError = this.validateBomPayload({ finishedItemId: bom.finishedItemId || '', lines, baseQuantity });
+      if (payloadError) return { success: false, error: payloadError };
+    }
+
+    erpDb.mutate(draft => {
+      const target = draft.boms.find(b => b.id === params.bomId);
+      if (!target) return;
+      if (params.baseQuantity !== undefined) target.baseQuantity = Number(params.baseQuantity);
+      if (params.unitId !== undefined) target.unitId = params.unitId;
+      if (params.effectiveDate !== undefined) target.effectiveDate = params.effectiveDate;
+      if (params.notes !== undefined) target.notes = params.notes;
+      if (lines) {
+        draft.bomLines = draft.bomLines.filter(l => l.bomId !== params.bomId);
+        lines.forEach((l, idx) => {
+          draft.bomLines.push({
+            id: `bline-${params.bomId}-${idx + 1}`,
+            bomId: params.bomId,
+            materialItemId: l.materialItemId,
+            quantityRequired: Number(l.quantityRequired),
+            unitId: l.unitId,
+            wastePercentage: l.wastePercentage !== undefined && l.wastePercentage !== null ? Number(l.wastePercentage) : undefined,
+          });
+        });
+      }
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'إدارة الإنتاج والتكاليف',
+        action: 'edit',
+        recordId: params.bomId,
+        description: `تعديل معادلة تصنيع ${target.bomNumber || params.bomId}${lines ? ` (${lines.length} بنود)` : ''}`,
+      });
+    });
+
+    return { success: true };
+  }
+
+  /** Activate/deactivate a BOM version. Activating ensures ONE active BOM per product.
+   *  With no active BOM, production order creation stays blocked (existing guard). */
+  public static setBomActive(bomId: string, active: boolean, userId: string = 'usr-admin', userName: string = 'مدير الإنتاج'): { success: boolean; error?: string } {
+    const guard = AuthorizationService.enforce('manufacturing', 'edit', { userId, userName });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    const db = erpDb.getSnapshot();
+    const bom = db.boms.find(b => b.id === bomId);
+    if (!bom) return { success: false, error: 'المعادلة غير موجودة' };
+    if (active) {
+      const hasLines = db.bomLines.some(l => l.bomId === bomId);
+      if (!hasLines) return { success: false, error: 'لا يمكن تفعيل معادلة بدون بنود' };
+    }
+
+    erpDb.mutate(draft => {
+      const target = draft.boms.find(b => b.id === bomId);
+      if (!target) return;
+      target.active = active;
+      if (active) {
+        // Enforce exactly one active BOM per finished product.
+        draft.boms
+          .filter(b => b.finishedItemId === target.finishedItemId && b.active && b.id !== bomId)
+          .forEach(b => { b.active = false; });
+      }
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'إدارة الإنتاج والتكاليف',
+        action: 'edit',
+        recordId: bomId,
+        description: `${active ? 'تفعيل' : 'إيقاف'} معادلة التصنيع ${target.bomNumber || bomId}${active ? ' (مع إيقاف نسخة أخرى لنفس المنتج تلقائيًا)' : ''}`,
       });
     });
 

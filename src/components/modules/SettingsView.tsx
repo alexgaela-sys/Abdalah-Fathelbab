@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { Item, ProductFamily, Warehouse } from '../../types/erp';
+import { MasterDataService } from '../../services/masterData';
 
 interface SettingsViewProps {
   openTestRunner?: () => void;
@@ -37,11 +38,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
   const finishedProducts = db.items.filter(i => i.itemType === 'finished_product');
 
   const handleSaveCompany = () => {
-    erpDb.mutate(draft => {
-      draft.company.nameAr = companyNameAr;
-      draft.company.taxNumber = taxNumber;
-      draft.company.currentUsdExchangeRate = Number(usdRate);
+    // F15: guarded service write.
+    const res = MasterDataService.updateCompanySettings({
+      nameAr: companyNameAr,
+      taxNumber,
+      currentUsdExchangeRate: Number(usdRate),
+      userId: 'usr-admin',
+      userName: 'المشرف العام (Admin)',
     });
+    if (!res.success) {
+      alert(res.error || 'تعذر حفظ إعدادات الشركة');
+      return;
+    }
     alert('تم حفظ إعدادات الشركة وسعر الصرف بنجاح');
   };
 
@@ -51,62 +59,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
       return;
     }
 
-    const newProd: Item = {
-      id: `item-fp-${Date.now()}`,
-      code: prodCode,
-      nameAr: prodNameAr,
-      nameEn: prodNameEn,
-      itemType: 'finished_product',
-      productFamily: family,
-      flavor,
-      baseUnitId: 'unit-carton',
-      vatRate: Number(vatRate),
-      vatCategory: 'standard',
-      trackBatch: true,
-      trackExpiry: true,
-      standardCost: Number(stdCost),
-      actualCost: Number(stdCost),
-      sellingPriceRetail: Number(priceRetail),
-      sellingPriceWholesale: Number(priceWholesale),
-      sellingPriceExportUSD: Number(priceExportUsd),
-      active: true,
-      minStockLevel: 0,
-    };
-
-    erpDb.mutate(draft => {
-      draft.items.push(newProd);
-
-      // Auto create BOM V1 for this finished snack
-      const bomId = `bom-${newProd.id}`;
-      draft.boms.push({
-        id: bomId,
-        bomNumber: `BOM-${newProd.code}-V1`,
-        finishedItemId: newProd.id,
-        version: 1,
-        baseQuantity: 1000,
-        unitId: 'unit-carton',
+    // F15: guarded service write (product + its initial active BOM V1).
+    const res = MasterDataService.createFinishedProductWithBom({
+      item: {
+        code: prodCode,
+        nameAr: prodNameAr,
+        nameEn: prodNameEn,
+        itemType: 'finished_product',
+        productFamily: family,
+        flavor,
+        baseUnitId: 'unit-carton',
+        vatRate: Number(vatRate),
+        vatCategory: 'standard',
+        trackBatch: true,
+        trackExpiry: true,
+        standardCost: Number(stdCost),
+        actualCost: Number(stdCost),
+        sellingPriceRetail: Number(priceRetail),
+        sellingPriceWholesale: Number(priceWholesale),
+        sellingPriceExportUSD: Number(priceExportUsd),
         active: true,
-        effectiveDate: new Date().toISOString().split('T')[0],
-        notes: `معادلة تصنيع 1000 كرتونة من ${newProd.nameAr}`,
-      });
-
-      draft.bomLines.push(
-        { id: `bline-${bomId}-1`, bomId, materialItemId: 'item-raw-corn', quantityRequired: 800, unitId: 'unit-kg' },
-        { id: `bline-${bomId}-2`, bomId, materialItemId: 'item-raw-oil', quantityRequired: 180, unitId: 'unit-kg' },
-        { id: `bline-${bomId}-3`, bomId, materialItemId: 'item-pkg-carton', quantityRequired: 1000, unitId: 'unit-piece' }
-      );
-
-      draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: 'usr-admin',
-        userName: 'المشرف العام (Admin)',
-        module: 'إعدادات المنتجات',
-        action: 'create',
-        recordId: newProd.id,
-        description: `إنشاء منتج تام جديد: ${newProd.code} - ${newProd.nameAr}`,
-      });
+        minStockLevel: 0,
+      },
+      userId: 'usr-admin',
+      userName: 'المشرف العام (Admin)',
     });
+    if (!res.success) {
+      alert(res.error || 'تعذر حفظ المنتج');
+      return;
+    }
 
     setShowAddProductModal(false);
     setProdNameAr('');
@@ -423,9 +404,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
                         value={accId}
                         onChange={(e) => {
                           const newAccId = e.target.value;
-                          erpDb.mutate(draft => {
-                            draft.accountMappings[key] = newAccId;
+                          // F15: guarded service write.
+                          const res = MasterDataService.updateAccountMapping(key, newAccId, {
+                            userId: 'usr-admin', userName: 'المشرف العام (Admin)',
                           });
+                          if (!res.success) alert(res.error || 'تعذر تغيير ربط مفتاح الترحيل');
                         }}
                         className="w-full p-1.5 rounded-lg bg-slate-50 border border-slate-300 text-xs font-bold"
                       >

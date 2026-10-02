@@ -7,6 +7,7 @@ import {
 import { erpDb } from '../../services/db';
 import { Customer, QualityDestination } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
+import { MasterDataService } from '../../services/masterData';
 
 export const CustomersView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -94,10 +95,10 @@ export const CustomersView: React.FC = () => {
       return;
     }
 
-    const newCust: Customer = {
-      id: `cust-${Date.now()}`,
+    // F15: writes go through the guarded master-data service (AuthorizationService).
+    const res = MasterDataService.createCustomer({
       code,
-      name: name.trim(),
+      name,
       customerType,
       channel,
       address,
@@ -105,25 +106,15 @@ export const CustomersView: React.FC = () => {
       taxNumber,
       currency,
       creditLimit: Number(creditLimit) || 0,
-      currentBalance: Number(openingBalanceInput) || 0,
-      paymentTerms,
       openingBalance: Number(openingBalanceInput) || 0,
-      active: true,
-    };
-
-    erpDb.mutate(draft => {
-      draft.customers.push(newCust);
-      draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: 'usr-admin',
-        userName: 'المشرف العام (Admin)',
-        module: 'إدارة العملاء',
-        action: 'create',
-        recordId: newCust.id,
-        description: `إنشاء عميل جديد: ${newCust.code} - ${newCust.name}`,
-      });
+      paymentTerms,
+      userId: 'usr-admin',
+      userName: 'المشرف العام (Admin)',
     });
+    if (!res.success) {
+      alert(res.error || 'تعذر حفظ بيانات العميل');
+      return;
+    }
 
     setShowAddModal(false);
     setName('');

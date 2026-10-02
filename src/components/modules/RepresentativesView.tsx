@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { WorkflowService } from '../../services/workflows';
+import { AuthService } from '../../services/auth';
+import { PermissionService } from '../../services/permissions';
 import { SalesRepresentative, RepresentativeCustody } from '../../types/erp';
 
 export const RepresentativesView: React.FC = () => {
@@ -13,6 +15,14 @@ export const RepresentativesView: React.FC = () => {
   const [showOpenCustodyModal, setShowOpenCustodyModal] = useState(false);
   const [showLoadModal, setShowLoadModal] = useState<RepresentativeCustody | null>(null);
   const [showReturnModal, setShowReturnModal] = useState<RepresentativeCustody | null>(null);
+
+  // ---------- Representative master data (F2) ----------
+  const sessionRole = AuthService.getCurrentSession()?.user.role;
+  const canManageReps = sessionRole ? PermissionService.canCreate(sessionRole, 'representatives') : true;
+  const [showRepModal, setShowRepModal] = useState(false);
+  const [editingRep, setEditingRep] = useState<SalesRepresentative | null>(null);
+  const [repForm, setRepForm] = useState({ code: '', name: '', phone: '', targetMonthlySales: 0 });
+  const [repError, setRepError] = useState<string | null>(null);
 
   // Open Custody state
   const [selectedRepId, setSelectedRepId] = useState('');
@@ -30,6 +40,61 @@ export const RepresentativesView: React.FC = () => {
 
   const reps = db.salesReps.filter(r => r.active);
   const finishedProducts = db.items.filter(i => i.itemType === 'finished_product' && i.active);
+
+  const openRepCreate = () => {
+    setEditingRep(null);
+    setRepForm({ code: '', name: '', phone: '', targetMonthlySales: 0 });
+    setRepError(null);
+    setShowRepModal(true);
+  };
+
+  const openRepEdit = (rep: SalesRepresentative) => {
+    setEditingRep(rep);
+    setRepForm({
+      code: rep.code,
+      name: rep.name,
+      phone: rep.phone || '',
+      targetMonthlySales: Number(rep.targetMonthlySales) || 0,
+    });
+    setRepError(null);
+    setShowRepModal(true);
+  };
+
+  const handleSaveRep = () => {
+    setRepError(null);
+    const res = editingRep
+      ? WorkflowService.updateSalesRepresentative({
+          repId: editingRep.id,
+          name: repForm.name,
+          phone: repForm.phone,
+          targetMonthlySales: Number(repForm.targetMonthlySales) || 0,
+          userId: 'usr-admin',
+          userName: 'المشرف العام (Admin)',
+        })
+      : WorkflowService.createSalesRepresentative({
+          code: repForm.code,
+          name: repForm.name,
+          phone: repForm.phone,
+          targetMonthlySales: Number(repForm.targetMonthlySales) || 0,
+          userId: 'usr-admin',
+          userName: 'المشرف العام (Admin)',
+        });
+    if (!res.success) {
+      setRepError(res.error || 'تعذر حفظ بيانات المندوب');
+      return;
+    }
+    setShowRepModal(false);
+  };
+
+  const handleToggleRepActive = (rep: SalesRepresentative) => {
+    const res = WorkflowService.updateSalesRepresentative({
+      repId: rep.id,
+      active: !rep.active,
+      userId: 'usr-admin',
+      userName: 'المشرف العام (Admin)',
+    });
+    if (!res.success) alert(res.error || 'تعذر تغيير حالة المندوب');
+  };
 
   const handleOpenCustody = () => {
     if (!selectedRepId) return;
@@ -127,20 +192,40 @@ export const RepresentativesView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            if (reps.length > 0) setSelectedRepId(reps[0].id);
-            setShowOpenCustodyModal(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-md transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span>فتح عهدة مندوب جديدة</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={openRepCreate}
+            disabled={!canManageReps}
+            className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition disabled:opacity-40"
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>مندوب جديد</span>
+          </button>
+          <button
+            onClick={() => {
+              if (reps.length > 0) setSelectedRepId(reps[0].id);
+              setShowOpenCustodyModal(true);
+            }}
+            disabled={reps.length === 0}
+            title={reps.length === 0 ? 'سجّل مندوبي المبيعات أولاً من تبويب بيانات المندوبين' : ''}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-md transition disabled:opacity-40"
+          >
+            <Plus className="w-4 h-4" />
+            <span>فتح عهدة مندوب جديدة</span>
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-slate-200 pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+        <button
+          onClick={() => setActiveTab('reps')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+            activeTab === 'reps' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          بيانات المندوبين (Master Data)
+        </button>
         <button
           onClick={() => setActiveTab('custody')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
@@ -158,6 +243,184 @@ export const RepresentativesView: React.FC = () => {
           ربحية المناديب (صافي المساهمة)
         </button>
       </div>
+
+      {/* Representative master data (F2) */}
+      {activeTab === 'reps' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-bold text-xs text-slate-800">بيانات مندوبي المبيعات (Sales Representatives)</h3>
+              <p className="text-[11px] text-slate-500">
+                المندوب المسجل هنا يظهر مباشرة في فواتير المبيعات، العهدة، التسوية، المصروفات، وتقرير الربحية
+              </p>
+            </div>
+            <button
+              onClick={openRepCreate}
+              disabled={!canManageReps}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs disabled:opacity-40"
+            >
+              <Plus className="w-4 h-4" />
+              <span>تسجيل مندوب</span>
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-100 text-slate-700 font-bold">
+                <tr>
+                  <th className="p-3.5">الكود</th>
+                  <th className="p-3.5">الاسم</th>
+                  <th className="p-3.5">الهاتف</th>
+                  <th className="p-3.5 text-center">المستهدف الشهري (ج.م)</th>
+                  <th className="p-3.5 text-center">المبيعات المحققة</th>
+                  <th className="p-3.5 text-center">نسبة التحقق</th>
+                  <th className="p-3.5 text-center">الحالة</th>
+                  <th className="p-3.5 text-center">إجراءات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {db.salesReps.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-12 text-center text-slate-400">
+                      لا يوجد مندوبون مسجلون — اضغط «تسجيل مندوب» لإضافة أول مندوب
+                    </td>
+                  </tr>
+                ) : (
+                  db.salesReps.map(rep => {
+                    const achieved = db.salesInvoices
+                      .filter(i => i.status === 'posted' && i.repId === rep.id)
+                      .reduce((s, i) => s + (i.totalAmountEGP || 0), 0);
+                    const target = Number(rep.targetMonthlySales) || 0;
+                    const attainment = target > 0 ? (achieved / target) * 100 : 0;
+                    return (
+                      <tr key={rep.id} className="hover:bg-slate-50/80">
+                        <td className="p-3.5 font-mono font-bold text-slate-900">{rep.code}</td>
+                        <td className="p-3.5 font-bold text-slate-800">{rep.name}</td>
+                        <td className="p-3.5 font-mono text-slate-600">{rep.phone || '-'}</td>
+                        <td className="p-3.5 text-center font-mono">{target.toLocaleString('ar-EG')}</td>
+                        <td className="p-3.5 text-center font-mono font-bold text-slate-900">{achieved.toLocaleString('ar-EG')}</td>
+                        <td className="p-3.5 text-center font-mono font-bold">
+                          <span className={attainment >= 100 ? 'text-emerald-700' : 'text-amber-700'}>
+                            {attainment.toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            rep.active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {rep.active ? 'نشط' : 'موقوف'}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => openRepEdit(rep)}
+                              disabled={!canManageReps}
+                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs disabled:opacity-40"
+                            >
+                              تعديل
+                            </button>
+                            <button
+                              onClick={() => handleToggleRepActive(rep)}
+                              disabled={!canManageReps}
+                              className={`px-2 py-1 font-bold rounded-lg text-xs border disabled:opacity-40 ${
+                                rep.active
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}
+                            >
+                              {rep.active ? 'إيقاف' : 'تنشيط'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Representative create/edit modal */}
+      {showRepModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 text-right space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <h3 className="font-bold text-base text-slate-900">
+                {editingRep ? `تعديل بيانات المندوب: ${editingRep.name}` : 'تسجيل مندوب مبيعات جديد'}
+              </h3>
+              <button onClick={() => setShowRepModal(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+
+            {repError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">{repError}</div>
+            )}
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">كود المندوب</label>
+                  <input
+                    type="text"
+                    value={repForm.code}
+                    disabled={!!editingRep}
+                    onChange={(e) => setRepForm({ ...repForm, code: e.target.value })}
+                    placeholder="REP-01"
+                    className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono disabled:opacity-60"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">رقم الهاتف</label>
+                  <input
+                    type="text"
+                    value={repForm.phone}
+                    onChange={(e) => setRepForm({ ...repForm, phone: e.target.value })}
+                    className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">اسم المندوب</label>
+                <input
+                  type="text"
+                  value={repForm.name}
+                  onChange={(e) => setRepForm({ ...repForm, name: e.target.value })}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">المستهدف الشهري (ج.م)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={repForm.targetMonthlySales}
+                  onChange={(e) => setRepForm({ ...repForm, targetMonthlySales: Number(e.target.value) })}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+              <button
+                onClick={() => setShowRepModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={handleSaveRep}
+                className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md"
+              >
+                {editingRep ? 'حفظ التعديلات' : 'تسجيل المندوب'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activeTab === 'custody' && (
         <div className="space-y-4">

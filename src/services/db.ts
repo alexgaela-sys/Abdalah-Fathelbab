@@ -306,6 +306,8 @@ export const INITIAL_ACCOUNT_MAPPINGS: Record<string, string> = {
   rep_expense: 'acc-6106',
   export_costs: 'acc-6104',
   bank_fees: 'acc-6109',
+  // Credit side for export logistics cost accrual (Accrued Expenses - مصروفات مستحقة)
+  export_costs_payable: 'acc-2104',
 };
 
 export const INITIAL_PERIODS: AccountingPeriod[] = [

@@ -108,16 +108,14 @@ export const AccountingView: React.FC = () => {
   };
 
   const handleTogglePeriod = (periodId: string) => {
-    erpDb.mutate(draft => {
-      const p = draft.accountingPeriods.find(x => x.id === periodId);
-      if (p) {
-        p.isClosed = !p.isClosed;
-        if (p.isClosed) {
-          p.closedAt = new Date().toISOString();
-          p.closedBy = 'رئيس الحسابات';
-        }
-      }
-    });
+    // F15: period close/open goes through the guarded AccountingEngine API
+    // (AuthorizationService 'accounting:cancel'), never a direct UI mutation.
+    const period = db.accountingPeriods.find(x => x.id === periodId);
+    if (!period) return;
+    const res = AccountingEngine.setPeriodClosed(periodId, !period.isClosed, 'usr-admin', 'رئيس الحسابات');
+    if (!res.success) {
+      alert(res.error || 'تعذر تغيير حالة الفترة المالية');
+    }
   };
 
   // Requirement 6: General Ledger Computation from actual posted journal entries & lines
@@ -390,6 +388,10 @@ export const AccountingView: React.FC = () => {
                         <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-100 text-rose-700">
                           ملغى بقيد عكسي
                         </span>
+                      ) : jv.sourceDocumentType === 'journal_reversal' ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-200 text-slate-700">
+                          قيد عكسي (غير قابل للعكس مجدداً)
+                        </span>
                       ) : (
                         <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800">
                           مرحل نهائي
@@ -404,7 +406,7 @@ export const AccountingView: React.FC = () => {
                         >
                           عرض الأطراف
                         </button>
-                        {!jv.isReversed && (
+                        {!jv.isReversed && jv.sourceDocumentType !== 'journal_reversal' && (
                           <button
                             onClick={() => handleReverseJv(jv.id)}
                             title="إلغاء عبر قيد عكسي Reversal"

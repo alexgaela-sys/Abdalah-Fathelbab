@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Factory, Plus, Play, CheckCircle2, AlertCircle, 
-  Layers, ChevronRight, Recycle, Trash2, Calendar, PackageOpen
+  Layers, ChevronRight, Recycle, Trash2, Calendar, PackageOpen,
+  FileStack, Pencil, Power, GitBranch, Save
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { ManufacturingEngine } from '../../services/manufacturing';
+import { AuthService } from '../../services/auth';
+import { PermissionService } from '../../services/permissions';
 import { ProductionOrder, ProductionOrderStatus } from '../../types/erp';
 
 export const ManufacturingView: React.FC = () => {
@@ -12,6 +15,23 @@ export const ManufacturingView: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDailyOutputModal, setShowDailyOutputModal] = useState<ProductionOrder | null>(null);
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<ProductionOrder | null>(null);
+  const [activeSection, setActiveSection] = useState<'orders' | 'bom'>('orders');
+
+  // ---------- BOM management (F1) ----------
+  const sessionRole = AuthService.getCurrentSession()?.user.role;
+  const canEditBom = sessionRole ? PermissionService.canCreate(sessionRole, 'manufacturing') : true;
+  const [bomProductId, setBomProductId] = useState('');
+  const [bomHeader, setBomHeader] = useState({
+    baseQuantity: 1000,
+    unitId: 'unit-carton',
+    effectiveDate: new Date().toISOString().split('T')[0],
+    notes: '',
+  });
+  const [bomLines, setBomLines] = useState<Array<{
+    materialItemId: string; quantityRequired: number; unitId: string; wastePercentage: number;
+  }>>([]);
+  const [bomError, setBomError] = useState<string | null>(null);
+  const [bomNotice, setBomNotice] = useState<string | null>(null);
 
   // Form State for new production order
   const [productId, setProductId] = useState('');
@@ -31,6 +51,174 @@ export const ManufacturingView: React.FC = () => {
   const [outputDate, setOutputDate] = useState(new Date().toISOString().split('T')[0]);
 
   const finishedProducts = db.items.filter(i => i.itemType === 'finished_product' && i.active);
+  const allFinishedProducts = db.items.filter(i => i.itemType === 'finished_product');
+  const materialItems = db.items.filter(i => i.itemType === 'raw_material' || i.itemType === 'packaging_material');
+  const units = db.units || [];
+
+  // Active BOM + full version history for the selected finished product.
+  const bomsForProduct = useMemo(
+    () => db.boms.filter(b => (b.finishedItemId || b.productId) === bomProductId)
+      .sort((a, b) => (Number(b.version) || 0) - (Number(a.version) || 0)),
+    [db.boms, bomProductId]
+  );
+  const activeBom = bomsForProduct.find(b => b.active) || null;
+  const linesFor = (bomId: string) => db.bomLines.filter(l => l.bomId === bomId);
+
+  const loadBomIntoEditor = (bomId: string | null) => {
+    setBomError(null);
+    setBomNotice(null);
+    if (!bomId) {
+      setBomHeader({
+        baseQuantity: 1000,
+        unitId: 'unit-carton',
+        effectiveDate: new Date().toISOString().split('T')[0],
+        notes: '',
+      });
+      setBomLines([]);
+      return;
+    }
+    const bom = db.boms.find(b => b.id === bomId);
+    if (!bom) return;
+    setBomHeader({
+      baseQuantity: bom.baseQuantity,
+      unitId: bom.unitId,
+      effectiveDate: bom.effectiveDate || new Date().toISOString().split('T')[0],
+      notes: bom.notes || '',
+    });
+    setBomLines(linesFor(bomId).map(l => ({
+      materialItemId: l.materialItemId,
+      quantityRequired: l.quantityRequired,
+      unitId: l.unitId,
+      wastePercentage: Number(l.wastePercentage) || 0,
+    })));
+  };
+
+  const handleSelectBomProduct = (productId: string) => {
+    setBomProductId(productId);
+    const act = db.boms.find(b => (b.finishedItemId || b.productId) === productId && b.active);
+    loadBomIntoEditor(act ? act.id : null);
+  };
+
+  const handleAddBomLine = () => {
+    const first = materialItems[0];
+    if (!first) return;
+    setBomLines([...bomLines, {
+      materialItemId: first.id,
+      quantityRequired: 1,
+      unitId: first.baseUnitId,
+      wastePercentage: 0,
+    }]);
+  };
+
+  const handleUpdateBomLine = (idx: number, field: string, value: any) => {
+    const next = [...bomLines];
+    const line = { ...next[idx] };
+    if (field === 'materialItemId') {
+      const itm = materialItems.find(i => i.id === value);
+      if (itm) line.unitId = itm.baseUnitId;
+    }
+    (line as any)[field] = value;
+    next[idx] = line;
+    setBomLines(next);
+  };
+
+  const handleRemoveBomLine = (idx: number) => setBomLines(bomLines.filter((_, i) => i !== idx));
+
+  const handleSaveBom = () => {
+    setBomError(null);
+    setBomNotice(null);
+    if (!bomProductId) {
+      setBomError('يرجى اختيار المنتج التام أولاً');
+      return;
+    }
+    const payloadLines = bomLines.map(l => ({
+      materialItemId: l.materialItemId,
+      quantityRequired: Number(l.quantityRequired),
+      unitId: l.unitId,
+      wastePercentage: Number(l.wastePercentage) || undefined,
+    }));
+
+    if (activeBom) {
+      const res = ManufacturingEngine.updateBom({
+        bomId: activeBom.id,
+        baseQuantity: Number(bomHeader.baseQuantity),
+        unitId: bomHeader.unitId,
+        effectiveDate: bomHeader.effectiveDate,
+        notes: bomHeader.notes,
+        lines: payloadLines,
+        userId: 'usr-admin',
+        userName: 'مدير الإنتاج',
+      });
+      if (!res.success) {
+        setBomError(res.error || 'تعذر حفظ معادلة التصنيع');
+        return;
+      }
+      setBomNotice('تم تحديث بنود معادلة التصنيع النشطة بنجاح');
+      return;
+    }
+
+    const res = ManufacturingEngine.createBomVersion({
+      finishedItemId: bomProductId,
+      baseQuantity: Number(bomHeader.baseQuantity),
+      unitId: bomHeader.unitId,
+      effectiveDate: bomHeader.effectiveDate,
+      notes: bomHeader.notes,
+      lines: payloadLines,
+      userId: 'usr-admin',
+      userName: 'مدير الإنتاج',
+    });
+    if (!res.success) {
+      setBomError(res.error || 'تعذر حفظ معادلة التصنيع');
+      return;
+    }
+    setBomNotice('تم إنشاء معادلة تصنيع جديدة وتفعيلها — يمكنك الآن بناء أمر إنتاج لهذا المنتج');
+    // The editor already holds exactly what was saved; the version history below
+    // re-renders from the fresh snapshot, so no reload from the stale snapshot here.
+  };
+
+  const handleNewBomVersion = () => {
+    setBomError(null);
+    setBomNotice(null);
+    if (!bomProductId) {
+      setBomError('يرجى اختيار المنتج التام أولاً');
+      return;
+    }
+    if (bomLines.length === 0) {
+      setBomError('يجب تعبئة بنود الخامات قبل إنشاء نسخة جديدة');
+      return;
+    }
+    const res = ManufacturingEngine.createBomVersion({
+      finishedItemId: bomProductId,
+      baseQuantity: Number(bomHeader.baseQuantity),
+      unitId: bomHeader.unitId,
+      effectiveDate: bomHeader.effectiveDate || new Date().toISOString().split('T')[0],
+      notes: bomHeader.notes,
+      lines: bomLines.map(l => ({
+        materialItemId: l.materialItemId,
+        quantityRequired: Number(l.quantityRequired),
+        unitId: l.unitId,
+        wastePercentage: Number(l.wastePercentage) || undefined,
+      })),
+      userId: 'usr-admin',
+      userName: 'مدير الإنتاج',
+    });
+    if (!res.success) {
+      setBomError(res.error || 'تعذر إنشاء نسخة جديدة من المعادلة');
+      return;
+    }
+    setBomNotice('تم إنشاء نسخة جديدة وتعطيل النسخة السابقة تلقائياً (نسخة نشطة واحدة فقط لكل منتج)');
+  };
+
+  const handleToggleBomActive = (bomId: string, nextActive: boolean) => {
+    setBomError(null);
+    setBomNotice(null);
+    const res = ManufacturingEngine.setBomActive(bomId, nextActive, 'usr-admin', 'مدير الإنتاج');
+    if (!res.success) {
+      setBomError(res.error || 'تعذر تغيير حالة المعادلة');
+      return;
+    }
+    setBomNotice(nextActive ? 'تم تفعيل المعادلة.' : 'تم إيقاف المعادلة. لن يُسمح ببناء أمر إنتاج بدون معادلة نشطة.');
+  };
 
   const handleOpenCreate = () => {
     if (finishedProducts.length > 0) setProductId(finishedProducts[0].id);
@@ -44,60 +232,22 @@ export const ManufacturingView: React.FC = () => {
 
   const handleSaveOrder = () => {
     setFormError(null);
-    if (!productId) {
-      setFormError('يرجى اختيار المنتج التام');
-      return;
-    }
-    if (plannedQty <= 0) {
-      setFormError('الكمية المخططة يجب أن تكون أكبر من صفر');
-      return;
-    }
-
-    const bom = db.boms.find(b => b.finishedItemId === productId && b.active);
-    if (!bom) {
-      setFormError('لا توجد معادلة تصنيع (BOM) نشطة لهذا المنتج');
-      return;
-    }
-
-    const count = db.productionOrders.length + 1;
-    const orderNumber = `PRD-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
-    const orderId = `pord-${Date.now()}`;
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    erpDb.mutate(draft => {
-      draft.productionOrders.push({
-        id: orderId,
-        orderNumber,
-        productId,
-        bomId: bom.id,
-        plannedQuantity: plannedQty,
-        producedQuantity: 0,
-        defectiveQuantity: 0,
-        scrapQuantity: 0,
-        remainingQuantity: plannedQty,
-        startDate: todayStr,
-        expectedCompletionDate: expectedDate,
-        status: 'released',
-        destinationWarehouseId: destinationWhId,
-        targetMarket,
-        notes: orderNotes,
-        createdUserId: 'usr-admin',
-        createdAt: new Date().toISOString(),
-      });
-
-      // Audit Log
-      draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        userId: 'usr-admin',
-        userName: 'مدير الإنتاج',
-        module: 'الإنتاج والتصنيع',
-        action: 'create',
-        recordId: orderId,
-        description: `إنشاء أمر إنتاج جديد رقم ${orderNumber} لكمية ${plannedQty} كرتونة`,
-      });
+    // F15: guarded service write. The "active BOM required" rule is enforced
+    // inside ManufacturingEngine.createProductionOrder and is not weakened.
+    const res = ManufacturingEngine.createProductionOrder({
+      productId,
+      plannedQuantity: plannedQty,
+      targetMarket,
+      destinationWarehouseId: destinationWhId,
+      expectedCompletionDate: expectedDate,
+      notes: orderNotes,
+      userId: 'usr-admin',
+      userName: 'مدير الإنتاج',
     });
-
+    if (!res.success) {
+      setFormError(res.error || 'تعذر إنشاء أمر الإنتاج');
+      return;
+    }
     setShowCreateModal(false);
   };
 
@@ -157,20 +307,324 @@ export const ManufacturingView: React.FC = () => {
         <div>
           <h2 className="text-xl font-black text-slate-900">إدارة الإنتاج والتصنيع (Manufacturing)</h2>
           <p className="text-xs text-slate-500 mt-1">
-            أوامر التشغيل متعددة الأيام، معادلات التصنيع (BOM)، معالجة التوالف والسكراب، وتتبع تكلفة المنتج
+            أوامر التشغيل متعددة الأيام، معادلات التصنيع (BOM)، معالجة التوالف والسكراب، وتتبع تكلفة المنتج — راجع تبويب «إدارة معادلات التصنيع (BOM)» لإنشاء/تعديل/تفعيل المعادلة قبل بناء أمر الإنتاج
           </p>
         </div>
 
+        <div className="flex items-center gap-2">
+          {activeSection === 'orders' && (
+            <button
+              onClick={handleOpenCreate}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>أمر إنتاج جديد</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Section switcher: production orders / BOM master data */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
         <button
-          onClick={handleOpenCreate}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition"
+          onClick={() => setActiveSection('orders')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+            activeSection === 'orders' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
         >
-          <Plus className="w-4 h-4" />
-          <span>أمر إنتاج جديد</span>
+          <Factory className="w-3.5 h-3.5" />
+          أوامر الإنتاج
+        </button>
+        <button
+          onClick={() => setActiveSection('bom')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+            activeSection === 'bom' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <FileStack className="w-3.5 h-3.5" />
+          إدارة معادلات التصنيع (BOM)
         </button>
       </div>
 
+      {activeSection === 'bom' && (
+        <div className="space-y-4">
+          {/* Product selector + active BOM summary */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+              <div className="flex-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1">اختر المنتج التام لإدارة معادلته</label>
+                <select
+                  value={bomProductId}
+                  onChange={(e) => handleSelectBomProduct(e.target.value)}
+                  className="w-full p-2.5 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold"
+                >
+                  <option value="">— اختر منتجاً تاماً —</option>
+                  {allFinishedProducts.map(fp => {
+                    const act = db.boms.find(b => (b.finishedItemId || b.productId) === fp.id && b.active);
+                    return (
+                      <option key={fp.id} value={fp.id}>
+                        {fp.code} — {fp.nameAr} {act ? `(نسخة نشطة V${act.version})` : '(لا توجد معادلة نشطة)'}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <div className="text-xs font-sans rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+                {activeBom ? (
+                  <span className="text-emerald-800 font-bold">
+                    المعادلة النشطة: {activeBom.bomNumber || activeBom.id} (V{activeBom.version}) — ساري في {activeBom.effectiveDate}
+                  </span>
+                ) : bomProductId ? (
+                  <span className="text-rose-700 font-bold">لا توجد معادلة نشطة — أمر الإنتاج لهذا المنتج محظور حتى إنشاء/تفعيل معادلة</span>
+                ) : (
+                  <span className="text-slate-500">اختر منتجاً لعرض معادلته</span>
+                )}
+              </div>
+            </div>
+
+            {/* Version history */}
+            {bomProductId && bomsForProduct.length > 0 && (
+              <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-100 text-slate-700 font-bold">
+                    <tr>
+                      <th className="p-2.5">رقم المعادلة</th>
+                      <th className="p-2.5 text-center">النسخة</th>
+                      <th className="p-2.5 text-center">كمية الأساس</th>
+                      <th className="p-2.5 text-center">عدد البنود</th>
+                      <th className="p-2.5 text-center">ساري في</th>
+                      <th className="p-2.5 text-center">الحالة</th>
+                      <th className="p-2.5 text-center">إجراءات</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {bomsForProduct.map(b => (
+                      <tr key={b.id} className={b.active ? 'bg-emerald-50/50' : 'hover:bg-slate-50'}>
+                        <td className="p-2.5 font-mono font-bold text-slate-900">{b.bomNumber || b.id}</td>
+                        <td className="p-2.5 text-center font-mono font-black text-slate-900">V{b.version}</td>
+                        <td className="p-2.5 text-center font-mono">{b.baseQuantity}</td>
+                        <td className="p-2.5 text-center font-mono">{linesFor(b.id).length}</td>
+                        <td className="p-2.5 text-center font-mono text-slate-600">{b.effectiveDate}</td>
+                        <td className="p-2.5 text-center">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                            b.active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {b.active ? 'نشطة' : 'مؤرشفة'}
+                          </span>
+                        </td>
+                        <td className="p-2.5">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => loadBomIntoEditor(b.id)}
+                              disabled={!canEditBom}
+                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs disabled:opacity-40"
+                            >
+                              <Pencil className="w-3 h-3 inline" /> تحرير
+                            </button>
+                            <button
+                              onClick={() => handleToggleBomActive(b.id, !b.active)}
+                              disabled={!canEditBom}
+                              className={`px-2 py-1 font-bold rounded-lg text-xs disabled:opacity-40 ${
+                                b.active ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              }`}
+                            >
+                              <Power className="w-3 h-3 inline" /> {b.active ? 'إيقاف' : 'تفعيل'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* BOM editor */}
+          {bomProductId && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-xs text-slate-800">
+                    {activeBom ? `تحرير بنود ${activeBom.bomNumber || 'المعادلة'} (V${activeBom.version})` : 'إنشاء معادلة تصنيع جديدة'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">خامات ومواد تعبئة + الكمية + الوحدة + نسبة الهالك + كمية الأساس</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleSaveBom}
+                    disabled={!canEditBom}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs disabled:opacity-40"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    {activeBom ? 'حفظ تعديلات المعادلة النشطة' : 'حفظ وتفعيل المعادلة'}
+                  </button>
+                  <button
+                    onClick={handleNewBomVersion}
+                    disabled={!canEditBom}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs disabled:opacity-40"
+                  >
+                    <GitBranch className="w-3.5 h-3.5" />
+                    إنشاء نسخة جديدة
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 space-y-3">
+                {bomError && (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">{bomError}</div>
+                )}
+                {bomNotice && (
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">{bomNotice}</div>
+                )}
+                {!canEditBom && (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold">
+                    دورك الحالي لا يملك صلاحية إنشاء/تعديل معادلات التصنيع — العرض فقط
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">كمية الأساس (وحدة الإنتاج)</label>
+                    <input
+                      type="number" min="1"
+                      value={bomHeader.baseQuantity}
+                      onChange={(e) => setBomHeader({ ...bomHeader, baseQuantity: Number(e.target.value) })}
+                      className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">وحدة الأساس</label>
+                    <select
+                      value={bomHeader.unitId}
+                      onChange={(e) => setBomHeader({ ...bomHeader, unitId: e.target.value })}
+                      className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                    >
+                      {units.map(u => (
+                        <option key={u.id} value={u.id}>{u.nameAr} ({u.code})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">تاريخ السريان</label>
+                    <input
+                      type="date"
+                      value={bomHeader.effectiveDate}
+                      onChange={(e) => setBomHeader({ ...bomHeader, effectiveDate: e.target.value })}
+                      className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات المعادلة</label>
+                  <input
+                    type="text"
+                    value={bomHeader.notes}
+                    onChange={(e) => setBomHeader({ ...bomHeader, notes: e.target.value })}
+                    placeholder="مثال: تركيبة محسنة بانخفاض هالك التعبئة 1%"
+                    className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                  />
+                </div>
+
+                {/* BOM lines */}
+                <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-100 text-slate-700 font-bold">
+                      <tr>
+                        <th className="p-2.5">الخامة / مادة التعبئة</th>
+                        <th className="p-2.5 w-32 text-center">الكمية المطلوبة</th>
+                        <th className="p-2.5 w-28 text-center">الوحدة</th>
+                        <th className="p-2.5 w-28 text-center">نسبة الهالك %</th>
+                        <th className="p-2.5 w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {bomLines.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-8 text-center text-slate-400">
+                            لا توجد بنود — أضف خامة أو مادة تعبئة للبدء
+                          </td>
+                        </tr>
+                      ) : (
+                        bomLines.map((l, idx) => (
+                          <tr key={idx}>
+                            <td className="p-2">
+                              <select
+                                value={l.materialItemId}
+                                onChange={(e) => handleUpdateBomLine(idx, 'materialItemId', e.target.value)}
+                                disabled={!canEditBom}
+                                className="w-full p-1.5 rounded-lg border border-slate-300 text-xs bg-white disabled:opacity-60"
+                              >
+                                {materialItems.map(itm => (
+                                  <option key={itm.id} value={itm.id}>
+                                    {itm.nameAr} [{itm.itemType === 'raw_material' ? 'خام' : 'تعبئة'}]
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="number" min="0" step="0.01"
+                                value={l.quantityRequired}
+                                onChange={(e) => handleUpdateBomLine(idx, 'quantityRequired', Number(e.target.value))}
+                                disabled={!canEditBom}
+                                className="w-full p-1.5 rounded-lg border border-slate-300 text-xs text-center font-mono disabled:opacity-60"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <select
+                                value={l.unitId}
+                                onChange={(e) => handleUpdateBomLine(idx, 'unitId', e.target.value)}
+                                disabled={!canEditBom}
+                                className="w-full p-1.5 rounded-lg border border-slate-300 text-xs bg-white disabled:opacity-60"
+                              >
+                                {units.map(u => (
+                                  <option key={u.id} value={u.id}>{u.nameAr}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="number" min="0" max="100" step="0.1"
+                                value={l.wastePercentage}
+                                onChange={(e) => handleUpdateBomLine(idx, 'wastePercentage', Number(e.target.value))}
+                                disabled={!canEditBom}
+                                className="w-full p-1.5 rounded-lg border border-slate-300 text-xs text-center font-mono disabled:opacity-60"
+                              />
+                            </td>
+                            <td className="p-2 text-center">
+                              <button
+                                onClick={() => handleRemoveBomLine(idx)}
+                                disabled={!canEditBom}
+                                className="text-rose-500 font-bold disabled:opacity-40"
+                              >
+                                ✕
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <button
+                  onClick={handleAddBomLine}
+                  disabled={!canEditBom || materialItems.length === 0}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs disabled:opacity-40"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  إضافة خامة / مادة تعبئة
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Production Orders Table */}
+      {activeSection === 'orders' && (
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
           <h3 className="font-bold text-xs text-slate-800">أوامر الإنتاج والتشغيل الجارية</h3>
@@ -280,6 +734,7 @@ export const ManufacturingView: React.FC = () => {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Create Order Modal */}
       {showCreateModal && (
@@ -291,8 +746,20 @@ export const ManufacturingView: React.FC = () => {
             </div>
 
             {formError && (
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
-                {formError}
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex flex-wrap items-center justify-between gap-2">
+                <span>{formError}</span>
+                {formError.includes('معادلة تصنيع') && (
+                  <button
+                    onClick={() => {
+                      setShowCreateModal(false);
+                      setActiveSection('bom');
+                      handleSelectBomProduct(productId);
+                    }}
+                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px]"
+                  >
+                    الذهاب إلى إدارة معادلات التصنيع (BOM)
+                  </button>
+                )}
               </div>
             )}
 

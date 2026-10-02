@@ -3,7 +3,8 @@ import {
   Calculator, TrendingUp, TrendingDown, Clock, 
   Layers, BarChart2, Plus, CheckCircle2
 } from 'lucide-react';
-import { erpDb } from '../../services/db';
+import { erpDb, generateErpId } from '../../services/db';
+import { AuthorizationService } from '../../services/authorization';
 import { ManufacturingEngine } from '../../services/manufacturing';
 import { StandardCostRate, ProductFamily } from '../../types/erp';
 
@@ -29,8 +30,15 @@ export const CostingView: React.FC = () => {
   };
 
   const handleSaveRate = () => {
+    // F15: guarded service write (AuthorizationService 'costing:create').
+    const guard = AuthorizationService.enforce('costing', 'create', { userId: 'usr-admin', userName: 'رئيس costing' });
+    if (!guard.allowed) {
+      alert(guard.error || 'ليس لديك صلاحية إضافة معدل تكلفة معياري');
+      return;
+    }
+
     const newRate: StandardCostRate = {
-      id: `scr-${Date.now()}`,
+      id: generateErpId('scr'),
       costType,
       costTypeNameAr: costTypeNameMap[costType] || costType,
       baseQuantity: baseQty,
@@ -42,6 +50,13 @@ export const CostingView: React.FC = () => {
 
     erpDb.mutate(draft => {
       draft.standardCostRates.push(newRate);
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId, userName: guard.userName,
+        module: 'إدارة التكاليف', action: 'create', recordId: newRate.id,
+        description: `إضافة معدل تكلفة معياري ${newRate.costTypeNameAr} بمعدل ${newRate.rate} على أساس ${newRate.baseQuantity}`,
+      });
     });
 
     setShowAddRateModal(false);

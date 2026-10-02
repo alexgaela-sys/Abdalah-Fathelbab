@@ -215,6 +215,17 @@ export class AccountingEngine {
       return { success: false, error: 'تم إلغاء وعكس هذا القيد المحاسبي مسبقًا' };
     }
 
+    // F11: a reversal entry is ITSELF a reversal of its source journal. Reversing it
+    // again would post a second, duplicate reversal of the same economic event while
+    // the original journal stays flagged isReversed — i.e. the same transaction ends up
+    // reversed twice. Independent (non-reversal) journals remain fully reversible.
+    if (original.sourceDocumentType === 'journal_reversal') {
+      return {
+        success: false,
+        error: `هذا القيد عكسي للقيد ${original.reference || original.entryNumber} ولا يجوز عكس القيد العكسي مرة أخرى؛ يتم التصحيح بقيد تسوية مستقل`,
+      };
+    }
+
     // Verify current date period is open
     const todayStr = new Date().toISOString().split('T')[0];
     const periodCheck = this.isPeriodOpen(todayStr);
@@ -285,6 +296,50 @@ export class AccountingEngine {
     });
 
     return { success: true, reversalEntry };
+  }
+
+  /**
+   * Close or reopen an accounting period (F11). This is itself an authorization-
+   * protected action: 'cancel' on accounting (Super Admin / Chief Accountant).
+   */
+  public static setPeriodClosed(
+    periodId: string,
+    closed: boolean,
+    userId: string = 'usr-admin',
+    userName: string = 'رئيس الحسابات'
+  ): { success: boolean; error?: string } {
+    const guard = AuthorizationService.enforce('accounting', 'cancel', { userId, userName } as GuardOptions);
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    const db = erpDb.getSnapshot();
+    const period = db.accountingPeriods.find(p => p.id === periodId);
+    if (!period) return { success: false, error: 'الفترة المالية غير موجودة' };
+    if (period.isClosed === closed) return { success: false, error: `الفترة المالية (${period.nameAr}) بالفعل ${closed ? 'مغلقة' : 'مفتوحة'}` };
+
+    erpDb.mutate(draft => {
+      const p = draft.accountingPeriods.find(x => x.id === periodId);
+      if (!p) return;
+      p.isClosed = closed;
+      if (closed) {
+        p.closedAt = new Date().toISOString();
+        p.closedBy = guard.userName;
+      } else {
+        p.closedAt = undefined;
+        p.closedBy = undefined;
+      }
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'المحاسبة العامة',
+        action: closed ? 'cancel' : 'edit',
+        recordId: periodId,
+        description: `${closed ? 'إقفال' : 'إعادة فتح'} الفترة المالية ${p.nameAr}`,
+      });
+    });
+
+    return { success: true };
   }
 
   /**

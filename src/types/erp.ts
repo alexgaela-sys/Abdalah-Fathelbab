@@ -310,6 +310,8 @@ export interface SalesInvoice {
   journalEntryId?: string;
   notes?: string;
   exportShipmentId?: string;
+  /** Invoice-level tax treatment. Absent = legacy/current behavior (line rates govern). */
+  taxTreatment?: 'taxable' | 'exempt';
   isTest?: boolean;
 }
 
@@ -508,7 +510,16 @@ export interface Cheque {
   statusDate: string;
   relatedTransactionId?: string;
   notes?: string;
+  /** Last journal posted for the latest status transition (informational). */
   journalEntryId?: string;
+  /**
+   * Journal that recognized the trade balance for this cheque (set exactly once):
+   * incoming → Dr 1104 | Cr receivable (+ customer balance),
+   * outgoing → Dr supplier payable | Cr 2102 (+ supplier balance).
+   * PATH A sets it to the payment journal; PATH B (registerCheque) posts its own.
+   * Bounce reverses ONLY when this exists (never fabricates an adjustment).
+   */
+  receiptJournalId?: string;
   isTest?: boolean;
 }
 
@@ -599,6 +610,9 @@ export interface ExportShipment {
   collectionStatus: 'pending' | 'partially_collected' | 'collected';
   collectedUsd: number;
   status: 'draft' | 'shipped' | 'delivered' | 'closed';
+  /** Linked export sales invoice (additive/backward compatible). When set, revenue/FX/cost
+   *  figures are derived from the real invoice and revenue/COGS are posted ONLY by the invoice. */
+  salesInvoiceId?: string;
   notes?: string;
   isTest?: boolean;
 }

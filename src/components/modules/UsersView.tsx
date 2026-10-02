@@ -4,6 +4,7 @@ import {
   Lock, Check, Trash2, Key
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
+import { MasterDataService } from '../../services/masterData';
 import { RoleName, User } from '../../types/erp';
 
 export const UsersView: React.FC = () => {
@@ -13,7 +14,8 @@ export const UsersView: React.FC = () => {
   // Form State
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('12345');
+  // F15: no default password — the admin must type one explicitly.
+  const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<RoleName>('Chief Accountant');
 
@@ -38,26 +40,30 @@ export const UsersView: React.FC = () => {
       alert('يرجى إدخال اسم المستخدم وبياناته');
       return;
     }
+    if (!password.trim()) {
+      alert('كلمة المرور مطلوبة — لا يوجد كلمة مرور افتراضية (الحد الأدنى 6 أحرف)');
+      return;
+    }
 
-    const newUser: User = {
-      id: `usr-${Date.now()}`,
-      username: username.trim().toLowerCase(),
-      password: password.trim() || '12345',
-      name: name.trim(),
-      email: email.trim(),
+    // F15: guarded service write; password is mandatory (no insecure default).
+    const res = MasterDataService.createUser({
+      username,
+      password,
+      name,
+      email,
       role,
-      active: true,
-      createdAt: new Date().toISOString(),
-    };
-
-    erpDb.mutate(draft => {
-      draft.users.push(newUser);
+      userId: 'usr-admin',
+      userName: 'المشرف العام (Admin)',
     });
+    if (!res.success) {
+      alert(res.error || 'تعذر إنشاء المستخدم');
+      return;
+    }
 
     setShowAddModal(false);
     setName('');
     setUsername('');
-    setPassword('12345');
+    setPassword('');
     setEmail('');
   };
 
@@ -67,9 +73,10 @@ export const UsersView: React.FC = () => {
       return;
     }
     if (confirm(`هل أنت متأكد من حذف المستخدم "${userName}"؟`)) {
-      erpDb.mutate(draft => {
-        draft.users = draft.users.filter(u => u.id !== userId);
+      const res = MasterDataService.deleteUser(userId, {
+        userId: 'usr-admin', userName: 'المشرف العام (Admin)',
       });
+      if (!res.success) alert(res.error || 'تعذر حذف المستخدم');
     }
   };
 
@@ -194,12 +201,12 @@ export const UsersView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">كلمة المرور (Password)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">كلمة المرور (Password) — إجبارية، 6 أحرف فأكثر</label>
                 <input
-                  type="text"
+                  type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="12345"
+                  placeholder="••••••"
                   className="w-full p-2.5 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
                 />
               </div>

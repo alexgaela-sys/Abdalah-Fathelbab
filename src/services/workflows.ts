@@ -12,6 +12,7 @@ import {
 import { InventoryEngine } from './inventory';
 import { AccountingEngine } from './accounting';
 import { AuthorizationService } from './authorization';
+import { isChannelCustomerMismatch } from './pricing';
 
 interface JLine {
   id: string;
@@ -293,6 +294,8 @@ export class WorkflowService {
     date: string;
     notes?: string;
     exportShipmentId?: string;
+    /** Invoice-level tax treatment. Absent = current behavior (per-line vatRate governs). */
+    taxTreatment?: 'taxable' | 'exempt';
     lines: Array<{
       itemId: string;
       quantity: number;
@@ -314,6 +317,18 @@ export class WorkflowService {
     const db = erpDb.getSnapshot();
     const customer = db.customers.find(c => c.id === params.customerId);
     if (!customer) return { success: false, error: 'العميل غير مسجل بالنظام' };
+
+    // F3 service-level validation: the export boundary (currency/warehouse/VAT/revenue
+    // account) must never disagree with the customer master type. Retail↔wholesale
+    // overrides remain allowed (pricing only — not dangerous).
+    if (isChannelCustomerMismatch(customer.customerType, params.channel)) {
+      return {
+        success: false,
+        error: params.channel === 'export'
+          ? `قناة التصدير تتطلب عميل تصدير مسجل: العميل (${customer.name}) من نوع ${customer.customerType}`
+          : `العميل (${customer.name}) مسجل كعميل تصدير ويجب اختيار قناة التصدير (USD / مستودع WH-03)`
+      };
+    }
 
     const warehouse = db.warehouses.find(w => w.id === params.warehouseId);
     if (!warehouse) return { success: false, error: 'المستودع غير صالح' };
@@ -345,7 +360,10 @@ export class WorkflowService {
     params.lines.forEach(l => {
       const item = itemsMap.get(l.itemId);
       const lineSub = l.quantity * l.unitPrice * (1 - ((l.discount || 0) / 100));
-      const lineVat = lineSub * (l.vatRate || 0);
+      // F5: invoice-level 'exempt' forces zero-rated lines regardless of item rate;
+      // absent/ taxable keeps the passed (item-derived or user-overridden) rates.
+      const effectiveRate = params.taxTreatment === 'exempt' ? 0 : (l.vatRate || 0);
+      const lineVat = lineSub * effectiveRate;
       subtotal += lineSub;
       vatAmount += lineVat;
 
@@ -401,7 +419,7 @@ export class WorkflowService {
         id: '',
         journalEntryId: '',
         accountId: debitAcc,
-        accountCode: debitAcc === 'acc-1101' ? '1101' : debitAcc === 'acc-1102' ? '1102' : '1105',
+        accountCode: debitAcc === 'acc-1101' ? '1101' : debitAcc === 'acc-1102' ? '1102' : debitAcc === 'acc-1106' ? '1106' : '1105',
         accountNameAr: debitAcc === 'acc-1101' ? 'الخزينة' : debitAcc === 'acc-1102' ? 'البنك' : `حساب العميل: ${customer.name}`,
         debit: totalAmountEGP,
         credit: 0,
@@ -530,6 +548,7 @@ export class WorkflowService {
         journalEntryId: jvResult.entry?.id,
         notes: params.notes,
         exportShipmentId: params.exportShipmentId,
+        taxTreatment: params.taxTreatment,
       };
 
       draft.salesInvoices.push(createdInvoice);
@@ -538,7 +557,7 @@ export class WorkflowService {
       params.lines.forEach((l, idx) => {
         const item = itemsMap.get(l.itemId);
         const lSub = l.quantity * l.unitPrice * (1 - ((l.discount || 0) / 100));
-        const lVat = lSub * (l.vatRate || 0);
+        const lVat = lSub * (params.taxTreatment === 'exempt' ? 0 : (l.vatRate || 0));
 
         draft.salesInvoiceLines.push({
           id: `sinvl-${invoiceId}-${idx + 1}`,
@@ -550,7 +569,7 @@ export class WorkflowService {
           unitPrice: l.unitPrice,
           unitCost: item?.standardCost || 50,
           discount: l.discount || 0,
-          vatRate: l.vatRate,
+          vatRate: params.taxTreatment === 'exempt' ? 0 : l.vatRate,
           vatAmount: lVat,
           totalBeforeVat: lSub,
           netTotal: lSub + lVat,
@@ -688,6 +707,9 @@ export class WorkflowService {
           status: 'received',
           statusDate: params.date,
           relatedTransactionId: paymentId,
+          // F8: the payment journal IS the recognition of this cheque (Dr 1104 | Cr receivable
+          // + customer balance already updated above) — never post it again downstream.
+          receiptJournalId: jvResult.entry?.id,
         });
       }
 
@@ -853,6 +875,9 @@ export class WorkflowService {
           status: 'issued',
           statusDate: params.date,
           relatedTransactionId: paymentId,
+          // F8: the payment journal IS the recognition of this cheque (Dr 2101 | Cr 2102
+          // + supplier balance already updated above) — never post it again downstream.
+          receiptJournalId: jvResult.entry?.id,
         });
       }
 
@@ -1117,12 +1142,19 @@ export class WorkflowService {
     const exchangeRate = params.invoiceId ? (db.salesInvoices.find(i => i.id === params.invoiceId)?.exchangeRate || 1) : 1;
 
     // Financial reversal amounts (net revenue + VAT at original selling prices)
+    // F5: when the return references the original invoice, inherit the ACTUAL posted
+    // VAT rate of that sale (taxable stays taxable, exempt/zero-rated stays zero).
+    const originalInvoiceLines = params.invoiceId
+      ? db.salesInvoiceLines.filter(sl => sl.invoiceId === params.invoiceId)
+      : [];
     let revenueNet = 0;
     let vatTotal = 0;
     params.lines.forEach(l => {
+      const origLine = originalInvoiceLines.find(sl => sl.itemId === l.itemId);
+      const effectiveVatRate = origLine ? (origLine.vatRate || 0) : (l.vatRate || 0);
       const lineNet = l.quantity * l.unitPrice;
       revenueNet += lineNet;
-      vatTotal += lineNet * (l.vatRate || 0);
+      vatTotal += lineNet * effectiveVatRate;
     });
     const totalAmount = revenueNet + vatTotal;
 
@@ -1583,32 +1615,69 @@ export class WorkflowService {
     portCosts: number;
     customsCost: number;
     otherExportCosts: number;
+    /** Link to the export sales invoice (F12). When provided, revenue/FX/cost are
+     *  derived from the real invoice — revenue/COGS/stock are posted ONLY by the invoice. */
     salesInvoiceId?: string;
     notes?: string;
     userId?: string;
     userName?: string;
     isTest?: boolean;
   }): { success: boolean; shipment?: ExportShipment; error?: string } {
+    // RBAC: creating export shipments requires 'create' on export
+    const guard = AuthorizationService.enforce('export', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
     const db = erpDb.getSnapshot();
     const customer = db.customers.find(c => c.id === params.customerId);
     if (!customer) return { success: false, error: 'عميل التصدير غير مسجل بالنظام' };
-    if (params.exchangeRate <= 0) return { success: false, error: 'سعر الصرف يجب أن يكون أكبر من صفر' };
-    if (Number(params.usdRevenue) <= 0) return { success: false, error: 'إيراد التصدير بالدولار يجب أن يكون أكبر من صفر' };
+
+    // F12: link to the real export sales invoice when requested.
+    // Revenue (4103), receivable (1106), COGS (5102) and WH-03 stock are posted by
+    // createSalesInvoice(channel='export') — the shipment NEVER re-posts them.
+    let usdRevenue = Number(params.usdRevenue);
+    let exchangeRate = Number(params.exchangeRate);
+    let productCost = Number(params.productCost);
+    let linkedInvoice: SalesInvoice | undefined;
+    if (params.salesInvoiceId) {
+      const inv = db.salesInvoices.find(i => i.id === params.salesInvoiceId);
+      if (!inv) return { success: false, error: 'فاتورة التصدير المرتبطة غير موجودة' };
+      if (inv.channel !== 'export') return { success: false, error: 'يمكن ربط الشحنة بفاتورة بيع قناة التصدير فقط' };
+      if (inv.currency !== 'USD') return { success: false, error: 'فاتورة التصدير يجب أن تكون بالدولار USD' };
+      if (inv.customerId !== params.customerId) return { success: false, error: 'عميل الشحنة لا يطابق عميل الفاتورة المرتبطة' };
+      if (inv.exportShipmentId && inv.exportShipmentId !== undefined) {
+        // already linked to a (different) shipment
+        const existing = db.exportShipments.find(s => s.id === inv.exportShipmentId);
+        if (existing) return { success: false, error: `الفاتورة ${inv.invoiceNumber} مرتبطة بالفعل بالشحنة ${existing.shipmentNumber}` };
+      }
+      if (db.exportShipments.some(s => s.salesInvoiceId === inv.id)) {
+        return { success: false, error: `الفاتورة ${inv.invoiceNumber} مرتبطة بالفعل بشحنة أخرى` };
+      }
+      if (!inv.journalEntryId) return { success: false, error: 'فاتورة التصدير يجب أن تكون مرحلة بالدفاتر قبل ربطها بشحنة' };
+      linkedInvoice = inv;
+      // Derive the shipment's commercial figures from the actual invoice (F12.4).
+      usdRevenue = inv.subtotal;
+      exchangeRate = inv.exchangeRate;
+      productCost = inv.cogsTotal; // actual COGS (EGP) already posted by the invoice
+    }
+
+    if (exchangeRate <= 0) return { success: false, error: 'سعر الصرف يجب أن يكون أكبر من صفر' };
+    if (usdRevenue <= 0) return { success: false, error: 'إيراد التصدير بالدولار يجب أن يكون أكبر من صفر' };
 
     const shipmentId = generateErpId('shp');
     const shipmentNumber = nextDocNumber(erpDb.getSnapshot() as unknown as Record<string, unknown>, 'exportShipments', 'EXP-SHP', 3, 'shipmentNumber');
 
-    const egpValue = params.usdRevenue * params.exchangeRate;
-    const totalCosts = params.productCost + params.shippingCost + params.portCosts + params.customsCost + params.otherExportCosts;
+    const egpValue = usdRevenue * exchangeRate;
+    const totalCosts = productCost + params.shippingCost + params.portCosts + params.customsCost + params.otherExportCosts;
     const netProfitEGP = egpValue - totalCosts;
     const profitMarginPercent = egpValue > 0 ? (netProfitEGP / egpValue) * 100 : 0;
 
-    // Post the logistics/export costs to GL: Dr Export Costs 6104 | Cr Accrued Expenses 2104
+    // Logistics cost journal: Dr Export Costs 6104 | Cr Accrued Expenses 2104.
+    // (F12.1: NEVER credits 6101 Salaries & Wages — fixed mapping key export_costs_payable.)
     let jvId: string | undefined;
     const costTotal = params.shippingCost + params.portCosts + params.customsCost + params.otherExportCosts;
     if (costTotal > 0) {
       const exportCostAcc = AccountingEngine.getMappedAccountId('export_costs', 'acc-6104');
-      const accruedAcc = AccountingEngine.getMappedAccountId('expenses_default', 'acc-6101');
+      const accruedAcc = AccountingEngine.getMappedAccountId('export_costs_payable', 'acc-2104');
       const jv = AccountingEngine.postJournal({
         date: params.shipmentDate,
         reference: shipmentNumber,
@@ -1619,7 +1688,7 @@ export class WorkflowService {
           jl(exportCostAcc, costTotal, 0, costTotal, 1, 'EGP', `تكاليف شحن ونولون وتخليص شحنة ${shipmentNumber}`, 'cc-export'),
           jl(accruedAcc, 0, costTotal, costTotal, 1, 'EGP', `استحقاق تكاليف شحنة تصدير ${shipmentNumber}`, 'cc-export'),
         ],
-      }, params.userId, params.userName, params.isTest);
+      }, guard.userId, guard.userName, params.isTest);
       if (!jv.success) return { success: false, error: jv.error };
       jvId = jv.entry?.id;
     }
@@ -1634,10 +1703,10 @@ export class WorkflowService {
         portOfOrigin: params.portOfOrigin,
         destinationPort: params.destinationPort,
         containerNumber: params.containerNumber,
-        usdRevenue: params.usdRevenue,
-        exchangeRate: params.exchangeRate,
+        usdRevenue,
+        exchangeRate,
         egpValue,
-        productCost: params.productCost,
+        productCost,
         shippingCost: params.shippingCost,
         portCosts: params.portCosts,
         customsCost: params.customsCost,
@@ -1648,20 +1717,27 @@ export class WorkflowService {
         collectionStatus: 'pending',
         collectedUsd: 0,
         status: 'shipped',
+        salesInvoiceId: params.salesInvoiceId,
         notes: params.notes,
         isTest: params.isTest,
       };
       draft.exportShipments.push(created);
 
+      // Back-link on the invoice (SalesInvoice.exportShipmentId — additive field).
+      if (linkedInvoice) {
+        const inv = draft.salesInvoices.find(i => i.id === linkedInvoice!.id);
+        if (inv) inv.exportShipmentId = shipmentId;
+      }
+
       draft.auditLogs.push({
         id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
-        userId: params.userId || 'usr-admin',
-        userName: params.userName || 'مدير التصدير',
+        userId: guard.userId,
+        userName: guard.userName,
         module: 'التصدير',
         action: 'create',
         recordId: shipmentId,
-        description: `تسجيل شحنة تصدير ${shipmentNumber}: إيراد ${params.usdRevenue.toLocaleString('en-US')}$ بسعر صرف ${params.exchangeRate}، صافي ربح ${netProfitEGP.toLocaleString('ar-EG')} ج.م (هامش ${profitMarginPercent.toFixed(1)}%)`,
+        description: `تسجيل شحنة تصدير ${shipmentNumber}${linkedInvoice ? ` مرتبطة بالفاتورة ${linkedInvoice.invoiceNumber}` : ''}: إيراد ${usdRevenue.toLocaleString('en-US')}$ بسعر صرف ${exchangeRate}، صافي ربح ${netProfitEGP.toLocaleString('ar-EG')} ج.م (هامش ${profitMarginPercent.toFixed(1)}%)`,
       });
     });
 
@@ -1682,6 +1758,10 @@ export class WorkflowService {
     userName?: string;
     isTest?: boolean;
   }): { success: boolean; error?: string } {
+    // RBAC: recording export collections requires 'create' on export
+    const guard = AuthorizationService.enforce('export', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
     const db = erpDb.getSnapshot();
     const shipment = db.exportShipments.find(s => s.id === params.shipmentId);
     if (!shipment) return { success: false, error: 'شحنة التصدير غير موجودة' };
@@ -1726,7 +1806,7 @@ export class WorkflowService {
       sourceDocumentType: 'export_collection',
       sourceDocumentId: shipment.id,
       lines,
-    }, params.userId, params.userName, params.isTest);
+    }, guard.userId, guard.userName, params.isTest);
     if (!jv.success) return { success: false, error: jv.error };
 
     erpDb.mutate(draft => {
@@ -1741,11 +1821,19 @@ export class WorkflowService {
       const bankAcct = draft.bankAccounts.find(b => b.id === bank.id);
       if (bankAcct) bankAcct.currentBalance += params.amountUsd; // USD balance
 
+      // F12.6: the collection credits export receivable 1106 (booked at the shipment's
+      // historical rate) — the export customer's denormalized balance must fall by the
+      // same economic amount it accrued, keeping the card synchronized with the GL.
+      const cust = draft.customers.find(c => c.id === shipment.customerId);
+      if (cust) {
+        cust.currentBalance = (cust.currentBalance || 0) - (cust.currency === 'USD' ? params.amountUsd : bookedEGP);
+      }
+
       draft.auditLogs.push({
         id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
-        userId: params.userId || 'usr-admin',
-        userName: params.userName || 'محاسب التصدير',
+        userId: guard.userId,
+        userName: guard.userName,
         module: 'التصدير - التحصيلات',
         action: 'post',
         recordId: shipment.id,
@@ -1942,12 +2030,25 @@ export class WorkflowService {
   }
 
   /**
-   * 14. Cheque status change with the correct accounting effect for each transition.
-   *  - incoming -> under_collection: Dr Cheques under collection | Cr Customer Receivable
-   *  - under_collection -> collected: Dr Bank | Cr Cheques under collection
-   *  - outgoing -> paid: Dr Cheques Payable | Cr Bank
-   *  - incoming bounced/returned: Dr Customer Receivable | Cr Cheques under collection (re-debt customer)
-   *  - outgoing returned/bounced: Dr Cheques Payable | Cr Supplier Payable (re-debt supplier)
+   * 14. Cheque status change — ONE coherent accounting lifecycle (F8/F9).
+   * Recognition (settling the trade balance into the cheques account) happens EXACTLY
+   * once per cheque and is tracked by Cheque.receiptJournalId:
+   *  - incoming recognition:  Dr 1104 Cheques under collection | Cr 1105/1106 receivable
+   *                           (+ customer.currentBalance -= amount)
+   *      PATH A (recordCustomerPayment) posts it at payment time and stamps the id here;
+   *      PATH B (registerCheque) posts it at registration; legacy cheques get it posted
+   *      lazily on their first transition (ensureRecognition).
+   *  - outgoing recognition:  Dr 2101 supplier payable | Cr 2102 Cheques payable
+   *                           (+ supplier.currentBalance -= amount)
+   * Transition journals (posted only when legal — enforced state machine):
+   *  - received -> under_collection: recognition if missing, otherwise state change only
+   *    (the 1104 debit already exists — never double-post the receivable).
+   *  - -> collected (incoming): recognition if missing, then Dr Bank | Cr 1104.
+   *  - -> paid (outgoing): recognition if missing, then Dr 2102 | Cr Bank.
+   *  - -> bounced/returned: reverse ONLY the recognition that was actually posted
+   *    (Dr receivable | Cr 1104 and restore customer balance; Dr 2102 | Cr 2101 and
+   *    restore supplier balance). If nothing was ever recognized → status change only,
+   *    so 1104/2102 can never be corrupted by a fabricated reversal.
    */
   public static updateChequeStatus(params: {
     chequeId: string;
@@ -1974,6 +2075,25 @@ export class WorkflowService {
       if (!db.suppliers.find(s => s.id === cheque.partyId)) return { success: false, error: 'مورد الشيك غير مسجل' };
     }
 
+    // F9: enforced state machine — invalid transitions are rejected up front.
+    const ALLOWED_TRANSITIONS: Record<ChequeStatus, ChequeStatus[]> = {
+      received: ['under_collection', 'collected', 'bounced', 'returned'],
+      under_collection: ['collected', 'bounced', 'returned'],
+      collected: [],
+      issued: ['paid', 'bounced', 'returned'],
+      due: ['paid', 'bounced', 'returned'],
+      paid: [],
+      bounced: [],
+      returned: [],
+    };
+    const allowedNext = ALLOWED_TRANSITIONS[cheque.status] || [];
+    if (!allowedNext.includes(params.newStatus)) {
+      return {
+        success: false,
+        error: `انتقال غير صالح للشيك: من (${cheque.status}) إلى (${params.newStatus}). الحالات المسموحة بعد الحالة الحالية: ${allowedNext.length ? allowedNext.join('، ') : 'لا يوجد (الشيك في حالة نهائية)'}`
+      };
+    }
+
     const bank = db.bankAccounts.find(b => b.currency === 'EGP') || db.bankAccounts[0];
     const underCollAcc = AccountingEngine.getMappedAccountId('cheques_under_collection', 'acc-1104');
     const payableAcc = AccountingEngine.getMappedAccountId('cheques_payable', 'acc-2102');
@@ -1984,53 +2104,122 @@ export class WorkflowService {
     const supAcc = AccountingEngine.getMappedAccountId('supplier_payable', 'acc-2101');
     const bankAcc = bank?.glAccountId || AccountingEngine.getMappedAccountId('bank_egp', 'acc-1102');
 
-    let lines: JLine[] | null = null;
-    let jvDescription = '';
+    const isBounce = params.newStatus === 'bounced' || params.newStatus === 'returned';
+    const needsRecognition = !cheque.receiptJournalId;
 
-    if (cheque.type === 'incoming' && params.newStatus === 'under_collection') {
-      lines = [
-        jl(underCollAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `شيك وارد تحت التحصيل رقم ${cheque.chequeNumber}`),
-        jl(recvAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تحويل مديونية العميل لشيك تحت التحصيل ${cheque.chequeNumber}`),
-      ];
-      jvDescription = `إيداع شيك وارد تحت التحصيل رقم ${cheque.chequeNumber}`;
-    } else if (cheque.type === 'incoming' && params.newStatus === 'collected') {
-      lines = [
-        jl(bankAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `تحصيل شيك رقم ${cheque.chequeNumber} وإيداعه بالبنك`),
-        jl(underCollAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تسوية أوراق قبض محصلة ${cheque.chequeNumber}`),
-      ];
-      jvDescription = `تحصيل شيك وارد رقم ${cheque.chequeNumber}`;
-    } else if (cheque.type === 'incoming' && (params.newStatus === 'bounced' || params.newStatus === 'returned')) {
-      lines = [
-        jl(recvAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `إعادة تحميل العميل بمديونية شيك مرتد ${cheque.chequeNumber}`),
-        jl(underCollAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `عكس أوراق قبض شيك مرتد ${cheque.chequeNumber}`),
-      ];
-      jvDescription = `ارتجاع شيك وارد رقم ${cheque.chequeNumber}`;
-    } else if (cheque.type === 'outgoing' && params.newStatus === 'paid') {
-      lines = [
-        jl(payableAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `صرف شيك صادر رقم ${cheque.chequeNumber}`),
-        jl(bankAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `خصم شيك صادر ${cheque.chequeNumber} من البنك`),
-      ];
-      jvDescription = `صرف شيك صادر رقم ${cheque.chequeNumber} من البنك`;
-    } else if (cheque.type === 'outgoing' && (params.newStatus === 'bounced' || params.newStatus === 'returned')) {
-      lines = [
-        jl(payableAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `إلغاء ورقة دفع شيك مرتد ${cheque.chequeNumber}`),
-        jl(supAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `إعادة تحميل المورد بمستحقات شيك مرتد ${cheque.chequeNumber}`),
-      ];
-      jvDescription = `ارتجاع شيك صادر رقم ${cheque.chequeNumber}`;
+    // Journal plan: optional recognition first, then the transition journal (if any).
+    const plan: Array<{ description: string; reference: string; lines: JLine[]; isRecognition: boolean }> = [];
+
+    if (cheque.type === 'incoming') {
+      if (isBounce) {
+        if (!needsRecognition) {
+          plan.push({
+            description: `ارتجاع شيك وارد رقم ${cheque.chequeNumber} - عكس الاعتراف بالأصلية (${cheque.receiptJournalId || ''})`,
+            reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
+            isRecognition: false,
+            lines: [
+              jl(recvAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `إعادة تحميل العميل بمديونية شيك مرتد ${cheque.chequeNumber}`),
+              jl(underCollAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `عكس أوراق قبض شيك مرتد ${cheque.chequeNumber}`),
+            ],
+          });
+        }
+        // Not recognized yet → nothing to reverse: status change only (never fabricate an adjustment).
+      } else if (params.newStatus === 'under_collection') {
+        if (needsRecognition) {
+          plan.push({
+            description: `شيك وارد تحت التحصيل رقم ${cheque.chequeNumber} - الاعتراف بالتحصيل وخصم مديونية العميل`,
+            reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
+            isRecognition: true,
+            lines: [
+              jl(underCollAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `شيك وارد تحت التحصيل رقم ${cheque.chequeNumber}`),
+              jl(recvAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تحويل مديونية العميل لشيك تحت التحصيل ${cheque.chequeNumber}`),
+            ],
+          });
+        }
+        // Already recognized at received → state change only (never double-post 1104/1105).
+      } else if (params.newStatus === 'collected') {
+        if (needsRecognition) {
+          plan.push({
+            description: `تحصيل شيك وارد رقم ${cheque.chequeNumber} - الاعتراف الأصلي وخصم مديونية العميل`,
+            reference: `CHQ-REC-${cheque.chequeNumber}`,
+            isRecognition: true,
+            lines: [
+              jl(underCollAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `شيك وارد تحت التحصيل رقم ${cheque.chequeNumber}`),
+              jl(recvAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تحويل مديونية العميل لشيك تحت التحصيل ${cheque.chequeNumber}`),
+            ],
+          });
+        }
+        plan.push({
+          description: `تحصيل شيك وارد رقم ${cheque.chequeNumber} وإيداعه بالبنك`,
+          reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
+          isRecognition: false,
+          lines: [
+            jl(bankAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `تحصيل شيك رقم ${cheque.chequeNumber} وإيداعه بالبنك`),
+            jl(underCollAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تسوية أوراق قبض محصلة ${cheque.chequeNumber}`),
+          ],
+        });
+      }
+    } else {
+      // Outgoing (payable) cheque
+      if (isBounce) {
+        if (!needsRecognition) {
+          plan.push({
+            description: `ارتجاع شيك صادر رقم ${cheque.chequeNumber} - عكس الاعتراف بالأصلية (${cheque.receiptJournalId || ''})`,
+            reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
+            isRecognition: false,
+            lines: [
+              jl(payableAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `إلغاء ورقة دفع شيك مرتد ${cheque.chequeNumber}`),
+              jl(supAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `إعادة تحميل المورد بمستحقات شيك مرتد ${cheque.chequeNumber}`),
+            ],
+          });
+        }
+      } else if (params.newStatus === 'paid') {
+        if (needsRecognition) {
+          plan.push({
+            description: `صرف شيك صادر رقم ${cheque.chequeNumber} - الاعتراف الأصلي بورقة الدفع`,
+            reference: `CHQ-REC-${cheque.chequeNumber}`,
+            isRecognition: true,
+            lines: [
+              jl(supAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `اعتراف بورقة دفع للمورد ${cheque.chequeNumber}`),
+              jl(payableAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تسجيل أوراق دفع شيك صادر ${cheque.chequeNumber}`),
+            ],
+          });
+        }
+        plan.push({
+          description: `صرف شيك صادر رقم ${cheque.chequeNumber} من البنك`,
+          reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
+          isRecognition: false,
+          lines: [
+            jl(payableAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `صرف شيك صادر رقم ${cheque.chequeNumber}`),
+            jl(bankAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `خصم شيك صادر ${cheque.chequeNumber} من البنك`),
+          ],
+        });
+      }
     }
 
-    let jvId: string | undefined;
-    if (lines) {
+    // Post the plan (all-or-nothing: recognition posts first; a failure aborts before
+    // any status change, and both journals share the same date/period result).
+    let lastJvId: string | undefined;
+    let recognitionJvId = cheque.receiptJournalId;
+    let balanceDelta = 0; // applied to the party's currentBalance
+    for (const step of plan) {
       const jv = AccountingEngine.postJournal({
         date: params.date,
-        reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
-        description: jvDescription,
-        sourceDocumentType: 'cheque_status_change',
+        reference: step.reference,
+        description: step.description,
+        sourceDocumentType: step.isRecognition ? 'cheque_recognition' : 'cheque_status_change',
         sourceDocumentId: cheque.id,
-        lines,
+        lines: step.lines,
       }, params.userId, params.userName, params.isTest);
       if (!jv.success) return { success: false, error: jv.error };
-      jvId = jv.entry?.id;
+      lastJvId = jv.entry?.id;
+      if (step.isRecognition) {
+        recognitionJvId = jv.entry?.id;
+        balanceDelta -= cheque.amount; // settle the trade balance exactly once
+      }
+      if (isBounce && !step.isRecognition) {
+        balanceDelta += cheque.amount; // restore what recognition deducted
+      }
     }
 
     erpDb.mutate(draft => {
@@ -2038,18 +2227,30 @@ export class WorkflowService {
       if (c) {
         c.status = params.newStatus;
         c.statusDate = params.date;
-        if (jvId) c.journalEntryId = jvId;
+        if (lastJvId) c.journalEntryId = lastJvId;
+        if (recognitionJvId) c.receiptJournalId = recognitionJvId;
+      }
+
+      // Keep denormalized party balances synchronized with the GL (never diverge).
+      if (balanceDelta !== 0) {
+        if (cheque.partyType === 'customer') {
+          const cust = draft.customers.find(x => x.id === cheque.partyId);
+          if (cust) cust.currentBalance = (cust.currentBalance || 0) + balanceDelta;
+        } else {
+          const sup = draft.suppliers.find(x => x.id === cheque.partyId);
+          if (sup) sup.currentBalance = (sup.currentBalance || 0) + balanceDelta;
+        }
       }
 
       draft.auditLogs.push({
         id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
-        userId: params.userId || 'usr-admin',
-        userName: params.userName || 'محاسب الشيكات',
+        userId: guard.userId,
+        userName: guard.userName,
         module: 'إدارة الشيكات',
         action: 'edit',
         recordId: cheque.id,
-        description: `تحديث حالة الشيك ${cheque.chequeNumber} إلى: ${params.newStatus}${jvId ? ' مع ترحيل القيد المحاسبي' : ''}`,
+        description: `تحديث حالة الشيك ${cheque.chequeNumber} إلى: ${params.newStatus}${plan.length ? ` مع ترحيل ${plan.length} قيد محاسبي` : ' (بدون قيد - لم يسبق الاعتراف بالأصلية)'}${balanceDelta !== 0 ? ` وتحديث رصيد الطرف بـ ${balanceDelta}` : ''}`,
       });
     });
 
@@ -2073,48 +2274,203 @@ export class WorkflowService {
     userName?: string;
     isTest?: boolean;
   }): { success: boolean; cheque?: Cheque; error?: string } {
+    // F15: manual cheque registration is no longer an unguarded write —
+    // registering cheques requires 'create' on the cheques module.
+    const guard = AuthorizationService.enforce('cheques', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
     const db = erpDb.getSnapshot();
     if (!params.chequeNumber?.trim()) return { success: false, error: 'يرجى إدخال رقم الشيك' };
     if (Number(params.amount) <= 0) return { success: false, error: 'مبلغ الشيك يجب أن يكون أكبر من صفر' };
-    if (params.type === 'incoming') {
-      if (!db.customers.find(c => c.id === params.partyId)) return { success: false, error: 'العميل غير مسجل بالنظام' };
-    } else {
-      if (!db.suppliers.find(s => s.id === params.partyId)) return { success: false, error: 'المورد غير مسجل بالنظام' };
-    }
+    const amount = Number(params.amount);
 
     const chequeId = generateErpId('chq');
+    const chequeNumber = params.chequeNumber.trim();
+
+    // F8: registration IS the business event that settles the trade balance —
+    // the same recognition PATH A posts through recordCustomerPayment/recordSupplierPayment.
+    const underCollAcc = AccountingEngine.getMappedAccountId('cheques_under_collection', 'acc-1104');
+    const payableAcc = AccountingEngine.getMappedAccountId('cheques_payable', 'acc-2102');
+    const supAcc = AccountingEngine.getMappedAccountId('supplier_payable', 'acc-2101');
+
+    let recognitionLines: JLine[];
+    let recognitionDesc: string;
+    if (params.type === 'incoming') {
+      const customer = db.customers.find(c => c.id === params.partyId);
+      if (!customer) return { success: false, error: 'العميل غير مسجل بالنظام' };
+      const recvAcc = AccountingEngine.getMappedAccountId(
+        customer.currency === 'USD' ? 'customer_receivable_export' : 'customer_receivable_local',
+        'acc-1105'
+      );
+      recognitionLines = [
+        jl(underCollAcc, amount, 0, amount, 1, params.currency, `استلام شيك وارد رقم ${chequeNumber} تحت التحصيل`),
+        jl(recvAcc, 0, amount, amount, 1, params.currency, `تحويل مديونية العميل ${customer.name} إلى شيك وارد ${chequeNumber}`),
+      ];
+      recognitionDesc = `تسجيل شيك وارد ${chequeNumber} من العميل ${customer.name} وخصم المديونية`;
+    } else {
+      const supplier = db.suppliers.find(s => s.id === params.partyId);
+      if (!supplier) return { success: false, error: 'المورد غير مسجل بالنظام' };
+      recognitionLines = [
+        jl(supAcc, amount, 0, amount, 1, params.currency, `سداد مستحقات المورد ${supplier.name} بشيك صادر ${chequeNumber}`),
+        jl(payableAcc, 0, amount, amount, 1, params.currency, `تسجيل أوراق دفع شيك صادر ${chequeNumber}`),
+      ];
+      recognitionDesc = `تسجيل شيك صادر ${chequeNumber} للمورد ${supplier.name}`;
+    }
+
+    const jv = AccountingEngine.postJournal({
+      date: params.issueDate,
+      reference: `CHQ-REG-${chequeNumber}`,
+      description: recognitionDesc,
+      sourceDocumentType: 'cheque_registration',
+      sourceDocumentId: chequeId,
+      lines: recognitionLines,
+    }, guard.userId, guard.userName, params.isTest);
+    if (!jv.success) return { success: false, error: jv.error };
+
     const newCheque: Cheque = {
       id: chequeId,
-      chequeNumber: params.chequeNumber.trim(),
+      chequeNumber,
       type: params.type,
       partyType: params.type === 'incoming' ? 'customer' : 'supplier',
       partyId: params.partyId,
       bankName: params.bankName?.trim() || 'بنك غير محدد',
-      amount: Number(params.amount),
+      amount,
       currency: params.currency,
       issueDate: params.issueDate,
       dueDate: params.dueDate,
       status: params.type === 'incoming' ? 'received' : 'issued',
       statusDate: params.issueDate,
       notes: params.notes,
+      journalEntryId: jv.entry?.id,
+      receiptJournalId: jv.entry?.id,
       isTest: params.isTest,
     };
 
     erpDb.mutate(draft => {
       draft.cheques.push(newCheque);
+
+      // Keep the party balance synchronized with the recognition journal (F8).
+      if (params.type === 'incoming') {
+        const cust = draft.customers.find(c => c.id === params.partyId);
+        if (cust) cust.currentBalance = (cust.currentBalance || 0) - amount;
+      } else {
+        const sup = draft.suppliers.find(s => s.id === params.partyId);
+        if (sup) sup.currentBalance = (sup.currentBalance || 0) - amount;
+      }
+
       draft.auditLogs.push({
         id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
-        userId: params.userId || 'usr-admin',
-        userName: params.userName || 'محاسب الشيكات',
+        userId: guard.userId,
+        userName: guard.userName,
         module: 'إدارة الشيكات',
         action: 'create',
         recordId: chequeId,
-        description: `تسجيل شيك ${params.type === 'incoming' ? 'وارد' : 'صادر'} رقم ${newCheque.chequeNumber} بمبلغ ${newCheque.amount} ${newCheque.currency}`,
+        description: `تسجيل شيك ${params.type === 'incoming' ? 'وارد' : 'صادر'} رقم ${newCheque.chequeNumber} بمبلغ ${newCheque.amount} ${newCheque.currency} مع ترحيل قيد الاعتراف وتحديث رصيد الطرف`,
       });
     });
 
     return { success: true, cheque: newCheque };
+  }
+
+  /**
+   * 15b. Representative master data — create (F2). Guarded by AuthorizationService.
+   * No representatives are ever seeded automatically; the user registers them here.
+   */
+  public static createSalesRepresentative(params: {
+    code: string;
+    name: string;
+    phone?: string;
+    targetMonthlySales?: number;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; rep?: SalesRepresentative; error?: string } {
+    const guard = AuthorizationService.enforce('representatives', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    const db = erpDb.getSnapshot();
+    const code = (params.code || '').trim();
+    const name = (params.name || '').trim();
+    if (!code) return { success: false, error: 'كود المندوب مطلوب' };
+    if (!name) return { success: false, error: 'اسم المندوب مطلوب' };
+    if (db.salesReps.some(r => r.code.toLowerCase() === code.toLowerCase())) return { success: false, error: `كود المندوب (${code}) مستخدم بالفعل` };
+    if (db.salesReps.some(r => r.name.trim() === name)) return { success: false, error: `المندوب (${name}) مسجل بالفعل` };
+
+    const rep: SalesRepresentative = {
+      id: generateErpId('rep'),
+      code,
+      name,
+      phone: (params.phone || '').trim(),
+      active: true,
+      targetMonthlySales: Number(params.targetMonthlySales) || 0,
+      isTest: params.isTest,
+    };
+
+    erpDb.mutate(draft => {
+      draft.salesReps.push(rep);
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'المندوبون والعهد',
+        action: 'create',
+        recordId: rep.id,
+        description: `تسجيل مندوب جديد: ${rep.code} - ${rep.name}`,
+      });
+    });
+
+    return { success: true, rep };
+  }
+
+  /**
+   * 15c. Representative master data — edit/deactivate (F2). Guarded by AuthorizationService.
+   * Deactivation only hides the rep from NEW transaction dropdowns; historical
+   * transactions referencing it remain valid.
+   */
+  public static updateSalesRepresentative(params: {
+    repId: string;
+    name?: string;
+    phone?: string;
+    active?: boolean;
+    targetMonthlySales?: number;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; rep?: SalesRepresentative; error?: string } {
+    const guard = AuthorizationService.enforce('representatives', 'edit', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    const db = erpDb.getSnapshot();
+    const existing = db.salesReps.find(r => r.id === params.repId);
+    if (!existing) return { success: false, error: 'المندوب غير موجود' };
+    const name = params.name !== undefined ? params.name.trim() : existing.name;
+    if (!name) return { success: false, error: 'اسم المندوب مطلوب' };
+    if (db.salesReps.some(r => r.id !== existing.id && r.name.trim() === name)) return { success: false, error: `المندوب (${name}) مسجل بالفعل` };
+
+    let updated: SalesRepresentative | undefined;
+    erpDb.mutate(draft => {
+      const rep = draft.salesReps.find(r => r.id === params.repId);
+      if (!rep) return;
+      rep.name = name;
+      if (params.phone !== undefined) rep.phone = params.phone.trim();
+      if (params.active !== undefined) rep.active = params.active;
+      if (params.targetMonthlySales !== undefined) rep.targetMonthlySales = Number(params.targetMonthlySales) || 0;
+      updated = { ...rep };
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'المندوبون والعهد',
+        action: 'edit',
+        recordId: rep.id,
+        description: `تعديل المندوب ${rep.code} - ${rep.name}${params.active !== undefined ? (params.active ? ' (تفعيل)' : ' (تعطيل)') : ''}`,
+      });
+    });
+
+    return { success: true, rep: updated };
   }
 
   /**
