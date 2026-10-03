@@ -7,6 +7,7 @@ import {
 import { erpDb } from '../../services/db';
 import { AccountingEngine } from '../../services/accounting';
 import { JournalEntry, Account, AccountingPeriod, isDebitNatureCategory } from '../../types/erp';
+import { printDocument } from '../printUtils';
 
 export const AccountingView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -256,7 +257,7 @@ export const AccountingView: React.FC = () => {
   };
 
   const handlePrintLedger = () => {
-    window.print();
+    printDocument();
   };
 
   return (
@@ -349,7 +350,7 @@ export const AccountingView: React.FC = () => {
 
       {/* TAB 1: JOURNAL ENTRIES */}
       {activeTab === 'journals' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
           <table className="w-full text-right text-xs">
             <thead className="bg-slate-100 text-slate-700 font-bold">
               <tr>
@@ -520,7 +521,7 @@ export const AccountingView: React.FC = () => {
           )}
 
           {/* Ledger Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
               <div>
                 <h3 className="font-bold text-xs text-slate-900">

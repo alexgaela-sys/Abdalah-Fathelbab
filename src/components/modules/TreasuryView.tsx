@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { WorkflowService } from '../../services/workflows';
+import { TreasuryLedgerService } from '../../services/ledger';
+import { printDocument } from '../printUtils';
 
 export const TreasuryView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -33,151 +35,18 @@ export const TreasuryView: React.FC = () => {
   const glCashBalance = treasuryAcc?.currentBalance || 0;
 
   // Requirement 7: Treasury Ledger with Running Balance
+  // F29: derived from the POSTED GL cash account (1101) — one coherent source of
+  // truth. Every cash-affecting workflow (cash sales, customer/supplier cash,
+  // custody settlement, cash expense, transfers) appears exactly once and can
+  // never be double counted.
   const treasuryLedgerData = useMemo(() => {
-    const from = fromDate ? new Date(fromDate) : new Date('2000-01-01');
-    const to = toDate ? new Date(toDate) : new Date('2099-12-31');
-    to.setHours(23, 59, 59, 999);
-
-    // Initial opening balance of treasury
-    let opening = 0;
-
-    // 1. Transactions before From Date
-    db.treasuryTransactions
-      .filter(tx => new Date(tx.date) < from)
-      .forEach(tx => {
-        if (tx.type === 'cash_receipt') {
-          opening += tx.amount; // Debit treasury
-        } else {
-          opening -= tx.amount; // Credit treasury
-        }
-      });
-
-    // Also include customer receipts paid in cash before From Date if recorded in payments table
-    db.payments
-      .filter(p => p.paymentMethod === 'cash' && new Date(p.date) < from)
-      .forEach(p => {
-        // If not already in treasuryTransactions
-        const existsInTreasury = db.treasuryTransactions.some(t => t.receiptNumber === p.paymentNumber);
-        if (!existsInTreasury) {
-          if (p.paymentType === 'customer_receipt') {
-            opening += p.amountEGP;
-          } else if (p.paymentType === 'supplier_payment') {
-            opening -= p.amountEGP;
-          }
-        }
-      });
-
-    // 2. Transactions within date range
-    interface TreasuryRow {
-      id: string;
-      date: string;
-      documentNumber: string;
-      transactionType: string;
-      transactionTypeLabelAr: string;
-      isDebit: boolean;
-      description: string;
-      partyName: string;
-      debit: number; // مدين - مقبوضات
-      credit: number; // دائن - مدفوعات
-      postingSequence: string; // رقم القيد المحاسبي (ترتيب الترحيل الفعلي)
-      runningBalance: number;
-    }
-
-    const rawRows: Array<Omit<TreasuryRow, 'runningBalance'>> = [];
-
-    // F10: deterministic ordering. Map journal entry id -> entry number so that
-    // same-day rows fall back to the actual GL posting sequence, never to array order.
-    const postingSeqByJournalId = new Map<string, string>();
-    db.journalEntries.forEach(jv => {
-      if (jv.isPosted && !jv.isReversed) postingSeqByJournalId.set(jv.id, jv.entryNumber);
-    });
-
-    // From treasuryTransactions table
-    db.treasuryTransactions.forEach(tx => {
-      const d = new Date(tx.date);
-      if (d >= from && d <= to) {
-        if (typeFilter === 'all' || typeFilter === tx.type) {
-          const isReceipt = tx.type === 'cash_receipt';
-          rawRows.push({
-            id: tx.id,
-            date: tx.date,
-            documentNumber: tx.receiptNumber,
-            transactionType: tx.type,
-            transactionTypeLabelAr: isReceipt ? 'سند قبض وارد' : tx.type === 'advance_custody' ? 'سلفة / عهدة مؤقتة' : 'سند صرف نقدية',
-            isDebit: isReceipt,
-            description: tx.description,
-            partyName: tx.partyName || '-',
-            debit: isReceipt ? tx.amount : 0,
-            credit: !isReceipt ? tx.amount : 0,
-            postingSequence: (tx.journalEntryId && postingSeqByJournalId.get(tx.journalEntryId)) || '',
-          });
-        }
-      }
-    });
-
-    // Also check cash payments from payments table not yet synced
-    db.payments
-      .filter(p => p.paymentMethod === 'cash')
-      .forEach(p => {
-        const d = new Date(p.date);
-        if (d >= from && d <= to) {
-          const alreadyListed = rawRows.some(r => r.documentNumber === p.paymentNumber);
-          if (!alreadyListed) {
-            const isReceipt = p.paymentType === 'customer_receipt';
-            if (typeFilter === 'all' || (isReceipt && typeFilter === 'cash_receipt') || (!isReceipt && typeFilter === 'cash_payment')) {
-              rawRows.push({
-                id: p.id,
-                date: p.date,
-                documentNumber: p.paymentNumber,
-                transactionType: isReceipt ? 'cash_receipt' : 'cash_payment',
-                transactionTypeLabelAr: isReceipt ? 'تحصيل عميل (نقدي)' : 'سداد مورد (نقدي)',
-                isDebit: isReceipt,
-                description: `${p.reference || ''}`,
-                partyName: p.partyId,
-                debit: isReceipt ? p.amountEGP : 0,
-                credit: !isReceipt ? p.amountEGP : 0,
-                postingSequence: (p.journalEntryId && postingSeqByJournalId.get(p.journalEntryId)) || '',
-              });
-            }
-          }
-        }
-      });
-
-    // F10: deterministic chronological ordering.
-    // date -> GL posting sequence -> document number -> stable generated id.
-    // No accounting value is touched here; only the row presentation order.
-    rawRows.sort((a, b) => {
-      const byDate = new Date(a.date).getTime() - new Date(b.date).getTime();
-      if (byDate !== 0) return byDate;
-      const byPosting = (a.postingSequence || '').localeCompare(b.postingSequence || '', 'en', { numeric: true });
-      if (byPosting !== 0) return byPosting;
-      const byDoc = (a.documentNumber || '').localeCompare(b.documentNumber || '', 'en', { numeric: true });
-      if (byDoc !== 0) return byDoc;
-      return a.id.localeCompare(b.id);
-    });
-
-    let running = opening;
-    let totalDebit = 0;
-    let totalCredit = 0;
-
-    const entries: TreasuryRow[] = rawRows.map(row => {
-      totalDebit += row.debit;
-      totalCredit += row.credit;
-      running = running + row.debit - row.credit;
-      return {
-        ...row,
-        runningBalance: running,
-      };
-    });
-
-    const closingBalance = opening + totalDebit - totalCredit;
-
+    const gl = TreasuryLedgerService.build({ fromDate, toDate, typeFilter: typeFilter as any });
     return {
-      openingBalance: opening,
-      entries,
-      totalDebit,
-      totalCredit,
-      closingBalance,
+      openingBalance: gl.openingBalance,
+      entries: gl.rows,
+      totalDebit: gl.totalDebit,
+      totalCredit: gl.totalCredit,
+      closingBalance: gl.closingBalance,
     };
   }, [fromDate, toDate, typeFilter, db]);
 
@@ -282,7 +151,7 @@ export const TreasuryView: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => window.print()}
+            onClick={printDocument}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-300 transition cursor-pointer"
             title="طباعة دفتر الخزينة"
           >
@@ -404,7 +273,7 @@ export const TreasuryView: React.FC = () => {
       </div>
 
       {/* Treasury Ledger Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+      <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
           <div>
             <h3 className="font-bold text-xs text-slate-900">سجل حركات الخزينة النقدية (Running Balance)</h3>

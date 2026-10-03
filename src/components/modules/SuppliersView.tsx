@@ -8,6 +8,7 @@ import { erpDb } from '../../services/db';
 import { Supplier } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
 import { MasterDataService } from '../../services/masterData';
+import { printDocument } from '../printUtils';
 
 export const SuppliersView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -317,7 +318,7 @@ export const SuppliersView: React.FC = () => {
   };
 
   const handlePrint = () => {
-    window.print();
+    printDocument();
   };
 
   return (
@@ -435,7 +436,7 @@ export const SuppliersView: React.FC = () => {
           </div>
 
           {/* Suppliers Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
                 <tr>
@@ -600,7 +601,7 @@ export const SuppliersView: React.FC = () => {
           )}
 
           {/* Statement Ledger Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
               <div>
                 <h3 className="font-bold text-xs text-slate-900">

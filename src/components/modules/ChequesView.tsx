@@ -7,6 +7,7 @@ import {
 import { erpDb } from '../../services/db';
 import { Cheque, ChequeType, ChequeStatus } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
+import { printDocument } from '../printUtils';
 
 export const ChequesView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -205,7 +206,7 @@ export const ChequesView: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => window.print()}
+            onClick={printDocument}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-300 transition cursor-pointer"
             title="طباعة سجل الشيكات"
           >
@@ -331,7 +332,7 @@ export const ChequesView: React.FC = () => {
       </div>
 
       {/* Cheques Table (Requirement 9) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+      <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <table className="w-full text-right text-xs">
           <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
             <tr>

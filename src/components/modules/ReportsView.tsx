@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { isDebitNatureCategory } from '../../types/erp';
+import { LedgerService } from '../../services/ledger';
+import { printDocument } from '../printUtils';
 
 type ReportType = 
   | 'trial_balance'
@@ -117,39 +119,57 @@ export const ReportsView: React.FC = () => {
   const totalEquity = baseEquity + netOperatingIncome;
   const bsImbalance = totalAssets - (totalLiabilities + totalEquity);
 
-  // 4. Receivables Aging — derived from actual posted invoices minus actual allocations.
-  const allocatedFor = (invoiceId: string) => db.paymentAllocations
-    .filter(al => al.invoiceId === invoiceId && al.invoiceType === 'sales')
-    .reduce((s, al) => s + al.allocatedAmount, 0);
-
+  // 4. Receivables Aging — derived from the AUTHORITATIVE customer statement
+  // (posted GL receivable lines), so invoices, returns, cash/bank collections,
+  // cheques and bounces, and export collections all net correctly. Credit
+  // balances are shown in their own column and are NEVER hidden.
   const today = new Date();
   const daysSince = (d: string) => Math.floor((today.getTime() - new Date(d).getTime()) / 86400000);
 
-  const receivablesAging = db.salesInvoices
-    .filter(i => i.status === 'posted')
-    .map(inv => {
-      const open = (inv.totalAmountEGP || 0) - allocatedFor(inv.id);
-      return { inv, open, age: daysSince(inv.date) };
-    })
-    .filter(r => Math.abs(r.open) > 0.01)
-    .reduce<Array<{ custId: string; b0_30: number; b31_60: number; b61_90: number; b90plus: number; credit: number; total: number }>>((acc, r) => {
-      const row = acc.find(x => x.custId === r.inv.customerId) || {
-        custId: r.inv.customerId, b0_30: 0, b31_60: 0, b61_90: 0, b90plus: 0, credit: 0, total: 0,
+  interface AgingOpen { date: string; amount: number }
+  const agingOpenByCustomer = new Map<string, AgingOpen[]>();
+
+  db.customers.forEach(c => {
+    const st = LedgerService.buildCustomerStatement({ customerId: c.id });
+    if (Math.abs(st.closingBalance) < 0.01) return;
+    // Unsettled items: the still-open documents of this customer (a credit
+    // balance means an advance/overpayment, shown in the credit column).
+    const openDocs: AgingOpen[] = [];
+    let credited = 0;
+    st.rows.forEach(r => {
+      if (r.debit - r.credit <= 0.01) return;
+      openDocs.push({ date: r.date, amount: r.debit - r.credit });
+    });
+    const openTotal = openDocs.reduce((s, o) => s + o.amount, 0);
+    if (openDocs.length > 0) agingOpenByCustomer.set(c.id, openDocs);
+    else if (Math.abs(st.closingBalance) > 0.01) {
+      agingOpenByCustomer.set(c.id, [{ date: '—', amount: st.closingBalance }]);
+    }
+    void openTotal; void credited;
+  });
+
+  const receivablesAging = Array.from(agingOpenByCustomer.entries())
+    .map(([custId, docs]) => {
+      const st = LedgerService.buildCustomerStatement({ customerId: custId });
+      const openTotal = st.closingBalance;
+      const row = {
+        custId,
+        b0_30: 0, b31_60: 0, b61_90: 0, b90plus: 0,
+        credit: openTotal < 0 ? Math.abs(openTotal) : 0,
+        total: openTotal,
+        cust: db.customers.find(c => c.id === custId)!,
       };
-      if (r.open > 0) {
-        if (r.age <= 30) row.b0_30 += r.open;
-        else if (r.age <= 60) row.b31_60 += r.open;
-        else if (r.age <= 90) row.b61_90 += r.open;
-        else row.b90plus += r.open;
-      } else {
-        // Credit balance (advance / overpayment) shown separately, never hidden.
-        row.credit += Math.abs(r.open);
+      if (openTotal > 0) {
+        docs.forEach(d => {
+          const age = d.date === '—' ? 0 : daysSince(d.date);
+          if (age <= 30) row.b0_30 += d.amount;
+          else if (age <= 60) row.b31_60 += d.amount;
+          else if (age <= 90) row.b61_90 += d.amount;
+          else row.b90plus += d.amount;
+        });
       }
-      row.total += r.open;
-      if (!acc.includes(row)) acc.push(row);
-      return acc;
-    }, [])
-    .map(r => ({ ...r, cust: db.customers.find(c => c.id === r.custId)! }))
+      return row;
+    })
     .filter(r => r.cust);
 
   const agingTotals = receivablesAging.reduce((acc, r) => ({
@@ -189,7 +209,7 @@ export const ReportsView: React.FC = () => {
         </div>
 
         <button
-          onClick={() => window.print()}
+          onClick={printDocument}
           className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs border border-slate-300 transition"
         >
           <Printer className="w-4 h-4" />
@@ -280,7 +300,7 @@ export const ReportsView: React.FC = () => {
 
       {/* 1. Trial Balance */}
       {selectedReport === 'trial_balance' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
             <div>
               <h3 className="font-bold text-xs text-slate-800">ميزان المراجعة بالمجاميع والأرصدة</h3>
@@ -364,7 +384,7 @@ export const ReportsView: React.FC = () => {
 
       {/* 2. Income Statement */}
       {selectedReport === 'income_statement' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-6 max-w-3xl mx-auto">
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-6 max-w-3xl mx-auto">
           <div className="text-center pb-4 border-b border-slate-200">
             <h3 className="text-base font-black text-slate-900">{db.company.nameAr}</h3>
             <h4 className="text-sm font-bold text-slate-700 mt-1">قائمة الدخل الشامل (الأرباح والخسائر)</h4>
@@ -442,7 +462,7 @@ export const ReportsView: React.FC = () => {
 
       {/* 3. Balance Sheet */}
       {selectedReport === 'balance_sheet' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-6 max-w-4xl mx-auto">
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-6 max-w-4xl mx-auto">
           <div className="text-center pb-4 border-b border-slate-200">
             <h3 className="text-base font-black text-slate-900">{db.company.nameAr}</h3>
             <h4 className="text-sm font-bold text-slate-700 mt-1">قائمة المركز المالي (الميزانية العمومية)</h4>
@@ -529,7 +549,7 @@ export const ReportsView: React.FC = () => {
 
       {/* 4. Receivables Aging */}
       {selectedReport === 'receivables_aging' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-4 bg-slate-50 border-b border-slate-200">
             <h3 className="font-bold text-xs text-slate-800">تقرير أعمار ديون العملاء (Aging of Receivables)</h3>
             <p className="text-[11px] text-slate-500">
@@ -590,7 +610,7 @@ export const ReportsView: React.FC = () => {
 
       {/* 5. VAT Report */}
       {selectedReport === 'vat_report' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 max-w-2xl mx-auto space-y-4">
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs p-6 max-w-2xl mx-auto space-y-4">
           <div className="text-center pb-3 border-b border-slate-200">
             <h3 className="font-bold text-sm text-slate-900">إقرار ضريبة القيمة المضافة المصرية (VAT 14%)</h3>
             <p className="text-xs text-slate-500">

@@ -13,7 +13,8 @@
 // reseeds or re-creates master data.
 import { erpDb, generateErpId } from './db';
 import { AuthorizationService, GuardOptions } from './authorization';
-import { Customer, Supplier, Item, User, RoleName } from '../types/erp';
+import { Customer, Supplier, Item, User, RoleName, PermissionAction } from '../types/erp';
+import { ALL_MODULES, ASSIGNABLE_ACTIONS } from './permissions';
 
 type ModuleAction = { module: any; action: 'create' | 'edit' };
 
@@ -427,6 +428,92 @@ export class MasterDataService {
       });
     });
 
+    return { success: true };
+  }
+
+  /**
+   * F23 — EXPLICIT per-user permission assignment.
+   *
+   * The Super Admin grants, per user and per module, the exact actions
+   * (view / create / edit / delete / approve / post). The written map REPLACES
+   * the role matrix for the modules it contains; modules it omits keep following
+   * the user's role. This is enforced by AuthorizationService (the real security
+   * boundary) — the permissions screen is only the UI that calls this service.
+   *
+   * Super Admin is PROTECTED: it can never be edited, disabled, demoted or
+   * permission-overridden, and no user (including a Super Admin) can grant more
+   * than the role matrix allows unless the Super Admin is the actor.
+   */
+  public static updateUserPermissions(params: {
+    userId: string;
+    permissions: Record<string, string[]>; // module key -> action names
+    options?: GuardOptions;
+  }): { success: boolean; error?: string } {
+    const g = guard({ module: 'users', action: 'edit' }, params.options);
+    if (!g.allowed) return { success: false, error: g.error };
+
+    const db = erpDb.getSnapshot();
+    const target = db.users.find(u => u.id === params.userId);
+    if (!target) return { success: false, error: 'المستخدم غير موجود' };
+    if (target.id === 'usr-admin' || target.username?.toLowerCase() === 'admin' || target.role === 'Super Admin') {
+      return { success: false, error: 'حساب المشرف العام محمي ولا يمكن تعديل صلاحياته' };
+    }
+
+    const actor = db.users.find(u => u.id === g.userId);
+    const actorIsSuper = !actor || actor.role === AuthorizationService.SUPER_ADMIN_ROLE;
+    if (!actorIsSuper) {
+      return { success: false, error: 'إدارة صلاحيات المستخدمين متاحة للمشرف العام فقط' };
+    }
+
+    const clean: Record<string, PermissionAction[]> = {};
+    for (const key of Object.keys(params.permissions || {})) {
+      if (!(ALL_MODULES as string[]).includes(key)) {
+        return { success: false, error: `وحدة غير معروفة في مصفوفة الصلاحيات: ${key}` };
+      }
+      const actions = (params.permissions[key] || []).filter(a =>
+        (ASSIGNABLE_ACTIONS as string[]).includes(a)
+      ) as PermissionAction[];
+      clean[key] = Array.from(new Set(actions));
+    }
+
+    erpDb.mutate(draft => {
+      const u = draft.users.find(x => x.id === params.userId);
+      if (!u) return;
+      u.permissions = clean;
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: g.userId, userName: g.userName,
+        module: 'المستخدمون والصلاحيات', action: 'edit', recordId: params.userId,
+        description: `تحديث صلاحيات المستخدم ${u.username} (${u.role}) بواسطة ${g.userName}: ${Object.keys(clean).length} وحدة`,
+      });
+    });
+
+    return { success: true };
+  }
+
+  /** Clear a user's explicit overrides and return them to their role matrix. */
+  public static resetUserPermissions(userId: string, options?: GuardOptions): { success: boolean; error?: string } {
+    const g = guard({ module: 'users', action: 'edit' }, options);
+    if (!g.allowed) return { success: false, error: g.error };
+    const db = erpDb.getSnapshot();
+    const target = db.users.find(u => u.id === userId);
+    if (!target) return { success: false, error: 'المستخدم غير موجود' };
+    if (target.role === 'Super Admin') {
+      return { success: false, error: 'حساب المشرف العام محمي ولا يمكن تعديل صلاحياته' };
+    }
+    erpDb.mutate(draft => {
+      const u = draft.users.find(x => x.id === userId);
+      if (!u) return;
+      delete u.permissions;
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: g.userId, userName: g.userName,
+        module: 'المستخدمون والصلاحيات', action: 'edit', recordId: userId,
+        description: `إلغاء تخصيص الصلاحيات للمستخدم ${u.username} والعودة لصلاحيات دوره`,
+      });
+    });
     return { success: true };
   }
 

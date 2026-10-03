@@ -15,7 +15,7 @@ export type RoleName =
   | 'Treasury Accountant'
   | 'Viewer';
 
-export type PermissionAction = 'view' | 'create' | 'edit' | 'approve' | 'post' | 'cancel' | 'export';
+export type PermissionAction = 'view' | 'create' | 'edit' | 'delete' | 'approve' | 'post' | 'cancel' | 'export';
 
 export interface User {
   id: string;
@@ -27,6 +27,13 @@ export interface User {
   avatar?: string;
   role: RoleName;
   active: boolean;
+  /**
+   * F23: EXPLICIT per-user permission overrides (additive, optional).
+   * Keyed by module key (see src/services/permissions.ts ModuleKey). When a module
+   * key is present it REPLACES the role-matrix actions for that user; when absent
+   * the role matrix governs. Super Admin is never overridable.
+   */
+  permissions?: Record<string, PermissionAction[]>;
   createdAt: string;
   lastLogin?: string;
   isTest?: boolean;
@@ -312,6 +319,18 @@ export interface SalesInvoice {
   exportShipmentId?: string;
   /** Invoice-level tax treatment. Absent = legacy/current behavior (line rates govern). */
   taxTreatment?: 'taxable' | 'exempt';
+  /**
+   * F20: stock source of the invoice. 'warehouse' (default) issues from
+   * SalesInvoice.warehouseId. 'rep_custody' issues from a representative custody
+   * and NEVER decrements warehouse stock a second time.
+   */
+  stockSource?: 'warehouse' | 'rep_custody';
+  /** F20: custody the goods were issued from when stockSource === 'rep_custody'. */
+  custodyId?: string;
+  /** F17: total bonus (free) quantity on the invoice — value is always zero. */
+  bonusQuantity?: number;
+  /** F25: cash actually collected at posting time (0 for credit sales). */
+  cashAmount?: number;
   isTest?: boolean;
 }
 
@@ -352,6 +371,14 @@ export interface SalesReturnLine {
   quantity: number;
   unitPrice: number;
   batchNumber: string;
+  /**
+   * F17: portion of `quantity` that was a zero-priced bonus on the original
+   * invoice. Preserved so the return keeps the bonus zero-value nature
+   * (no revenue, no VAT for the bonus portion).
+   */
+  freeQuantity?: number;
+  /** F17/F22: VAT rate actually inherited from the original invoice line. */
+  vatRate?: number;
   qualityDestination?: QualityDestination;
   destinationWarehouseId?: string;
 }

@@ -170,6 +170,7 @@ export const INITIAL_WAREHOUSES: Warehouse[] = [
 export const INITIAL_UNITS: Unit[] = [
   { id: 'unit-carton', code: 'CTN', nameAr: 'كرتونة', isBase: true },
   { id: 'unit-kg', code: 'KG', nameAr: 'كيلوجرام', isBase: true },
+  { id: 'unit-gram', code: 'GRAM', nameAr: 'جرام', isBase: true },
   { id: 'unit-ton', code: 'TON', nameAr: 'طن', isBase: false },
   { id: 'unit-piece', code: 'PCS', nameAr: 'قطعة', isBase: true },
   { id: 'unit-roll', code: 'ROLL', nameAr: 'بكرة تغليف', isBase: true },
@@ -177,6 +178,11 @@ export const INITIAL_UNITS: Unit[] = [
 
 export const INITIAL_UNIT_CONVERSIONS: UnitConversion[] = [
   { id: 'uc-1', fromUnitId: 'unit-ton', toUnitId: 'unit-kg', factor: 1000 },
+  // UOM change (master UAT): finished goods are measured in PCS. Small raw-material
+  // requirements stay decimal-exact: 75 GRAM = 0.075 KG per PCS.
+  { id: 'uc-2', fromUnitId: 'unit-gram', toUnitId: 'unit-kg', factor: 0.001 },
+  { id: 'uc-3', fromUnitId: 'unit-kg', toUnitId: 'unit-gram', factor: 1000 },
+  { id: 'uc-4', fromUnitId: 'unit-kg', toUnitId: 'unit-ton', factor: 0.001 },
 ];
 
 export const INITIAL_COST_CENTERS: CostCenter[] = [
@@ -620,7 +626,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Single',
     flavor: 'Sweet Chili Dip',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -643,7 +649,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Single',
     flavor: 'Spicy Grilled Dip',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -666,7 +672,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Single',
     flavor: 'Honey Mustard Dip',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -689,7 +695,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Single',
     flavor: 'Smokey Burger Dip',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -712,7 +718,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Single',
     flavor: 'Sweet Chili Dip',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -735,7 +741,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Single',
     flavor: 'Honey BBQ Dip',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -760,7 +766,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Duo',
     flavor: 'Sweet Chili & Honey BBQ',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -783,7 +789,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Duo',
     flavor: 'Sweet Chili & Honey BBQ',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -806,7 +812,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Duo',
     flavor: 'Sweet Chili & Spicy Grilled',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -829,7 +835,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Duo',
     flavor: 'Smoky Burger & Honey Mustard',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -852,7 +858,7 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     itemType: 'finished_product',
     productFamily: 'Duo',
     flavor: 'Smoky Burger & Honey BBQ',
-    baseUnitId: 'unit-carton',
+    baseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -870,10 +876,11 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
 
 /**
  * Production Bill of Materials for the 11 seeded finished products.
- * Each product gets an active V1 BOM (base: 1,000 cartons) built ONLY from
+ * Each product gets an active V1 BOM (base: 1,000 finished pieces PCS) built ONLY from
  * raw/packaging materials that exist in INITIAL_PRODUCTION_ITEMS above —
  * so manufacturing is possible immediately after a clean initialization.
- * Quantities per 1,000 cartons: corn 800kg, oil 180kg, flavor sauce 45kg, cartons 1,000 pcs.
+ * Quantities per 1,000 finished pieces (PCS): corn 800kg, oil 180kg, flavor sauce 45kg,
+ * shipping cartons 1,000 pcs — i.e. 0.8 / 0.18 / 0.045 KG per finished piece.
  * The flavor line is matched to each product's actual seeded flavor sauce.
  */
 const SINGLE_FLAVOR_BY_DIP: Record<string, string> = {
@@ -898,10 +905,10 @@ function buildInitialBoms(): { boms: BomHeader[]; bomLines: BomLine[] } {
         finishedItemId: fp.id,
         version: 1,
         baseQuantity: 1000,
-        unitId: 'unit-carton',
+        unitId: 'unit-piece',
         active: true,
         effectiveDate: '2026-01-01',
-        notes: `معادلة تصنيع 1000 كرتونة من ${fp.nameAr}`,
+        notes: `معادلة تصنيع 1000 قطعة من ${fp.nameAr}`,
       });
 
       const flavorItemId = SINGLE_FLAVOR_BY_DIP[fp.flavor || ''] || 'item-raw-flavor-sweet-chili';
@@ -991,6 +998,62 @@ export function createEmptyDatabase(): ERPDatabaseSchema {
   };
 }
 
+/**
+ * ADDITIVE, IDEMPOTENT, BACKWARD-COMPATIBLE migration (master UAT — UOM change).
+ *
+ * Business rule: finished products are measured in PCS / قطعة (never CTN).
+ * This migration therefore:
+ *   1. ensures the PCS unit exists (and the GRAM unit + conversions used by
+ *      decimal raw-material requirements such as 0.075 KG per piece),
+ *   2. re-points finished-product `baseUnitId` from carton to piece,
+ *   3. re-points the BOM base unit of finished products from carton to piece.
+ *
+ * It NEVER deletes, recreates or renumbers records: the 11 seeded BOMs, their
+ * lines, all stock, batches and documents keep their existing ids, quantities,
+ * costs and history. Only the *unit of measure label* changes. BOM line
+ * quantities are intentionally left untouched — a BOM line states the amount of
+ * raw material needed for the BOM's BASE quantity (1000 PCS), which is exactly
+ * how `calculateBomRequirements` scales it, so 800 KG per 1000 PCS stays
+ * 800 KG and equals 0.8 KG per piece.
+ */
+export function applyUomMigration(db: ERPDatabaseSchema): ERPDatabaseSchema {
+  const units = Array.isArray(db.units) && db.units.length ? db.units : [...INITIAL_UNITS];
+  const hasUnit = (id: string) => units.some(u => u.id === id);
+  for (const u of INITIAL_UNITS) {
+    if (!hasUnit(u.id)) units.push(u);
+  }
+
+  const conversions = Array.isArray(db.unitConversions) ? db.unitConversions : [];
+  for (const c of INITIAL_UNIT_CONVERSIONS) {
+    if (!conversions.some(x => x.fromUnitId === c.fromUnitId && x.toUnitId === c.toUnitId)) {
+      conversions.push(c);
+    }
+  }
+
+  const items = Array.isArray(db.items) ? db.items : [];
+  const finishedIds = new Set(
+    items.filter(i => i.itemType === 'finished_product').map(i => i.id)
+  );
+  db.items = items.map(i => (
+    finishedIds.has(i.id) && i.baseUnitId === 'unit-carton'
+      ? { ...i, baseUnitId: 'unit-piece' }
+      : i
+  ));
+
+  const boms = Array.isArray(db.boms) ? db.boms : [];
+  db.boms = boms.map(b => {
+    const finishedItemId = b.finishedItemId || b.productId;
+    if (finishedItemId && finishedIds.has(finishedItemId) && b.unitId === 'unit-carton') {
+      return { ...b, unitId: 'unit-piece' };
+    }
+    return b;
+  });
+
+  db.units = units;
+  db.unitConversions = conversions;
+  return db;
+}
+
 class ERPDatabaseService {
   private db: ERPDatabaseSchema;
   private listeners: Set<() => void> = new Set();
@@ -1054,8 +1117,8 @@ class ERPDatabaseService {
           users: loadedUsers,
         };
 
-        this.saveToStorage(merged);
-        return merged;
+        this.saveToStorage(applyUomMigration(merged));
+        return applyUomMigration(merged);
       }
       }
     } catch (e) {

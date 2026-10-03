@@ -380,6 +380,7 @@ export class ManufacturingEngine {
         itemId: req.materialItemId,
         warehouseId: 'wh-raw',
         movementType: 'production_issue',
+        date: params.date,
         quantityIn: 0,
         quantityOut: req.quantity,
         unitCost: 0, // engine derives actual FIFO cost
@@ -498,6 +499,7 @@ export class ManufacturingEngine {
           itemId: ord.productId,
           warehouseId: ord.destinationWarehouseId,
           movementType: 'production_output',
+          date: params.date,
           quantityIn: goodQty,
           quantityOut: 0,
           unitCost: actualUnitCost,
@@ -531,6 +533,7 @@ export class ManufacturingEngine {
           itemId: ord.productId,
           warehouseId: 'wh-scrap',
           movementType: 'scrap',
+          date: params.date,
           quantityIn: scrapQty,
           quantityOut: 0,
           unitCost: actualUnitCost * 0.1, // Scrap valued at 10% of production cost
@@ -564,6 +567,7 @@ export class ManufacturingEngine {
           itemId: ord.productId,
           warehouseId: targetWh,
           movementType: isRecycle ? 'recycling' : 'scrap',
+          date: params.date,
           quantityIn: defectiveQty,
           quantityOut: 0,
           unitCost: actualUnitCost * 0.5,

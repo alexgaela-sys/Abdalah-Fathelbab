@@ -9,6 +9,8 @@ export type ModuleKey =
   | 'export' | 'treasury' | 'banks' | 'cheques' | 'expenses' | 'accounting'
   | 'reports' | 'users' | 'settings' | 'audit';
 
+const AUTHORIZATION_SUPER_ADMIN: RoleName = 'Super Admin';
+
 /** Which module a NavTab belongs to (1:1 here, kept separate so module keys stay stable). */
 const TAB_TO_MODULE: Record<NavTab, ModuleKey> = {
   dashboard: 'dashboard', items: 'items', inventory: 'inventory',
@@ -20,7 +22,33 @@ const TAB_TO_MODULE: Record<NavTab, ModuleKey> = {
   audit: 'audit',
 };
 
-const ALL_ACTIONS: PermissionAction[] = ['view', 'create', 'edit', 'approve', 'post', 'cancel', 'export'];
+const ALL_ACTIONS: PermissionAction[] = ['view', 'create', 'edit', 'delete', 'approve', 'post', 'cancel', 'export'];
+
+/** F23: every module the Super Admin can grant explicitly, in display order. */
+export const ALL_MODULES: ModuleKey[] = [
+  'dashboard', 'items', 'inventory', 'manufacturing', 'quality', 'costing',
+  'sales', 'purchasing', 'customers', 'suppliers', 'representatives',
+  'export', 'treasury', 'banks', 'cheques', 'expenses', 'accounting',
+  'reports', 'users', 'settings', 'audit',
+];
+
+/** F23: the six explicit actions the Super Admin assigns per module. */
+export const ASSIGNABLE_ACTIONS: PermissionAction[] = ['view', 'create', 'edit', 'delete', 'approve', 'post'];
+
+/** Arabic labels for the permission matrix UI. */
+export const MODULE_LABELS_AR: Record<ModuleKey, string> = {
+  dashboard: 'لوحة المعلومات', items: 'الأصناف والمنتجات', inventory: 'المخازن والجرد',
+  manufacturing: 'الإنتاج والتصنيع', quality: 'الجودة', costing: 'الت costing والتكاليف',
+  sales: 'المبيعات', purchasing: 'المشتريات', customers: 'العملاء', suppliers: 'الموردون',
+  representatives: 'المناديب والعهد', export: 'التصدير', treasury: 'الخزينة',
+  banks: 'البنوك', cheques: 'الشيكات', expenses: 'المصروفات', accounting: 'المحاسبة والدفاتر',
+  reports: 'التقارير', users: 'المستخدمون والصلاحيات', settings: 'الإعدادات', audit: 'سجل التدقيق',
+};
+
+export const ACTION_LABELS_AR: Record<string, string> = {
+  view: 'عرض', create: 'إضافة', edit: 'تعديل', delete: 'حذف',
+  approve: 'اعتماد', post: 'ترحيل', cancel: 'إلغاء', export: 'استيراد/تصدير',
+};
 const VIEW_ONLY: PermissionAction[] = ['view'];
 const VIEW_EXPORT: PermissionAction[] = ['view', 'export'];
 const NO_POST: PermissionAction[] = ['view', 'create', 'edit', 'export'];
@@ -109,6 +137,31 @@ export class PermissionService {
   /** Actions the role holds on a module (empty array = no access). */
   public static getActions(role: RoleName, module: ModuleKey): PermissionAction[] {
     return MATRIX[role]?.[module] || [];
+  }
+
+  /**
+   * F23: effective actions of a USER.
+   * When the user has an EXPLICIT permission entry for the module, that entry wins
+   * over the role matrix (this is how the Super Admin narrows a role per user).
+   * When absent, the role matrix governs — so existing users are unaffected.
+   */
+  public static getActionsForUser(
+    user: { role: RoleName; permissions?: Record<string, PermissionAction[]> } | undefined,
+    module: ModuleKey
+  ): PermissionAction[] {
+    if (!user) return [];
+    if (user.role === AUTHORIZATION_SUPER_ADMIN) return ALL_ACTIONS;
+    const explicit = user.permissions?.[module];
+    if (Array.isArray(explicit)) return explicit;
+    return this.getActions(user.role, module);
+  }
+
+  public static hasPermissionForUser(
+    user: { role: RoleName; permissions?: Record<string, PermissionAction[]> } | undefined,
+    module: ModuleKey,
+    action: PermissionAction
+  ): boolean {
+    return this.getActionsForUser(user, module).includes(action);
   }
 
   public static hasPermission(role: RoleName, module: ModuleKey, action: PermissionAction): boolean {

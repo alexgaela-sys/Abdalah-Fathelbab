@@ -6,10 +6,11 @@ import {
 import { erpDb } from '../../services/db';
 import { InventoryEngine } from '../../services/inventory';
 import { WorkflowService } from '../../services/workflows';
+import ItemCardReport from './ItemCardReport';
 
 export const InventoryView: React.FC = () => {
   const db = erpDb.getSnapshot();
-  const [activeTab, setActiveTab] = useState<'balances' | 'ledger' | 'transfers' | 'physical_count'>('balances');
+  const [activeTab, setActiveTab] = useState<'balances' | 'ledger' | 'item_card' | 'transfers' | 'physical_count'>('balances');
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -182,6 +183,16 @@ export const InventoryView: React.FC = () => {
         >
           حركات المخزون المستمر (Inventory Ledger)
         </button>
+
+        {/* F18: item card */}
+        <button
+          onClick={() => setActiveTab('item_card')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+            activeTab === 'item_card' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          كارت الصنف (Item Card)
+        </button>
       </div>
 
       {activeTab === 'balances' && (
@@ -255,6 +266,10 @@ export const InventoryView: React.FC = () => {
             </table>
           </div>
         </div>
+      )}
+
+      {activeTab === 'item_card' && (
+        <ItemCardReport />
       )}
 
       {activeTab === 'ledger' && (

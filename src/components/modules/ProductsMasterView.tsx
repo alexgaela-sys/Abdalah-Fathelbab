@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import ItemCardReport from './ItemCardReport';
 import { 
   Package, Plus, Search, Edit3, Eye, Power, 
   CheckCircle2, AlertCircle, Filter, Tag, DollarSign,
-  Layers, Barcode, Calendar, Boxes, Check
+  Layers, Barcode, Calendar, Boxes, Check, FileText
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { Item, ProductFamily, ItemType } from '../../types/erp';
@@ -27,8 +28,10 @@ export const ProductsMasterView: React.FC = () => {
   const [itemType, setItemType] = useState<ItemType>('finished_product');
   const [productFamily, setProductFamily] = useState<ProductFamily | ''>('Single');
   const [flavor, setFlavor] = useState('');
-  const [baseUnitId, setBaseUnitId] = useState('unit-carton');
-  const [purchaseUnitId, setPurchaseUnitId] = useState('unit-carton');
+  // UOM change: finished products are measured in PCS / قطعة.
+  const [baseUnitId, setBaseUnitId] = useState('unit-piece');
+  const [purchaseUnitId, setPurchaseUnitId] = useState('unit-piece');
+  const [showItemCard, setShowItemCard] = useState(false);
   const [vatCategory, setVatCategory] = useState<'standard' | 'exempt' | 'export'>('standard');
   const [vatRate, setVatRate] = useState(0.14);
   const [standardCost, setStandardCost] = useState(0);
@@ -203,13 +206,24 @@ export const ProductsMasterView: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={openCreateModal}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>إضافة صنف / منتج جديد</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* F18: the item card is reachable from the product master too. */}
+          <button
+            onClick={() => setShowItemCard(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-md transition cursor-pointer"
+          >
+            <FileText className="w-4 h-4" />
+            <span>كارت الصنف (Item Card)</span>
+          </button>
+
+          <button
+            onClick={openCreateModal}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>إضافة صنف / منتج جديد</span>
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -435,6 +449,25 @@ export const ProductsMasterView: React.FC = () => {
       </div>
 
       {/* Product Create / Edit / View Modal */}
+      {showItemCard && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className="max-w-6xl mx-auto">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-black text-base text-white">كارت الصنف — حركة المخزون التفصيلية</h3>
+              <button
+                onClick={() => setShowItemCard(false)}
+                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold"
+              >
+                إغلاق
+              </button>
+            </div>
+            <div className="bg-white rounded-2xl p-4">
+              <ItemCardReport />
+            </div>
+          </div>
+        </div>
+      )}
+
       {modalMode && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4 animate-fade-in">
           <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden text-right flex flex-col max-h-[90vh]">

@@ -145,10 +145,13 @@ export const RepresentativesView: React.FC = () => {
   const handleSettleCustody = (custodyId: string) => {
     const cashInput = prompt('المبلغ النقدي المُحصل والمسلَّم مع تسوية العهدة (اتركه فارغاً أو صفراً إن لم يوجد):', '0');
     if (cashInput === null) return;
+    const refundInput = prompt('مبلغ نقدي يُرد للشركة من العهدة إن وجد (صفر أو فارغ = لا رد):', '0');
+    if (refundInput === null) return;
 
     const res = WorkflowService.settleRepCustody({
       custodyId,
       cashCollected: Number(cashInput) > 0 ? Number(cashInput) : undefined,
+      cashRefunded: Number(refundInput) > 0 ? Number(refundInput) : undefined,
       date: new Date().toISOString().split('T')[0],
     });
 
@@ -156,6 +159,17 @@ export const RepresentativesView: React.FC = () => {
       alert(res.error || 'خطأ في تسوية العهدة');
       return;
     }
+
+    // F21: show the real treasury effect of the settlement.
+    const remaining = (res.reconciliation || []).filter(r => Math.abs(r.remaining) > 0.0001);
+    alert(
+      `تمت تسوية العهدة وترحيل القيد المحاسبي.\n` +
+      `حركة الخزينة النقدية: ${(res.treasuryDelta || 0).toFixed(2)} ج.م ` +
+      `(${res.treasuryDelta === 0 ? 'تسوية غير نقدية — لا حركة نقدية' : (res.treasuryDelta || 0) > 0 ? 'قبض' : 'صرف'}).\n` +
+      (remaining.length
+        ? `تنبيه: توجد كميات غير مُسددة في ${remaining.length} صنف — راجع كشف التسوية.`
+        : 'لا توجد كميات غير مُسددة — التسوية متوازنة.')
+    );
   };
 
   // Representative Profitability calculation

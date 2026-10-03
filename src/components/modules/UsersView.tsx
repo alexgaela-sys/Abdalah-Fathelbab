@@ -5,11 +5,18 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { MasterDataService } from '../../services/masterData';
-import { RoleName, User } from '../../types/erp';
+import { RoleName, User, PermissionAction } from '../../types/erp';
+import {
+  ALL_MODULES, ASSIGNABLE_ACTIONS, MODULE_LABELS_AR, ACTION_LABELS_AR,
+  PermissionService, ModuleKey,
+} from '../../services/permissions';
 
 export const UsersView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showAddModal, setShowAddModal] = useState(false);
+  // F23: explicit per-user, per-module, per-action permission assignment.
+  const [permUserId, setPermUserId] = useState<string>('');
+  const [permDraft, setPermDraft] = useState<Record<string, PermissionAction[]>>({});
 
   // Form State
   const [name, setName] = useState('');
@@ -80,6 +87,43 @@ export const UsersView: React.FC = () => {
     }
   };
 
+  // ---------- F23: permission matrix ----------
+  const editableUsers = db.users.filter(u => u.role !== 'Super Admin');
+  const activePermUser = db.users.find(u => u.id === permUserId) || null;
+
+  const loadPermissions = (userId: string) => {
+    setPermUserId(userId);
+    const u = db.users.find(x => x.id === userId);
+    setPermDraft(u?.permissions ? { ...u.permissions } : {});
+  };
+
+  const togglePerm = (module: ModuleKey, action: PermissionAction) => {
+    const cur = permDraft[module] || PermissionService.getActions(activePermUser?.role || 'Viewer', module);
+    const next = cur.includes(action) ? cur.filter(a => a !== action) : [...cur, action];
+    setPermDraft({ ...permDraft, [module]: next });
+  };
+
+  const savePermissions = () => {
+    if (!permUserId) return;
+    const res = MasterDataService.updateUserPermissions({
+      userId: permUserId,
+      permissions: permDraft as Record<string, string[]>,
+      options: { userId: 'usr-admin', userName: 'المشرف العام (Admin)' },
+    });
+    if (!res.success) { alert(res.error || 'تعذر حفظ الصلاحيات'); return; }
+    alert('تم حفظ الصلاحيات — يسري المبدأ فورًا على مستوى الخدمات (AuthorizationService)');
+  };
+
+  const resetPermissions = () => {
+    if (!permUserId) return;
+    const res = MasterDataService.resetUserPermissions(permUserId, {
+      userId: 'usr-admin', userName: 'المشرف العام (Admin)',
+    });
+    if (!res.success) { alert(res.error || 'تعذر إلغاء التخصيص'); return; }
+    setPermDraft({});
+    alert('تم إلغاء التخصيص والعودة إلى صلاحيات الدور');
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -131,7 +175,7 @@ export const UsersView: React.FC = () => {
                 <td className="p-3.5 font-mono font-bold text-slate-800">@{u.username}</td>
                 <td className="p-3.5 font-mono text-slate-500">
                   <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[11px]">
-                    {u.password ? '•••••' : '12345'}
+                    {u.password ? '•••••' : '—'}
                   </span>
                 </td>
                 <td className="p-3.5 font-bold text-indigo-700">
@@ -152,20 +196,124 @@ export const UsersView: React.FC = () => {
                   {u.lastLogin ? u.lastLogin.replace('T', ' ').substring(0, 16) : '—'}
                 </td>
                 <td className="p-3.5 text-center">
-                  {u.id !== 'usr-admin' && u.username !== 'admin' && (
-                    <button
-                      onClick={() => handleDeleteUser(u.id, u.name)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
-                      title="حذف المستخدم"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
+                  <div className="flex items-center justify-center gap-1.5">
+                    {u.role !== 'Super Admin' && (
+                      <button
+                        onClick={() => loadPermissions(u.id)}
+                        className={`p-1.5 rounded-lg transition cursor-pointer ${
+                          permUserId === u.id ? 'bg-amber-100 text-amber-800' : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
+                        }`}
+                        title="تخصيص الصلاحيات"
+                      >
+                        <Shield className="w-4 h-4" />
+                      </button>
+                    )}
+                    {u.id !== 'usr-admin' && u.username !== 'admin' && (
+                      <button
+                        onClick={() => handleDeleteUser(u.id, u.name)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                        title="حذف المستخدم"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* F23: EXPLICIT permission matrix (per module x per action) */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-black text-slate-900">إدارة صلاحيات المستخدمين (Permissions Matrix)</h3>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              تخصيص صريح لكل مستخدم: عرض / إضافة / تعديل / حذف / اعتماد / ترحيل لكل نموذج. الحد الحقيقي للتنفيذ هو
+              ‏AuthorizationService على مستوى الخدمات — الواجهة ترسيخ إضافي فقط ولا يمكن منح صلاحيات بتعديل المتصفح.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={permUserId}
+              onChange={(e) => loadPermissions(e.target.value)}
+              className="p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold"
+            >
+              <option value="">— اختر مستخدمًا —</option>
+              {editableUsers.map(u => (
+                <option key={u.id} value={u.id}>{u.name} ({u.username}) — {u.role}</option>
+              ))}
+            </select>
+            <button
+              onClick={savePermissions}
+              disabled={!permUserId}
+              className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-40 cursor-pointer"
+            >
+              حفظ
+            </button>
+            <button
+              onClick={resetPermissions}
+              disabled={!permUserId}
+              className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold disabled:opacity-40 cursor-pointer"
+            >
+              إلغاء التخصيص
+            </button>
+          </div>
+        </div>
+
+        {activePermUser ? (
+          <>
+            <div className="text-[11px] text-slate-600 bg-slate-50 rounded-xl p-2">
+              المستخدم: <b>{activePermUser.name}</b> — الدور: <b>{activePermUser.role}</b>.
+              التخصيص الصريح يطغى على الدور في الوحدات المحددة فقط؛ باقي الوحدات تتبع مصفوفة الدور.
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-[11px]">
+                <thead className="bg-slate-100 text-slate-700 font-bold">
+                  <tr>
+                    <th className="p-2">النموذج</th>
+                    {ASSIGNABLE_ACTIONS.map(a => (
+                      <th key={a} className="p-2 text-center">{ACTION_LABELS_AR[a]}</th>
+                    ))}
+                    <th className="p-2 text-center">مصدر</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {ALL_MODULES.map(m => {
+                    const explicit = permDraft[m];
+                    const effective = explicit || PermissionService.getActions(activePermUser.role, m);
+                    return (
+                      <tr key={m}>
+                        <td className="p-2 font-bold text-slate-800">{MODULE_LABELS_AR[m]}</td>
+                        {ASSIGNABLE_ACTIONS.map(a => (
+                          <td key={a} className="p-2 text-center">
+                            <input
+                              type="checkbox"
+                              checked={effective.includes(a)}
+                              onChange={() => togglePerm(m, a)}
+                              className="w-4 h-4 accent-slate-900 cursor-pointer"
+                            />
+                          </td>
+                        ))}
+                        <td className="p-2 text-center">
+                          <span className={`px-2 py-0.5 rounded-full font-bold ${
+                            explicit ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {explicit ? 'تخصيص صريح' : 'الدور'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-slate-400">اختر مستخدمًا لعرض وتخصيص صلاحياته.</p>
+        )}
       </div>
 
       {/* Add User Modal */}

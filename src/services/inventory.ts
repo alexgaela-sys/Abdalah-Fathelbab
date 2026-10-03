@@ -20,6 +20,12 @@ export interface StockMovementRequest {
   notes?: string;
   allowNegative?: boolean;
   isTest?: boolean;
+  /**
+   * F18: business date of the movement (YYYY-MM-DD). Defaults to today.
+   * The item card filters by this date, so a back-dated document must record
+   * ITS OWN date rather than the posting day.
+   */
+  date?: string;
   /** Output: actual cost of goods issued, computed from consumed batches */
   _actualCost?: number;
 }
@@ -40,6 +46,78 @@ export interface ConsumptionPlan {
   consumes: Array<{ batchNumber: string; quantity: number; unitCost: number; totalCost: number }>;
   actualCost: number;
   shortfall: number; // >0 when available stock is insufficient
+}
+
+export interface ItemCardRow {
+  transactionId: string;
+  date: string;
+  documentNumber: string;
+  documentType: string;
+  movementType: InventoryMovementType;
+  movementLabelAr: string;
+  warehouseId: string;
+  warehouseNameAr: string;
+  quantityIn: number;
+  quantityOut: number;
+  runningBalance: number;
+  unitCost: number;
+  value: number;
+  /** Link target for "open the source document" (nav tab + document id). */
+  link?: { tab: string; recordId: string };
+}
+
+export interface ItemCardResult {
+  itemId: string;
+  itemNameAr: string;
+  itemCode: string;
+  baseUnitId: string;
+  unitNameAr: string;
+  warehouseId: string; // '' = all warehouses
+  warehouseNameAr: string;
+  fromDate: string;
+  toDate: string;
+  openingBalance: number;
+  rows: ItemCardRow[];
+  closingBalance: number;
+  /** Actual on-hand quantity (batches) for the same selection — the truth to reconcile against. */
+  actualBalance: number;
+  /** closingBalance - actualBalance; any non-zero value is a REAL mismatch and is shown as such. */
+  mismatch: number;
+  totalIn: number;
+  totalOut: number;
+  closingValue: number;
+}
+
+const MOVEMENT_LABELS_AR: Record<string, string> = {
+  purchase_receipt: 'إشعار استلام مشتريات',
+  purchase_return: 'مرتجع مشتريات',
+  warehouse_transfer: 'تحويل مخزني',
+  production_consumption: 'صرف مواد إنتاج',
+  production_issue: 'صرف مواد إنتاج',
+  production_output: 'وارد إنتاج تام',
+  sales: 'فاتورة مبيعات',
+  sales_return: 'مرتجع مبيعات',
+  rep_loading: 'تحميل عهد مندوب',
+  rep_return: 'إرجاع من عهد مندوب',
+  scrap: 'هالك / سكراب',
+  recycling: 'إعادة تدوير',
+  inventory_adjustment: 'تسوية جرد',
+  physical_inventory: 'جرد فعلي',
+};
+
+/** Where a movement row links to, per movement type (F18: "open the source document"). */
+function movementLink(movementType: string, docNumber: string): ItemCardRow['link'] {
+  switch (movementType) {
+    case 'sales': return { tab: 'sales', recordId: docNumber };
+    case 'sales_return': return { tab: 'sales', recordId: docNumber };
+    case 'purchase_receipt': return { tab: 'purchasing', recordId: docNumber };
+    case 'purchase_return': return { tab: 'purchasing', recordId: docNumber };
+    case 'warehouse_transfer': return { tab: 'inventory', recordId: docNumber };
+    case 'production_output':
+    case 'production_issue':
+    case 'production_consumption': return { tab: 'manufacturing', recordId: docNumber };
+    default: return { tab: 'inventory', recordId: docNumber };
+  }
 }
 
 export class InventoryEngine {
@@ -241,7 +319,7 @@ export class InventoryEngine {
     let createdTx: InventoryTransaction | undefined;
 
     erpDb.mutate((draft) => {
-      const dateStr = new Date().toISOString().split('T')[0];
+      const dateStr = req.date || new Date().toISOString().split('T')[0];
       const batchNum = req.batchNumber || `BATCH-${dateStr.replace(/-/g, '')}-${generateErpId('bn').slice(-6).toUpperCase()}`;
 
       const findBatch = (): Batch | undefined =>
@@ -343,7 +421,9 @@ export class InventoryEngine {
     quantity: number,
     unitCostHint?: number,
     batchNumber?: string,
-    notes?: string
+    notes?: string,
+    /** F18: business date of the transfer (defaults to today). */
+    date?: string
   ): { success: boolean; error?: string; outTransaction?: InventoryTransaction; inTransaction?: InventoryTransaction; actualCost?: number } {
     if (sourceWarehouseId === targetWarehouseId) {
       return { success: false, error: 'لا يمكن التحويل لنفس المستودع' };
@@ -385,7 +465,7 @@ export class InventoryEngine {
 
     // ---- SINGLE ATOMIC MUTATION for BOTH sides ----
     erpDb.mutate((draft) => {
-      const dateStr = new Date().toISOString().split('T')[0];
+      const dateStr = date || new Date().toISOString().split('T')[0];
       const valueBefore = draft.batches.reduce((s, b) => s + (b.quantity || 0) * (b.unitCost || 0), 0);
 
       // 1) Deduct consumed layers from source batches (exact per-layer amounts)
@@ -514,5 +594,100 @@ export class InventoryEngine {
     });
 
     return { success: true, outTransaction: outTx, inTransaction: inTx, actualCost };
+  }
+
+  /**
+   * F18 — ITEM CARD / كارت صنف.
+   *
+   * Built strictly from the EXISTING `inventoryTransactions` ledger (one engine,
+   * one source of truth) plus the batch layers for the opening balance. Nothing
+   * is written. The ending balance is reconciled against the real on-hand batch
+   * quantity and any difference is returned explicitly (`mismatch`) so the UI
+   * can show it instead of hiding it.
+   */
+  public static getItemCard(params: {
+    itemId: string;
+    warehouseId?: string; // '' or undefined = all warehouses
+    fromDate?: string;
+    toDate?: string;
+  }): ItemCardResult {
+    const db = erpDb.getSnapshot();
+    const item = db.items.find(i => i.id === params.itemId);
+    const unitNameAr = db.units.find(u => u.id === item?.baseUnitId)?.nameAr || '';
+    const warehouseId = params.warehouseId && params.warehouseId !== 'all' ? params.warehouseId : '';
+    const warehouseNameAr = warehouseId
+      ? (db.warehouses.find(w => w.id === warehouseId)?.nameAr || warehouseId)
+      : 'كافة المستودعات';
+    const fromDate = params.fromDate || '0000-01-01';
+    const toDate = params.toDate || '9999-12-31';
+
+    const inScope = (t: InventoryTransaction) =>
+      t.itemId === params.itemId && (!warehouseId || t.warehouseId === warehouseId);
+
+    const movements = db.inventoryTransactions.filter(inScope);
+
+    // Opening balance = every movement strictly before the from date.
+    const openingBalance = movements
+      .filter(t => t.date < fromDate)
+      .reduce((s, t) => s + (t.quantityIn || 0) - (t.quantityOut || 0), 0);
+
+    const rows: ItemCardRow[] = movements
+      .filter(t => t.date >= fromDate && t.date <= toDate)
+      .sort((a, b) => {
+        const byDate = (a.date || '').localeCompare(b.date || '');
+        if (byDate !== 0) return byDate;
+        // deterministic tiebreak: warehouse, then document, then id
+        const byWh = (a.warehouseId || '').localeCompare(b.warehouseId || '');
+        if (byWh !== 0) return byWh;
+        const byDoc = (a.documentNumber || '').localeCompare(b.documentNumber || '');
+        if (byDoc !== 0) return byDoc;
+        return (a.id || '').localeCompare(b.id || '');
+      })
+      .map(t => ({
+        transactionId: t.id,
+        date: t.date,
+        documentNumber: t.documentNumber,
+        documentType: t.documentType,
+        movementType: t.movementType,
+        movementLabelAr: MOVEMENT_LABELS_AR[t.movementType] || t.movementType,
+        warehouseId: t.warehouseId,
+        warehouseNameAr: db.warehouses.find(w => w.id === t.warehouseId)?.nameAr || t.warehouseId,
+        quantityIn: t.quantityIn || 0,
+        quantityOut: t.quantityOut || 0,
+        runningBalance: 0,
+        unitCost: t.unitCost || 0,
+        value: (t.quantityIn || 0) > 0 ? (t.quantityIn || 0) * (t.unitCost || 0) : -(t.totalCost || 0),
+        link: movementLink(t.movementType, t.documentNumber),
+      }));
+
+    let running = openingBalance;
+    for (const r of rows) {
+      running += r.quantityIn - r.quantityOut;
+      r.runningBalance = running;
+    }
+
+    const closingBalance = running;
+    const actualBalance = this.getItemBalance(params.itemId, warehouseId || undefined);
+    const closingValue = this.getItemValue(params.itemId, warehouseId || undefined);
+
+    return {
+      itemId: params.itemId,
+      itemNameAr: item?.nameAr || params.itemId,
+      itemCode: item?.code || '',
+      baseUnitId: item?.baseUnitId || '',
+      unitNameAr,
+      warehouseId,
+      warehouseNameAr,
+      fromDate,
+      toDate,
+      openingBalance,
+      rows,
+      closingBalance,
+      actualBalance,
+      mismatch: Number((closingBalance - actualBalance).toFixed(6)),
+      totalIn: rows.reduce((s, r) => s + r.quantityIn, 0),
+      totalOut: rows.reduce((s, r) => s + r.quantityOut, 0),
+      closingValue,
+    };
   }
 }

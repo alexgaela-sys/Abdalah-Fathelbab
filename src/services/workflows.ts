@@ -121,9 +121,8 @@ export class WorkflowService {
     const totalAmount = subtotal + vatAmount;
     const totalAmountEGP = totalAmount * (params.currency === 'USD' ? params.exchangeRate : 1);
 
-    const invCount = db.purchaseInvoices.length + 1;
-    const invoiceNumber = `PINV-${new Date().getFullYear()}-${String(invCount).padStart(5, '0')}`;
-    const invoiceId = `pinv-${Date.now()}`;
+    const invoiceNumber = nextDocNumber(db as unknown as Record<string, unknown>, 'purchaseInvoices', 'PINV', 5, 'invoiceNumber');
+    const invoiceId = generateErpId('pinv');
 
     // 1. Prepare and Post Balanced Double-Entry Accounting Journal
     // Debit: Raw/Packaging Inventory
@@ -201,6 +200,7 @@ export class WorkflowService {
         itemId: line.itemId,
         warehouseId: params.warehouseId,
         movementType: 'purchase_receipt',
+        date: params.date,
         quantityIn: line.quantity,
         quantityOut: 0,
         unitCost: line.unitPrice * (params.currency === 'USD' ? params.exchangeRate : 1),
@@ -264,7 +264,7 @@ export class WorkflowService {
 
       // Audit Log
       draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
+        id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
         userId: params.userId || 'usr-admin',
         userName: params.userName || 'مدير المشتريات',
@@ -288,6 +288,10 @@ export class WorkflowService {
     channel: 'retail' | 'wholesale' | 'export';
     warehouseId: string;
     repId?: string;
+    /** F20: where the goods are issued from. Absent = 'warehouse' (legacy behavior). */
+    stockSource?: 'warehouse' | 'rep_custody';
+    /** F20: required when stockSource === 'rep_custody'. */
+    custodyId?: string;
     paymentMethod: 'cash' | 'credit' | 'bank_transfer' | 'cheque';
     currency: 'EGP' | 'USD';
     exchangeRate: number;
@@ -337,16 +341,52 @@ export class WorkflowService {
       return { success: false, error: 'يجب إضافة أصناف لفاتورة المبيعات' };
     }
 
-    // Check stock for all lines (including free quantities)
+    // ---- F20: stock source — warehouse OR representative custody ----
+    const stockSource = params.stockSource === 'rep_custody' ? 'rep_custody' : 'warehouse';
+    let custody: RepresentativeCustody | undefined;
+    let custodyRepId: string | undefined = params.repId;
+    if (stockSource === 'rep_custody') {
+      if (!params.custodyId) return { success: false, error: 'يجب اختيار عهدة المندوب كمصدر صرف' };
+      custody = db.representativeCustodies.find(c => c.id === params.custodyId && c.status === 'open');
+      if (!custody) return { success: false, error: 'عهدة المندوب غير موجودة أو تم تسويتها' };
+      custodyRepId = custody.repId;
+      // Custody may only serve its own representative.
+      if (params.repId && params.repId !== custody.repId) {
+        return { success: false, error: 'العهدة المختارة لا تخص المندوب المحدد' };
+      }
+    }
+
+    /** F20/F21: available quantity in the selected source for an item. */
+    const custodyAvailable = (itemId: string): number => {
+      if (!custody) return 0;
+      const ms = db.custodyMovements.filter(m => m.custodyId === custody!.id && m.itemId === itemId);
+      const loaded = ms.filter(m => m.movementType === 'loaded').reduce((s, m) => s + m.quantity, 0);
+      const sold = ms.filter(m => m.movementType === 'sold').reduce((s, m) => s + m.quantity, 0);
+      const returned = ms.filter(m => m.movementType === 'returned').reduce((s, m) => s + m.quantity, 0);
+      return loaded - sold - returned;
+    };
+
+    // Check stock for all lines (including free quantities) in the SELECTED source
     for (const line of params.lines) {
       const totalQtyToIssue = line.quantity + (line.freeQuantity || 0);
-      const stock = InventoryEngine.getItemBalance(line.itemId, params.warehouseId);
+      if (!(totalQtyToIssue > 0)) continue;
       const item = db.items.find(i => i.id === line.itemId);
-      if (stock < totalQtyToIssue) {
-        return {
-          success: false,
-          error: `رصيد الصنف (${item?.nameAr}) في المستودع المختار هو ${stock} ولا يكفي لصرف كمية ${totalQtyToIssue} (تشمل البونص المجاني)`
-        };
+      if (stockSource === 'rep_custody') {
+        const available = custodyAvailable(line.itemId);
+        if (available < totalQtyToIssue) {
+          return {
+            success: false,
+            error: `الكمية المتاحة بعهدة المندوب من الصنف (${item?.nameAr}) هي ${available} ولا تكفي لصرف ${totalQtyToIssue} (تشمل البونص المجاني)`
+          };
+        }
+      } else {
+        const stock = InventoryEngine.getItemBalance(line.itemId, params.warehouseId);
+        if (stock < totalQtyToIssue) {
+          return {
+            success: false,
+            error: `رصيد الصنف (${item?.nameAr}) في المستودع المختار هو ${stock} ولا يكفي لصرف كمية ${totalQtyToIssue} (تشمل البونص المجاني)`
+          };
+        }
       }
     }
 
@@ -357,8 +397,11 @@ export class WorkflowService {
 
     const itemsMap = new Map(db.items.map(i => [i.id, i]));
 
+    let bonusQuantity = 0;
     params.lines.forEach(l => {
       const item = itemsMap.get(l.itemId);
+      // F17: the BONUS quantity is never priced — it is a separate zero-value
+      // quantity that still leaves inventory and still hits COGS.
       const lineSub = l.quantity * l.unitPrice * (1 - ((l.discount || 0) / 100));
       // F5: invoice-level 'exempt' forces zero-rated lines regardless of item rate;
       // absent/ taxable keeps the passed (item-derived or user-overridden) rates.
@@ -366,6 +409,7 @@ export class WorkflowService {
       const lineVat = lineSub * effectiveRate;
       subtotal += lineSub;
       vatAmount += lineVat;
+      bonusQuantity += Number(l.freeQuantity) || 0;
 
       // Free quantity price = 0, but included in COGS
       const totalUnits = l.quantity + (l.freeQuantity || 0);
@@ -386,9 +430,8 @@ export class WorkflowService {
       }
     }
 
-    const invCount = db.salesInvoices.length + 1;
-    const invoiceNumber = `SINV-${new Date().getFullYear()}-${String(invCount).padStart(5, '0')}`;
-    const invoiceId = `sinv-${Date.now()}`;
+    const invoiceNumber = nextDocNumber(db as unknown as Record<string, unknown>, 'salesInvoices', 'SINV', 5, 'invoiceNumber');
+    const invoiceId = generateErpId('sinv');
 
     // Double Entry Accounting:
     // 1. Revenue & Receivable
@@ -408,7 +451,12 @@ export class WorkflowService {
 
     const vatOutputAcc = AccountingEngine.getMappedAccountId('sales_vat_output', 'acc-2103');
     const cogsAcc = AccountingEngine.getMappedAccountId(params.channel === 'export' ? 'cogs_export' : 'cogs_local', 'acc-5101');
-    const finishedInvAcc = AccountingEngine.getMappedAccountId(params.channel === 'export' ? 'inventory_finished_export' : 'inventory_finished_local', 'acc-1109');
+    // F20: goods issued from a representative custody relieve the custody account
+    // (1107) — the finished-goods warehouse stock was already relieved when the
+    // goods were LOADED to the representative, so it must NOT be relieved twice.
+    const finishedInvAcc = stockSource === 'rep_custody'
+      ? AccountingEngine.getMappedAccountId('rep_custody', 'acc-1107')
+      : AccountingEngine.getMappedAccountId(params.channel === 'export' ? 'inventory_finished_export' : 'inventory_finished_local', 'acc-1109');
 
     const subtotalEGP = subtotal * (params.currency === 'USD' ? params.exchangeRate : 1);
     const vatEGP = vatAmount * (params.currency === 'USD' ? params.exchangeRate : 1);
@@ -476,15 +524,17 @@ export class WorkflowService {
         id: '',
         journalEntryId: '',
         accountId: finishedInvAcc,
-        accountCode: params.channel === 'export' ? '1110' : '1109',
-        accountNameAr: params.channel === 'export' ? 'مخزون الإنتاج التام - تصدير' : 'مخزون الإنتاج التام - محلي',
+        accountCode: stockSource === 'rep_custody' ? '1107' : (params.channel === 'export' ? '1110' : '1109'),
+        accountNameAr: stockSource === 'rep_custody' ? 'عهد مناديب المبيعات (بضائع ونقدية)' : (params.channel === 'export' ? 'مخزون الإنتاج التام - تصدير' : 'مخزون الإنتاج التام - محلي'),
         debit: 0,
         credit: cogsTotalEGP,
         currency: 'EGP' as const,
         originalAmount: cogsTotalEGP,
         exchangeRate: 1,
         costCenterId: params.channel === 'export' ? 'cc-export' : 'cc-sales',
-        description: `صرف مخزون إنتاج تام لفاتورة ${invoiceNumber}`,
+        description: stockSource === 'rep_custody'
+          ? `صرف من عهدة المندوب لفاتورة ${invoiceNumber}`
+          : `صرف مخزون إنتاج تام لفاتورة ${invoiceNumber}`,
       }
     ];
 
@@ -501,22 +551,44 @@ export class WorkflowService {
       return { success: false, error: jvResult.error };
     }
 
-    // Perpetual Stock Deduction
-    params.lines.forEach(line => {
-      const item = itemsMap.get(line.itemId);
-      const totalQty = line.quantity + (line.freeQuantity || 0);
-      InventoryEngine.recordMovement({
-        itemId: line.itemId,
-        warehouseId: params.warehouseId,
-        movementType: 'sales',
-        quantityIn: 0,
-        quantityOut: totalQty,
-        unitCost: item?.standardCost || 50,
-        documentType: 'فاتورة مبيعات',
-        documentNumber: invoiceNumber,
-        notes: `مبيعات للعميل ${customer.name}${line.freeQuantity ? ` (منها ${line.freeQuantity} بونص مجاني)` : ''}`,
+    // Perpetual Stock Deduction — F20: only when the goods come from a warehouse.
+    // Custody issues are tracked on custodyMovements (loaded - sold - returned).
+    if (stockSource === 'warehouse') {
+      params.lines.forEach(line => {
+        const item = itemsMap.get(line.itemId);
+        const totalQty = line.quantity + (line.freeQuantity || 0);
+        InventoryEngine.recordMovement({
+          itemId: line.itemId,
+          warehouseId: params.warehouseId,
+          movementType: 'sales',
+          quantityIn: 0,
+          quantityOut: totalQty,
+          unitCost: item?.standardCost || 50,
+          documentType: 'فاتورة مبيعات',
+          documentNumber: invoiceNumber,
+          notes: `مبيعات للعميل ${customer.name}${line.freeQuantity ? ` (منها ${line.freeQuantity} بونص مجاني)` : ''}`,
+          date: params.date,
+        });
       });
-    });
+    }
+
+    // F20: custody issue movements (invoice -> rep -> custody -> item -> qty -> cost)
+    const custodyMovements: CustodyMovement[] = [];
+    if (stockSource === 'rep_custody' && custody) {
+      for (const line of params.lines) {
+        const totalQty = line.quantity + (line.freeQuantity || 0);
+        custodyMovements.push({
+          id: generateErpId('cstm'),
+          custodyId: custody!.id,
+          itemId: line.itemId,
+          movementType: 'sold',
+          quantity: totalQty,
+          unitPrice: line.unitPrice,
+          date: params.date,
+          referenceDoc: invoiceNumber,
+        });
+      }
+    }
 
     let createdInvoice: SalesInvoice | undefined;
 
@@ -534,7 +606,7 @@ export class WorkflowService {
         customerId: params.customerId,
         channel: params.channel,
         warehouseId: params.warehouseId,
-        repId: params.repId,
+        repId: custodyRepId,
         paymentMethod: params.paymentMethod,
         currency: params.currency,
         exchangeRate: params.exchangeRate,
@@ -549,9 +621,34 @@ export class WorkflowService {
         notes: params.notes,
         exportShipmentId: params.exportShipmentId,
         taxTreatment: params.taxTreatment,
+        stockSource,
+        custodyId: custody?.id,
+        bonusQuantity,
+        cashAmount: params.paymentMethod === 'cash' ? totalAmountEGP : 0,
       };
 
       draft.salesInvoices.push(createdInvoice);
+
+      // F25/F29: a cash sale MUST also exist in the treasury transaction ledger
+      // (the GL cash line is posted above; this is its treasury document).
+      if (params.paymentMethod === 'cash' && totalAmountEGP > 0) {
+        draft.treasuryTransactions.push({
+          id: generateErpId('ctx'),
+          receiptNumber: nextDocNumber(draft as unknown as Record<string, unknown>, 'treasuryTransactions', 'CSH', 4, 'receiptNumber'),
+          type: 'cash_receipt',
+          amount: totalAmountEGP,
+          partyName: customer.name,
+          date: params.date,
+          description: `مبيعات نقدية - فاتورة ${invoiceNumber}${bonusQuantity ? ` (تشمل ${bonusQuantity} بونص مجاني بقيمة صفر)` : ''}`,
+          glAccountId: debitAcc,
+          documentType: 'sales_invoice',
+          journalEntryId: jvResult.entry?.id,
+          isTest: params.isTest,
+        });
+      }
+
+      // F20: custody movements for this invoice
+      custodyMovements.forEach(m => draft.custodyMovements.push(m));
 
       // Lines
       params.lines.forEach((l, idx) => {
@@ -578,7 +675,7 @@ export class WorkflowService {
 
       // Audit Log
       draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
+        id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
         userId: params.userId || 'usr-admin',
         userName: params.userName || 'مدير المبيعات',
@@ -622,9 +719,8 @@ export class WorkflowService {
     const customer = db.customers.find(c => c.id === params.customerId);
     if (!customer) return { success: false, error: 'العميل غير مسجل' };
 
-    const paymentCount = db.payments.length + 1;
-    const paymentNumber = `RCPT-${new Date().getFullYear()}-${String(paymentCount).padStart(5, '0')}`;
-    const paymentId = `pmt-${Date.now()}`;
+    const paymentNumber = nextDocNumber(db as unknown as Record<string, unknown>, 'payments', 'RCPT', 5, 'paymentNumber');
+    const paymentId = generateErpId('pmt');
     const amountEGP = params.amount * (params.currency === 'USD' ? params.exchangeRate : 1);
 
     // Double Entry:
@@ -692,7 +788,7 @@ export class WorkflowService {
       // If cheque payment, create Cheque record
       let chqId: string | undefined;
       if (params.paymentMethod === 'cheque' && params.chequeNumber) {
-        chqId = `chq-${Date.now()}`;
+        chqId = generateErpId('chq');
         draft.cheques.push({
           id: chqId,
           chequeNumber: params.chequeNumber,
@@ -733,11 +829,27 @@ export class WorkflowService {
 
       draft.payments.push(createdPayment);
 
-      // Allocations
+      // F29: the cash leg of a customer receipt belongs in the treasury ledger too
+      // (the journal above already moved GL 1101/1102).
+      if (params.paymentMethod === 'cash' && amountEGP > 0) {
+        draft.treasuryTransactions.push({
+          id: generateErpId('ctx'),
+          receiptNumber: nextDocNumber(draft as unknown as Record<string, unknown>, 'treasuryTransactions', 'CSH', 4, 'receiptNumber'),
+          type: 'cash_receipt',
+          amount: amountEGP,
+          partyName: customer.name,
+          date: params.date,
+          description: `تحصيل نقدي من العميل - سند ${paymentNumber}`,
+          glAccountId: debitAcc,
+          documentType: 'customer_payment',
+          journalEntryId: jvResult.entry?.id,
+          isTest: params.isTest,
+        });
+      }
       if (params.allocatedInvoiceIds) {
         params.allocatedInvoiceIds.forEach(invId => {
           draft.paymentAllocations.push({
-            id: `pa-${Date.now()}-${invId}`,
+            id: `${generateErpId('pa')}-${invId}`,
             paymentId,
             invoiceId: invId,
             invoiceType: 'sales',
@@ -748,7 +860,7 @@ export class WorkflowService {
 
       // Audit Log
       draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
+        id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
         userId: params.userId || 'usr-admin',
         userName: params.userName || 'محاسب الخزينة',
@@ -791,9 +903,8 @@ export class WorkflowService {
     const supplier = db.suppliers.find(s => s.id === params.supplierId);
     if (!supplier) return { success: false, error: 'المورد غير مسجل' };
 
-    const paymentCount = db.payments.length + 1;
-    const paymentNumber = `VMT-${new Date().getFullYear()}-${String(paymentCount).padStart(5, '0')}`;
-    const paymentId = `pmt-${Date.now()}`;
+    const paymentNumber = nextDocNumber(db as unknown as Record<string, unknown>, 'payments', 'VMT', 5, 'paymentNumber');
+    const paymentId = generateErpId('pmt');
     const amountEGP = params.amount * (params.currency === 'USD' ? params.exchangeRate : 1);
 
     // Double Entry:
@@ -860,7 +971,7 @@ export class WorkflowService {
       // Outgoing Cheque
       let chqId: string | undefined;
       if (params.paymentMethod === 'cheque' && params.chequeNumber) {
-        chqId = `chq-${Date.now()}`;
+        chqId = generateErpId('chq');
         draft.cheques.push({
           id: chqId,
           chequeNumber: params.chequeNumber,
@@ -901,9 +1012,26 @@ export class WorkflowService {
 
       draft.payments.push(createdPayment);
 
+      // F29: cash paid to a supplier is a treasury movement (GL 1101 was debited above).
+      if (params.paymentMethod === 'cash' && amountEGP > 0) {
+        draft.treasuryTransactions.push({
+          id: generateErpId('ctx'),
+          receiptNumber: nextDocNumber(draft as unknown as Record<string, unknown>, 'treasuryTransactions', 'CSH', 4, 'receiptNumber'),
+          type: 'cash_payment',
+          amount: amountEGP,
+          partyName: supplier.name,
+          date: params.date,
+          description: `سداد نقدي للمورد - سند ${paymentNumber}`,
+          glAccountId: creditAcc,
+          documentType: 'supplier_payment',
+          journalEntryId: jvResult.entry?.id,
+          isTest: params.isTest,
+        });
+      }
+
       // Audit Log
       draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
+        id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
         userId: params.userId || 'usr-admin',
         userName: params.userName || 'محاسب الخزينة',
@@ -931,10 +1059,9 @@ export class WorkflowService {
       return { success: false, error: `المندوب (${rep.name}) لديه عهدة مفتوحة بالفعل برقم (${existing.custodyNumber})، يجب تسويتها أولاً` };
     }
 
-    const count = db.representativeCustodies.length + 1;
-    const custodyNumber = `CUST-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
+    const custodyNumber = nextDocNumber(db as unknown as Record<string, unknown>, 'representativeCustodies', 'CUST', 4, 'custodyNumber');
     const newCustody: RepresentativeCustody = {
-      id: `cst-${Date.now()}`,
+      id: generateErpId('cst'),
       custodyNumber,
       repId,
       status: 'open',
@@ -973,6 +1100,7 @@ export class WorkflowService {
       itemId: params.itemId,
       warehouseId: params.warehouseId,
       movementType: 'rep_loading',
+      date: params.date,
       quantityIn: 0,
       quantityOut: params.quantity,
       unitCost: item?.standardCost || 50,
@@ -985,7 +1113,7 @@ export class WorkflowService {
 
     erpDb.mutate(draft => {
       draft.custodyMovements.push({
-        id: `cstm-${Date.now()}`,
+        id: generateErpId('cstm'),
         custodyId: params.custodyId,
         itemId: params.itemId,
         movementType: 'loaded',
@@ -1016,6 +1144,7 @@ export class WorkflowService {
       itemId: params.itemId,
       warehouseId: params.warehouseId,
       movementType: 'rep_return',
+      date: params.date,
       quantityIn: params.quantity,
       quantityOut: 0,
       unitCost: item?.standardCost || 50,
@@ -1026,7 +1155,7 @@ export class WorkflowService {
 
     erpDb.mutate(draft => {
       draft.custodyMovements.push({
-        id: `cstm-${Date.now()}`,
+        id: generateErpId('cstm'),
         custodyId: params.custodyId,
         itemId: params.itemId,
         movementType: 'returned',
@@ -1067,7 +1196,7 @@ export class WorkflowService {
     if (params.destination === 'scrap') targetWh = 'wh-scrap';
     if (params.destination === 'saleable') targetWh = 'wh-local';
 
-    const inspId = `qi-${Date.now()}`;
+    const inspId = generateErpId('qi');
     const insp: QualityInspection = {
       id: inspId,
       documentType: params.documentType,
@@ -1089,7 +1218,7 @@ export class WorkflowService {
 
       // Audit Log
       draft.auditLogs.push({
-        id: `aud-${Date.now()}`,
+        id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
         userId: 'usr-admin',
         userName: params.inspectorName,
@@ -1149,12 +1278,21 @@ export class WorkflowService {
       : [];
     let revenueNet = 0;
     let vatTotal = 0;
-    params.lines.forEach(l => {
+    // F17 + F22: the return inherits BOTH the tax treatment AND the zero-value
+    // bonus nature of the original line. Any quantity beyond the originally
+    // invoiced (paid) quantity, up to the original bonus quantity, is reversed
+    // at price 0.00 and carries no VAT — a bonus can never create revenue or VAT.
+    const lineEconomics = params.lines.map(l => {
       const origLine = originalInvoiceLines.find(sl => sl.itemId === l.itemId);
       const effectiveVatRate = origLine ? (origLine.vatRate || 0) : (l.vatRate || 0);
-      const lineNet = l.quantity * l.unitPrice;
+      const bonusQty = origLine
+        ? Math.min(l.quantity, Number(origLine.freeQuantity) || 0)
+        : Math.min(l.quantity, Number((l as { freeQuantity?: number }).freeQuantity) || 0);
+      const paidQty = Math.max(0, l.quantity - bonusQty);
+      const lineNet = paidQty * l.unitPrice;
       revenueNet += lineNet;
       vatTotal += lineNet * effectiveVatRate;
+      return { line: l, origLine, bonusQty, paidQty, effectiveVatRate, lineNet };
     });
     const totalAmount = revenueNet + vatTotal;
 
@@ -1185,20 +1323,26 @@ export class WorkflowService {
     );
 
     const revLines: JLine[] = [
-      jl(revAcc, revenueNet, 0, revenueNet, exchangeRate, 'EGP', `مرتجع مبيعات ${returnNumber} - إلغاء إيراد`),
+      ...(revenueNet > 0 ? [jl(revAcc, revenueNet, 0, revenueNet, exchangeRate, 'EGP', `مرتجع مبيعات ${returnNumber} - إلغاء إيراد`)] : []),
       ...(vatTotal > 0 ? [jl(vatAcc, vatTotal, 0, vatTotal, exchangeRate, 'EGP', `مرتجع مبيعات ${returnNumber} - عكس ضريبة مخرجات`)] : []),
-      jl(recvAcc, 0, totalAmount, totalAmount, exchangeRate, 'EGP', `مرتجع مبيعات ${returnNumber} - تخفيض مديونية العميل ${customer.name}`),
+      ...(totalAmount > 0 ? [jl(recvAcc, 0, totalAmount, totalAmount, exchangeRate, 'EGP', `مرتجع مبيعات ${returnNumber} - تخفيض مديونية العميل ${customer.name}`)] : []),
     ];
 
-    const revJv = AccountingEngine.postJournal({
-      date: params.date,
-      reference: returnNumber,
-      description: `مرتجع مبيعات رقم ${returnNumber} للعميل ${customer.name} - السبب: ${params.reason}`,
-      sourceDocumentType: 'sales_return',
-      sourceDocumentId: returnId,
-      lines: revLines,
-    }, params.userId, params.userName, params.isTest);
-    if (!revJv.success) return { success: false, error: revJv.error };
+    // F17: returning a purely bonus (zero-value) line has NO revenue and NO VAT
+    // to reverse — an empty journal is never posted (it would be unbalanced).
+    let revJvId: string | undefined;
+    if (revLines.length >= 2) {
+      const revJv = AccountingEngine.postJournal({
+        date: params.date,
+        reference: returnNumber,
+        description: `مرتجع مبيعات رقم ${returnNumber} للعميل ${customer.name} - السبب: ${params.reason}`,
+        sourceDocumentType: 'sales_return',
+        sourceDocumentId: returnId,
+        lines: revLines,
+      }, params.userId, params.userName, params.isTest);
+      if (!revJv.success) return { success: false, error: revJv.error };
+      revJvId = revJv.entry?.id;
+    }
 
     // COGS reversal: Dr Finished Inventory | Cr COGS (restores inventory value)
     const cogsAcc = AccountingEngine.getMappedAccountId(channel === 'export' ? 'cogs_export' : 'cogs_local', channel === 'export' ? 'acc-5102' : 'acc-5101');
@@ -1223,6 +1367,7 @@ export class WorkflowService {
         itemId: r.itemId,
         warehouseId: r.routing.warehouseId,
         movementType: 'sales_return',
+        date: params.date,
         quantityIn: r.quantity,
         quantityOut: 0,
         unitCost: r.unitCost,
@@ -1247,20 +1392,24 @@ export class WorkflowService {
         totalAmount,
         totalVat: vatTotal,
         status: 'posted',
-        journalEntryId: revJv.entry?.id,
+        journalEntryId: revJvId || cogsJv.entry?.id,
         isTest: params.isTest,
       };
       draft.salesReturns.push(created);
 
       params.lines.forEach((l, idx) => {
         const routing = receiptLines[idx].routing;
+        const econ = lineEconomics[idx];
         draft.salesReturnLines.push({
           id: `sretl-${returnId}-${idx + 1}`,
           returnId,
           itemId: l.itemId,
           quantity: l.quantity,
-          unitPrice: l.unitPrice,
+          // F17: a returned bonus piece stays at zero value.
+          unitPrice: econ.bonusQty >= l.quantity ? 0 : l.unitPrice,
           batchNumber: l.batchNumber || '',
+          freeQuantity: econ.bonusQty,
+          vatRate: econ.effectiveVatRate,
           qualityDestination: (params.inspectionOverrides?.[l.itemId] as SalesReturnLine['qualityDestination']) || 'saleable',
           destinationWarehouseId: routing.warehouseId,
         });
@@ -1345,6 +1494,7 @@ export class WorkflowService {
         itemId: l.itemId,
         warehouseId: params.warehouseId,
         movementType: 'purchase_return',
+        date: params.date,
         quantityIn: 0,
         quantityOut: l.quantity,
         unitCost: 0,
@@ -1556,6 +1706,7 @@ export class WorkflowService {
         itemId: m.itemId,
         warehouseId: params.warehouseId,
         movementType: 'inventory_adjustment',
+        date: params.date,
         quantityIn: m.direction === 'in' ? m.qty : 0,
         quantityOut: m.direction === 'out' ? m.qty : 0,
         unitCost: m.unitCost,
@@ -1610,7 +1761,8 @@ export class WorkflowService {
     containerNumber?: string;
     usdRevenue: number;
     exchangeRate: number;
-    productCost: number;
+    /** F26: optional — when a linked invoice exists the real COGS is derived from it. */
+    productCost?: number;
     shippingCost: number;
     portCosts: number;
     customsCost: number;
@@ -1636,7 +1788,8 @@ export class WorkflowService {
     // createSalesInvoice(channel='export') — the shipment NEVER re-posts them.
     let usdRevenue = Number(params.usdRevenue);
     let exchangeRate = Number(params.exchangeRate);
-    let productCost = Number(params.productCost);
+    let productCost = Number(params.productCost) || 0;
+    let productCostDerived = false;
     let linkedInvoice: SalesInvoice | undefined;
     if (params.salesInvoiceId) {
       const inv = db.salesInvoices.find(i => i.id === params.salesInvoiceId);
@@ -1657,7 +1810,22 @@ export class WorkflowService {
       // Derive the shipment's commercial figures from the actual invoice (F12.4).
       usdRevenue = inv.subtotal;
       exchangeRate = inv.exchangeRate;
-      productCost = inv.cogsTotal; // actual COGS (EGP) already posted by the invoice
+      // F26: finished-goods cost is AUTO-DERIVED from the linked invoice's lines
+      // (quantity + free quantity x the line unit cost = the COGS the invoice posted).
+      // The user is never asked to re-enter a cost the system already knows.
+      const linesOfInvoice = db.salesInvoiceLines.filter(l => l.invoiceId === inv.id);
+      const derivedFromLines = linesOfInvoice.reduce(
+        (s, l) => s + ((l.quantity + (l.freeQuantity || 0)) * (l.unitCost || 0)),
+        0
+      );
+      productCost = derivedFromLines > 0
+        ? derivedFromLines * (inv.currency === 'USD' ? inv.exchangeRate : 1)
+        : inv.cogsTotal;
+      productCostDerived = true;
+    }
+
+    if (!productCostDerived && !(productCost > 0)) {
+      return { success: false, error: 'تكلفة المنتج غير محددة — اربط الشحنة بفاتورة التصدير ليتم اشتقاق التكلفة تلقائيًا من تكلفة المبيعات الفعلية' };
     }
 
     if (exchangeRate <= 0) return { success: false, error: 'سعر الصرف يجب أن يكون أكبر من صفر' };
@@ -2103,6 +2271,11 @@ export class WorkflowService {
     );
     const supAcc = AccountingEngine.getMappedAccountId('supplier_payable', 'acc-2101');
     const bankAcc = bank?.glAccountId || AccountingEngine.getMappedAccountId('bank_egp', 'acc-1102');
+    // F24: the bounce journal must IDENTIFY the exact customer (or supplier) the
+    // receivable/AP effect is posted against — never a generic revenue account.
+    const partyName = cheque.partyType === 'customer'
+      ? (db.customers.find(c => c.id === cheque.partyId)?.name || '')
+      : (db.suppliers.find(s => s.id === cheque.partyId)?.name || '');
 
     const isBounce = params.newStatus === 'bounced' || params.newStatus === 'returned';
     const needsRecognition = !cheque.receiptJournalId;
@@ -2114,11 +2287,11 @@ export class WorkflowService {
       if (isBounce) {
         if (!needsRecognition) {
           plan.push({
-            description: `ارتجاع شيك وارد رقم ${cheque.chequeNumber} - عكس الاعتراف بالأصلية (${cheque.receiptJournalId || ''})`,
+            description: `ارتجاع شيك وارد رقم ${cheque.chequeNumber} من العميل ${partyName} - عكس الاعتراف بالأصلية (${cheque.receiptJournalId || ''})`,
             reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
             isRecognition: false,
             lines: [
-              jl(recvAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `إعادة تحميل العميل بمديونية شيك مرتد ${cheque.chequeNumber}`),
+              jl(recvAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `إعادة تحميل العميل ${partyName} بمديونية شيك مرتد ${cheque.chequeNumber}`),
               jl(underCollAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `عكس أوراق قبض شيك مرتد ${cheque.chequeNumber}`),
             ],
           });
@@ -2164,12 +2337,12 @@ export class WorkflowService {
       if (isBounce) {
         if (!needsRecognition) {
           plan.push({
-            description: `ارتجاع شيك صادر رقم ${cheque.chequeNumber} - عكس الاعتراف بالأصلية (${cheque.receiptJournalId || ''})`,
+            description: `ارتجاع شيك صادر رقم ${cheque.chequeNumber} للمورد ${partyName} - عكس الاعتراف بالأصلية (${cheque.receiptJournalId || ''})`,
             reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
             isRecognition: false,
             lines: [
               jl(payableAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `إلغاء ورقة دفع شيك مرتد ${cheque.chequeNumber}`),
-              jl(supAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `إعادة تحميل المورد بمستحقات شيك مرتد ${cheque.chequeNumber}`),
+              jl(supAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `إعادة تحميل المورد ${partyName} بمستحقات شيك مرتد ${cheque.chequeNumber}`),
             ],
           });
         }
@@ -2657,12 +2830,13 @@ export class WorkflowService {
    */
   public static settleRepCustody(params: {
     custodyId: string;
-    cashCollected?: number; // cash the rep hands over at settlement
+    cashCollected?: number; // cash the rep hands over at settlement (treasury IN)
+    cashRefunded?: number;  // cash the company refunds to the rep (treasury OUT)
     date: string;
     userId?: string;
     userName?: string;
     isTest?: boolean;
-  }): { success: boolean; error?: string } {
+  }): { success: boolean; error?: string; reconciliation?: Array<{ itemId: string; loaded: number; sold: number; returned: number; remaining: number }>; treasuryDelta?: number } {
     const db = erpDb.getSnapshot();
     const custody = db.representativeCustodies.find(c => c.id === params.custodyId);
     if (!custody) return { success: false, error: 'العهدة غير موجودة' };
@@ -2678,36 +2852,38 @@ export class WorkflowService {
       reconciliation.push({ itemId, loaded, sold, returned, remaining: loaded - sold - returned });
     }
 
-    // Post cash collection if any
-    if (params.cashCollected && params.cashCollected > 0) {
-      const res = WorkflowService.recordCustomerPayment({
-        customerId: '', // placeholder replaced below
-        amount: 0,
-        currency: 'EGP',
-        exchangeRate: 1,
-        paymentMethod: 'cash',
-        date: params.date,
-        reference: `تسوية عهدة ${custody.custodyNumber}`,
-      });
-      // The generic recordCustomerPayment requires a customer; here cash from rep is a custody settlement,
-      // so we record a direct treasury receipt instead.
-      void res;
+    const cashCollected = Number(params.cashCollected) || 0;
+    const cashRefunded = Number(params.cashRefunded) || 0;
+    if (cashCollected < 0 || cashRefunded < 0) {
+      return { success: false, error: 'مبالغ التسوية النقدية يجب أن تكون أرقامًا موجبة' };
     }
 
+    const rep = db.salesReps.find(r => r.id === custody.repId);
+
+    // F21: treasury moves ONLY with real cash.
+    //  - cashCollected  -> Dr Cash 1101 | Cr Custody 1107  (treasury IN)
+    //  - cashRefunded   -> Dr Custody 1107 | Cr Cash 1101  (treasury OUT)
+    //  - neither        -> purely non-cash: NO cash movement at all.
     let jvId: string | undefined;
-    if (params.cashCollected && params.cashCollected > 0) {
+    if (cashCollected > 0 || cashRefunded > 0) {
       const cashAcc = AccountingEngine.getMappedAccountId('cash_treasury', 'acc-1101');
       const custodyAcc = AccountingEngine.getMappedAccountId('rep_custody', 'acc-1107');
+      const lines: JLine[] = [];
+      if (cashCollected > 0) {
+        lines.push(jl(cashAcc, cashCollected, 0, cashCollected, 1, 'EGP', `استلام نقدي من تسوية عهدة ${custody.custodyNumber}`));
+        lines.push(jl(custodyAcc, 0, cashCollected, cashCollected, 1, 'EGP', `تخفيض عهدة المندوب النقدية ${custody.custodyNumber}`));
+      }
+      if (cashRefunded > 0) {
+        lines.push(jl(custodyAcc, cashRefunded, 0, cashRefunded, 1, 'EGP', `زيادة عهدة المندوب النقدية ${custody.custodyNumber} (استرداد)`));
+        lines.push(jl(cashAcc, 0, cashRefunded, cashRefunded, 1, 'EGP', `صرف نقدي لرد تسوية عهدة ${custody.custodyNumber}`));
+      }
       const jv = AccountingEngine.postJournal({
         date: params.date,
         reference: `CUST-SETTLE-${custody.custodyNumber}`,
-        description: `تسوية عهدة مندوب ${custody.custodyNumber} - استلام نقدي` ,
+        description: `تسوية عهدة مندوب ${custody.custodyNumber}${cashCollected > 0 ? ` - استلام نقدي ${cashCollected}` : ''}${cashRefunded > 0 ? ` - رد نقدي ${cashRefunded}` : ''}`,
         sourceDocumentType: 'rep_custody_settlement',
         sourceDocumentId: custody.id,
-        lines: [
-          jl(cashAcc, params.cashCollected, 0, params.cashCollected, 1, 'EGP', `استلام نقدي من تسوية عهدة ${custody.custodyNumber}`),
-          jl(custodyAcc, 0, params.cashCollected, params.cashCollected, 1, 'EGP', `تخفيض عهدة المندوب النقدية`),
-        ],
+        lines,
       }, params.userId, params.userName, params.isTest);
       if (!jv.success) return { success: false, error: jv.error };
       jvId = jv.entry?.id;
@@ -2721,6 +2897,39 @@ export class WorkflowService {
         c.closeDate = params.date;
       }
 
+      // F21/F29: the treasury ledger carries the same cash the GL just moved.
+      const cashAcc = AccountingEngine.getMappedAccountId('cash_treasury', 'acc-1101');
+      if (cashCollected > 0) {
+        draft.treasuryTransactions.push({
+          id: generateErpId('ctx'),
+          receiptNumber: nextDocNumber(draft as unknown as Record<string, unknown>, 'treasuryTransactions', 'CSH', 4, 'receiptNumber'),
+          type: 'cash_receipt',
+          amount: cashCollected,
+          partyName: rep?.name || custody.custodyNumber,
+          date: params.date,
+          description: `تحصيل نقدي من تسوية عهدة المندوب ${custody.custodyNumber}`,
+          glAccountId: cashAcc,
+          documentType: 'rep_custody_settlement',
+          journalEntryId: jvId,
+          isTest: params.isTest,
+        });
+      }
+      if (cashRefunded > 0) {
+        draft.treasuryTransactions.push({
+          id: generateErpId('ctx'),
+          receiptNumber: nextDocNumber(draft as unknown as Record<string, unknown>, 'treasuryTransactions', 'CSH', 4, 'receiptNumber'),
+          type: 'cash_payment',
+          amount: cashRefunded,
+          partyName: rep?.name || custody.custodyNumber,
+          date: params.date,
+          description: `صرف نقدي لرد تسوية عهدة المندوب ${custody.custodyNumber}`,
+          glAccountId: cashAcc,
+          documentType: 'rep_custody_settlement',
+          journalEntryId: jvId,
+          isTest: params.isTest,
+        });
+      }
+
       draft.auditLogs.push({
         id: generateErpId('aud'),
         timestamp: new Date().toISOString(),
@@ -2729,11 +2938,15 @@ export class WorkflowService {
         module: 'المناديب - تسوية العهد',
         action: 'approve',
         recordId: custody.id,
-        description: `تسوية وإغلاق عهدة ${custody.custodyNumber}: ${reconciliation.length} صنف، بقايا غير مباعة ${reconciliation.filter(r => r.remaining > 0).length} صنف${jvId ? ' مع ترحيل القيد المحاسبي' : ''}`,
+        description: `تسوية وإغلاق عهدة ${custody.custodyNumber}: ${reconciliation.length} صنف، بقايا غير مباعة ${reconciliation.filter(r => r.remaining > 0).length} صنف${jvId ? ` مع ترحيل القيد المحاسبي - صافي حركة الخزينة ${cashCollected - cashRefunded}` : ' (تسوية غير نقدية - لا حركة نقدية)'}`,
       });
     });
 
-    return { success: true };
+    return {
+      success: true,
+      reconciliation,
+      treasuryDelta: Number((cashCollected - cashRefunded).toFixed(2)),
+    };
   }
 
   /**
@@ -2873,6 +3086,7 @@ export class WorkflowService {
         itemId: params.itemId,
         warehouseId: sourceWh,
         movementType: params.destination === 'recycling' ? 'recycling' : 'scrap',
+        date: params.date,
         quantityIn: 0,
         quantityOut: params.inspectedQuantity,
         unitCost: 0,
@@ -2889,6 +3103,7 @@ export class WorkflowService {
         itemId: params.itemId,
         warehouseId: routing.warehouseId,
         movementType: params.destination === 'recycling' ? 'recycling' : 'scrap',
+        date: params.date,
         quantityIn: params.inspectedQuantity,
         quantityOut: 0,
         unitCost,

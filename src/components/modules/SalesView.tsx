@@ -24,6 +24,9 @@ export const SalesView: React.FC = () => {
   const [customerId, setCustomerId] = useState('');
   const [channel, setChannel] = useState<SalesChannel>('wholesale');
   const [warehouseId, setWarehouseId] = useState('wh-local');
+  // F20: stock source — warehouse OR representative custody
+  const [stockSource, setStockSource] = useState<'warehouse' | 'rep_custody'>('warehouse');
+  const [custodyId, setCustodyId] = useState('');
   const [repId, setRepId] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('credit');
   const [currency, setCurrency] = useState<'EGP' | 'USD'>('EGP');
@@ -53,6 +56,9 @@ export const SalesView: React.FC = () => {
   const finishedProducts = db.items.filter(i => i.itemType === 'finished_product' && i.active);
   const salesReps = db.salesReps.filter(r => r.active);
   const warehouses = db.warehouses.filter(w => w.type === 'local_finished' || w.type === 'export_finished');
+  // F20: open custodies available as a stock source
+  const openCustodies = db.representativeCustodies.filter(c => c.status === 'open');
+  const selectedCustody = db.representativeCustodies.find(c => c.id === custodyId);
 
   const addLine = (e: React.MouseEvent<HTMLButtonElement>, channelOverride?: SalesChannel) => {
     e.preventDefault();
@@ -192,6 +198,8 @@ export const SalesView: React.FC = () => {
       channel,
       warehouseId,
       repId: repId || undefined,
+      stockSource,
+      custodyId: stockSource === 'rep_custody' ? (custodyId || undefined) : undefined,
       paymentMethod,
       currency,
       exchangeRate,
@@ -406,17 +414,60 @@ export const SalesView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">مستودع الصرف</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">مصدر الصرف (Stock Source)</label>
                   <select
-                    value={warehouseId}
-                    onChange={(e) => setWarehouseId(e.target.value)}
+                    value={stockSource}
+                    onChange={(e) => {
+                      const v = e.target.value as 'warehouse' | 'rep_custody';
+                      setStockSource(v);
+                      if (v === 'rep_custody' && !custodyId && openCustodies[0]) setCustodyId(openCustodies[0].id);
+                    }}
                     className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                   >
-                    {warehouses.map(w => (
-                      <option key={w.id} value={w.id}>{w.nameAr}</option>
-                    ))}
+                    <option value="warehouse">مستودع (Warehouse)</option>
+                    <option value="rep_custody">عهدة مندوب (Representative Custody)</option>
                   </select>
                 </div>
+
+                {stockSource === 'warehouse' ? (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">مستودع الصرف</label>
+                    <select
+                      value={warehouseId}
+                      onChange={(e) => setWarehouseId(e.target.value)}
+                      className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                    >
+                      {warehouses.map(w => (
+                        <option key={w.id} value={w.id}>{w.nameAr}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">عهدة المندوب</label>
+                    <select
+                      value={custodyId}
+                      onChange={(e) => {
+                        setCustodyId(e.target.value);
+                        const c = openCustodies.find(x => x.id === e.target.value);
+                        if (c) setRepId(c.repId);
+                      }}
+                      className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                    >
+                      <option value="">— اختر العهدة المفتوحة —</option>
+                      {openCustodies.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.custodyNumber} — {db.salesReps.find(r => r.id === c.repId)?.name || c.repId}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedCustody && (
+                      <p className="mt-1 text-[10px] text-amber-700 font-semibold">
+                        الصرف من العهدة: لن يُخصم رصيد المستودع مرة أخرى — البضاعة خرجت للمندوب عند التحميل.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">طريقة الدفع</label>

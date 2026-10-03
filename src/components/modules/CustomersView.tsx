@@ -8,6 +8,8 @@ import { erpDb } from '../../services/db';
 import { Customer, QualityDestination } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
 import { MasterDataService } from '../../services/masterData';
+import { LedgerService } from '../../services/ledger';
+import { printDocument } from '../printUtils';
 
 export const CustomersView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -155,151 +157,27 @@ export const CustomersView: React.FC = () => {
   const selectedCustomer = db.customers.find(c => c.id === statementCustomerId);
 
   // Requirement 4: Customer Statement Computation (REAL Ledger with running balance)
-  const statementData = useMemo(() => {
-    if (!selectedCustomer) {
-      return {
-        openingBalance: 0,
-        entries: [],
-        totalDebit: 0,
-        totalCredit: 0,
-        closingBalance: 0,
-      };
-    }
-
-    const fromDate = statementFromDate ? new Date(statementFromDate) : new Date('2000-01-01');
-    const toDate = statementToDate ? new Date(statementToDate) : new Date('2099-12-31');
-    toDate.setHours(23, 59, 59, 999);
-
-    // Initial configured opening balance
-    let opening = Number(selectedCustomer.openingBalance) || 0;
-
-    // 1. Transactions before From Date (accumulate to opening balance)
-    db.salesInvoices
-      .filter(i => i.customerId === selectedCustomer.id && i.status === 'posted' && new Date(i.date) < fromDate)
-      .forEach(i => {
-        opening += (selectedCustomer.currency === 'USD' ? i.totalAmount : i.totalAmountEGP);
-      });
-
-    db.payments
-      .filter(p => p.partyId === selectedCustomer.id && p.paymentType === 'customer_receipt' && new Date(p.date) < fromDate)
-      .forEach(p => {
-        opening -= (selectedCustomer.currency === 'USD' ? p.amount : p.amountEGP);
-      });
-
-    db.salesReturns
-      .filter(r => r.customerId === selectedCustomer.id && r.status === 'posted' && new Date(r.date) < fromDate)
-      .forEach(r => {
-        opening -= r.totalAmount;
-      });
-
-    // 2. Transactions within date range
-    interface LedgerLine {
-      id: string;
-      date: string;
-      documentNumber: string;
-      documentType: 'sales_invoice' | 'customer_payment' | 'sales_return';
-      documentTypeLabelAr: string;
-      description: string;
-      debit: number;
-      credit: number;
-      runningBalance: number;
-    }
-
-    const rawLines: Array<Omit<LedgerLine, 'runningBalance'>> = [];
-
-    // Sales Invoices (Debit)
-    if (statementDocType === 'all' || statementDocType === 'sales_invoice') {
-      db.salesInvoices
-        .filter(i => i.customerId === selectedCustomer.id && i.status === 'posted')
-        .forEach(i => {
-          const d = new Date(i.date);
-          if (d >= fromDate && d <= toDate) {
-            const amount = selectedCustomer.currency === 'USD' ? i.totalAmount : i.totalAmountEGP;
-            rawLines.push({
-              id: i.id,
-              date: i.date,
-              documentNumber: i.invoiceNumber,
-              documentType: 'sales_invoice',
-              documentTypeLabelAr: 'فاتورة مبيعات',
-              description: `فاتورة مبيعات ${i.channel === 'export' ? 'تصدير' : i.channel === 'wholesale' ? 'جملة' : 'تجزئة'}${i.notes ? ` - ${i.notes}` : ''}`,
-              debit: amount,
-              credit: 0,
-            });
-          }
-        });
-    }
-
-    // Payments (Credit)
-    if (statementDocType === 'all' || statementDocType === 'customer_payment') {
-      db.payments
-        .filter(p => p.partyId === selectedCustomer.id && p.paymentType === 'customer_receipt')
-        .forEach(p => {
-          const d = new Date(p.date);
-          if (d >= fromDate && d <= toDate) {
-            const amount = selectedCustomer.currency === 'USD' ? p.amount : p.amountEGP;
-            rawLines.push({
-              id: p.id,
-              date: p.date,
-              documentNumber: p.paymentNumber,
-              documentType: 'customer_payment',
-              documentTypeLabelAr: 'سند تحصيل',
-              description: `سند تحصيل ${p.paymentMethod === 'cash' ? 'نقدية بالخزينة' : p.paymentMethod === 'bank' ? 'إيداع بنكي' : 'شيك'} (${p.reference || ''})`,
-              debit: 0,
-              credit: amount,
-            });
-          }
-        });
-    }
-
-    // Sales Returns (Credit)
-    if (statementDocType === 'all' || statementDocType === 'sales_return') {
-      db.salesReturns
-        .filter(r => r.customerId === selectedCustomer.id && r.status === 'posted')
-        .forEach(r => {
-          const d = new Date(r.date);
-          if (d >= fromDate && d <= toDate) {
-            rawLines.push({
-              id: r.id,
-              date: r.date,
-              documentNumber: r.returnNumber,
-              documentType: 'sales_return',
-              documentTypeLabelAr: 'مرتجع مبيعات',
-              description: `مردودات مبيعات: ${r.reason || 'إرجاع بضاعة'}`,
-              debit: 0,
-              credit: r.totalAmount,
-            });
-          }
-        });
-    }
-
-    // Sort chronologically
-    rawLines.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    // Calculate Running Balance line by line
-    let running = opening;
-    let totalDebit = 0;
-    let totalCredit = 0;
-
-    const entries: LedgerLine[] = rawLines.map(line => {
-      totalDebit += line.debit;
-      totalCredit += line.credit;
-      running = running + line.debit - line.credit;
-      return {
-        ...line,
-        runningBalance: running,
-      };
+  // F27/F28/F30: the statement is now a projection of the POSTED GL receivable
+  // control account (1105 local / 1106 export) — ONE authoritative source. Every
+  // customer movement appears: invoices, returns, cash/bank collections, cheques
+  // registered on the Cheques screen, cheque bounces, export collections.
+  const statement = useMemo(() => {
+    if (!selectedCustomer) return null;
+    return LedgerService.buildCustomerStatement({
+      customerId: selectedCustomer.id,
+      fromDate: statementFromDate,
+      toDate: statementToDate,
+      docType: statementDocType as any,
     });
-
-    const closingBalance = opening + totalDebit - totalCredit;
-
-    return {
-      openingBalance: opening,
-      entries,
-      totalDebit,
-      totalCredit,
-      closingBalance,
-    };
   }, [selectedCustomer, statementFromDate, statementToDate, statementDocType, db]);
+
+  const statementData = useMemo(() => ({
+    openingBalance: statement?.openingBalance || 0,
+    entries: statement?.rows || [],
+    totalDebit: statement?.totalDebit || 0,
+    totalCredit: statement?.totalCredit || 0,
+    closingBalance: statement?.closingBalance || 0,
+  }), [statement]);
 
   // Requirement 13: Subledger vs General Ledger Reconciliation Check
   const reconciliation = useMemo(() => {
@@ -360,7 +238,7 @@ export const CustomersView: React.FC = () => {
   };
 
   const handlePrint = () => {
-    window.print();
+    printDocument();
   };
 
   return (
@@ -738,6 +616,9 @@ export const CustomersView: React.FC = () => {
                   <option value="sales_invoice">فواتير المبيعات فقط (مدين)</option>
                   <option value="customer_payment">سندات التحصيل فقط (دائن)</option>
                   <option value="sales_return">مردودات المبيعات فقط (دائن)</option>
+                  <option value="cheque">الشيكات فقط (وارد/صادر)</option>
+                  <option value="cheque_bounce">ارتجاع/ارتداد الشيكات فقط</option>
+                  <option value="export_collection">تحصيلات التصدير فقط</option>
                 </select>
               </div>
 
@@ -802,8 +683,26 @@ export const CustomersView: React.FC = () => {
             </div>
           ) : null}
 
+          {/* F30: card balance vs statement closing balance reconciliation */}
+          {statement && selectedCustomer && (
+            <div className={`flex items-center gap-2 p-3 rounded-xl text-xs font-bold border ${
+              Math.abs(statement.cardDiff) < 0.05
+                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                : 'bg-rose-50 border-rose-300 text-rose-800'
+            }`}>
+              <CheckCircle2 className="w-4 h-4" />
+              <span>
+                رصيد كارت العميل: {statement.cardBalance.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} {statement.currency}
+                {' • '}رصيد كشف الحساب (GL 1105/1106): {statement.closingBalance.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} {statement.currency}
+                {Math.abs(statement.cardDiff) < 0.05
+                  ? ' • المطابقة سليمة'
+                  : ` • فرق غير مغطى: ${statement.cardDiff.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}`}
+              </span>
+            </div>
+          )}
+
           {/* Statement Ledger Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden print:border-none print:shadow-none">
+          <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden print:border-none print:shadow-none">
             <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
               <div>
                 <h3 className="font-bold text-sm text-slate-900">

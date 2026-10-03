@@ -301,44 +301,75 @@ div.fixed.inset-0.z-50 > div {
 }
 
 /* ============================================================
-   PRINT MODE (F7 — invoice printing)
-   The printable document sits in a dedicated .print-area that is the only
-   thing visible when the print dialog opens. The app shell is hidden via
-   Tailwind print: variant classes in the components themselves, so this
-   block guarantees the printed output is clean and focused.
- ============================================================ */
+   PRINT MODE (F19 — dedicated invoice & report print templates)
+
+   `printDocument()` adds the `print-only-doc` class to <body> for the
+   duration of the print job. While it is present, EVERYTHING outside a
+   `.print-area` container is hidden — sidebar, header, buttons, modals
+   and any unrelated page content — and the single `.print-area` (invoice,
+   report, customer statement, item card) is expanded to the full page.
+   ============================================================ */
 @media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
   body {
     overflow: visible !important;
     background: #fff !important;
   }
 
-  /* Hide the application shell (sidebar, header, modals) while printing. */
+  /* The printable document body lives inside its own overlay on screen; it is
+     always visible there as a preview and only reaches the printer through
+     .print-area below. */
+
+  /* Nothing is printable until printDocument() scopes it to a .print-area. */
+  body.print-only-doc > * {
+    visibility: hidden !important;
+  }
+  body.print-only-doc .print-area,
+  body.print-only-doc .print-area * {
+    visibility: visible !important;
+  }
+
+  /* Hide the application shell inside any document as a second safety net. */
   .print-area .app-shell,
   .print-area .sidebar,
   .print-area .header,
   .print-area .modal,
-  .print-area .print-hidden {
+  .print-area .print-hidden,
+  .print-area button {
     display: none !important;
   }
 
   /* The print container takes the full page for a clean document. */
   .print-area {
-    position: relative;
+    position: absolute !important;
+    inset-inline-start: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
     overflow: visible !important;
     padding: 0 !important;
     margin: 0 !important;
+    max-height: none !important;
+    max-width: none !important;
+    background: #fff !important;
   }
 
   .print-area .print-only {
     display: block !important;
   }
 
-  /* Ensure print color is as designed. */
-  .print-area *,
-  .print-area *::before,
-  .print-area *::after {
-    background: transparent !important;
+  /* When the print job is scoped, only the FIRST .print-area is the document
+     (a page never contains two print areas in practice). */
+  body.print-only-doc .print-area ~ .print-area {
+    display: none !important;
+  }
+
+  /* Keep the document readable in black on white. */
+  .print-area,
+  .print-area * {
     color: #000 !important;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
@@ -348,6 +379,9 @@ div.fixed.inset-0.z-50 > div {
   .print-area table,
   .print-area .print-doc {
     page-break-inside: avoid;
+  }
+  .print-area thead {
+    display: table-header-group;
   }
 }
 

@@ -60,7 +60,7 @@ export class AuthorizationService {
       if (user.role === this.SUPER_ADMIN_ROLE) {
         return { allowed: true, userId: user.id, userName: user.name };
       }
-      if (!PermissionService.hasPermission(user.role, module, action)) {
+      if (!PermissionService.hasPermissionForUser(user, module, action)) {
         return { allowed: false, error: `الدور (${user.role}) ${DENIED_SUFFIX}`, userId: user.id, userName: user.name };
       }
       return { allowed: true, userId: user.id, userName: user.name };
@@ -76,7 +76,7 @@ export class AuthorizationService {
         if (user.role === this.SUPER_ADMIN_ROLE) {
           return { allowed: true, userId: user.id, userName: user.name };
         }
-        if (!PermissionService.hasPermission(user.role, module, action)) {
+        if (!PermissionService.hasPermissionForUser(user, module, action)) {
           return { allowed: false, error: `الدور (${user.role}) ${DENIED_SUFFIX}`, userId: user.id, userName: user.name };
         }
         return { allowed: true, userId: user.id, userName: user.name };

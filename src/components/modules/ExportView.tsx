@@ -396,9 +396,16 @@ export const ExportView: React.FC = () => {
                   <input
                     type="number"
                     value={productCost}
+                    disabled={Boolean(selectedInvoice)}
                     onChange={(e) => setProductCost(Number(e.target.value))}
-                    className="w-full p-1.5 rounded-lg border border-slate-300 text-xs font-mono"
+                    title={selectedInvoice ? 'مشتقة تلقائيًا من فاتورة التصدير (تكلفة المبيعات الفعلية)' : 'أدخل التكلفة يدويًا عند عدم ربط فاتورة'}
+                    className={`w-full p-1.5 rounded-lg border text-xs font-mono ${selectedInvoice ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-300'}`}
                   />
+                  {selectedInvoice && (
+                    <p className="mt-0.5 text-[10px] text-emerald-700 font-bold">
+                      مشتقة تلقائيًا من الفاتورة المرتبطة (لا تُعاد إدخالها)
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">نولون الشحن البحري</label>
