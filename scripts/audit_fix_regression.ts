@@ -9,7 +9,7 @@
 // removes ONLY those records. It exercises the EXISTING engines — no second
 // costing/inventory/accounting engine is introduced or required.
 import { readFileSync } from 'node:fs';
-import { erpDb, PRODUCTION_RATES, CANONICAL_FINISHED_PRODUCTS } from '../src/services/db';
+import { erpDb, PRODUCTION_RATES, CANONICAL_FINISHED_PRODUCTS, createEmptyDatabase, applyMasterDataMigration } from '../src/services/db';
 import { AccountingEngine } from '../src/services/accounting';
 import { InventoryEngine } from '../src/services/inventory';
 import { ManufacturingEngine } from '../src/services/manufacturing';
@@ -185,6 +185,180 @@ section('A. PACKAGING / CHIP / SAUCE MASTER RECORDS (parts A1–A4)');
   check('E: the representative carries no fabricated transactions',
     !snap().representativeCustodies.some(c => c.repId === rep?.id),
     'a custody exists for the new rep');
+}
+
+// ===========================================================================
+section('MASTER-DATA HARDENING — fresh install vs existing install converge');
+// ===========================================================================
+{
+  const APPROVED_NAMES: Record<string, string> = {
+    'item-fp-s1': 'سنجل فاير سويت',
+    'item-fp-s2': 'سنجل فاير سبايسي',
+    'item-fp-s3': 'سنجل ناتشوز باربكيو',
+    'item-fp-s4': 'سنجل ناتشوز سويت',
+    'item-fp-s5': 'سنجل ناتشوز برجر',
+    'item-fp-s6': 'سنجل كرينكل مستردة',
+    'item-fp-d1': 'ديو لحمة برجر باربكيو',
+    'item-fp-d2': 'ديو لحمة برجر مستردة',
+    'item-fp-d3': 'ديو فراخ سويت سبايسي',
+    'item-fp-d4': 'ديو فراخ سويت باربكيو',
+    'item-fp-d5': 'ديو قوقعة سويت باربكيو',
+  };
+  const APPROVED_CODES: Record<string, string> = {
+    'item-fp-s1': 'FP-SNG-01', 'item-fp-s2': 'FP-SNG-02', 'item-fp-s3': 'FP-SNG-03',
+    'item-fp-s4': 'FP-SNG-04', 'item-fp-s5': 'FP-SNG-05', 'item-fp-s6': 'FP-SNG-06',
+    'item-fp-d1': 'FP-DUO-01', 'item-fp-d2': 'FP-DUO-02', 'item-fp-d3': 'FP-DUO-03',
+    'item-fp-d4': 'FP-DUO-04', 'item-fp-d5': 'FP-DUO-05',
+  };
+
+  // ---- A) FRESH database: no localStorage at all -------------------------
+  const fresh = createEmptyDatabase();
+  const freshWrong = Object.entries(APPROVED_NAMES).filter(([id, ar]) =>
+    fresh.items.find(i => i.id === id)?.nameAr !== ar);
+  check('MD-1. FRESH install carries the current 11 finished-product names',
+    freshWrong.length === 0,
+    freshWrong.map(([id]) => `${id}=${fresh.items.find(i => i.id === id)?.nameAr}`).join(','));
+  const freshCodeWrong = Object.entries(APPROVED_CODES).filter(([id, code]) =>
+    fresh.items.find(i => i.id === id)?.code !== code);
+  check('MD-1. FRESH install reuses the ESTABLISHED codes (no new ids/codes invented)',
+    freshCodeWrong.length === 0,
+    freshCodeWrong.map(([id, c]) => `${id}=${fresh.items.find(i => i.id === id)?.code} (want ${c})`).join(','));
+  check('MD-3. FRESH install classifies RM-CHIP-01 as raw_material',
+    fresh.items.find(i => i.id === 'item-raw-chip')?.itemType === 'raw_material',
+    fresh.items.find(i => i.id === 'item-raw-chip')?.itemType);
+  check('MD-3. the chip keeps its id, code, Arabic name and KG unit',
+    (() => {
+      const c = fresh.items.find(i => i.id === 'item-raw-chip');
+      return c?.id === 'item-raw-chip' && c?.code === 'RM-CHIP-01'
+        && c?.nameAr === 'شيبس / فاير فينجر' && c?.baseUnitId === 'unit-kg';
+    })());
+  check('MD-4. FRESH install keeps all 11 BOMs with their ids and versions',
+    fresh.boms.length === 11
+    && Object.keys(APPROVED_NAMES).every(id =>
+      fresh.boms.some(b => (b.finishedItemId || '') === id && b.active && b.id === `bom-${id}`)),
+    `boms=${fresh.boms.length}`);
+
+  // ---- B) EXISTING database: legacy names + pre-existing UAT data ---------
+  const legacy = structuredClone(fresh) as ReturnType<typeof createEmptyDatabase>;
+  const legacyNames: Record<string, string> = {
+    'item-fp-s1': 'أصابع سوبر هيت + صوص سويت تشيلي',
+    'item-fp-d1': 'دجاج مشوي + سويت تشيلي وهاني باربيكيو (DUO BOX)',
+  };
+  legacy.items.forEach(i => { if (legacyNames[i.id]) i.nameAr = legacyNames[i.id]; });
+  const chipLegacy = legacy.items.find(i => i.id === 'item-raw-chip')!;
+  chipLegacy.itemType = 'packaging_material';
+  legacy.boms.forEach(b => { b.version = 7; });            // pre-existing versions
+  const legacyBomIds = legacy.boms.map(b => b.id).sort();
+  (legacy.customers as unknown as unknown[]).push({
+    id: 'cust-md-uat-1', code: 'MD-C1', name: 'عميل موجود مسبقًا',
+    customerType: 'wholesale', channel: 'wholesale', address: '', phone: '',
+    taxNumber: '', currency: 'EGP', creditLimit: 0, openingBalance: 500,
+    currentBalance: 500, paymentTerms: '', active: true,
+  });
+  (legacy.purchaseInvoices as unknown as unknown[]).push({
+    id: 'pinv-md-uat-1', invoiceNumber: 'PINV-MD-1', date: '2026-01-01',
+    supplierId: 'sup-maraa', warehouseId: 'wh-raw', paymentTerms: '',
+    totalAmount: 100, totalAmountEGP: 100, status: 'posted', journalEntryId: 'je-md-1',
+  });
+  const legacyCustomerCount = legacy.customers.length;
+  const legacyPurchaseCount = legacy.purchaseInvoices.length;
+
+  const migrated = applyMasterDataMigration(structuredClone(legacy));
+  const migWrong = Object.entries(APPROVED_NAMES).filter(([id, ar]) =>
+    migrated.items.find(i => i.id === id)?.nameAr !== ar);
+  check('MD-2. EXISTING install migration converges to the same 11 names',
+    migWrong.length === 0,
+    migWrong.map(([id]) => `${id}=${migrated.items.find(i => i.id === id)?.nameAr}`).join(','));
+  check('MD-3. EXISTING install migration also classifies the chip as raw_material',
+    migrated.items.find(i => i.id === 'item-raw-chip')?.itemType === 'raw_material');
+  check('MD-4. EXISTING install preserves pre-existing BOM ids',
+    JSON.stringify(migrated.boms.map(b => b.id).sort()) === JSON.stringify(legacyBomIds));
+  check('MD-4. EXISTING install preserves pre-existing BOM versions (not reset to 1)',
+    migrated.boms.every(b => b.version === 7),
+    [...new Set(migrated.boms.map(b => b.version))].join(','));
+  check('MD-4. EXISTING install preserves pre-existing BOM effective dates',
+    migrated.boms.every(b => b.effectiveDate === '2026-01-01'),
+    [...new Set(migrated.boms.map(b => b.effectiveDate))].join(','));
+  check('MD-2. EXISTING install loses NO record (customers / purchase invoices survive)',
+    migrated.customers.length === legacyCustomerCount
+    && migrated.purchaseInvoices.length === legacyPurchaseCount
+    && !!migrated.customers.find(c => c.id === 'cust-md-uat-1')
+    && !!migrated.purchaseInvoices.find(p => p.id === 'pinv-md-uat-1'),
+    `customers ${legacyCustomerCount}->${migrated.customers.length} invoices ${legacyPurchaseCount}->${migrated.purchaseInvoices.length}`);
+
+  // ---- Convergence: both paths must agree ------------------------------
+  const fpMaster = (d: typeof fresh) => JSON.stringify(
+    d.items.filter(i => i.itemType === 'finished_product')
+      .map(i => [i.id, i.code, i.nameAr, i.baseUnitId]).sort());
+  check('MD-1/2. fresh install and migrated install produce IDENTICAL product master',
+    fpMaster(fresh) === fpMaster(migrated as typeof fresh));
+  const chipMaster = (d: typeof fresh) => JSON.stringify(
+    d.items.filter(i => i.id === 'item-raw-chip').map(i => [i.id, i.code, i.nameAr, i.itemType, i.baseUnitId]));
+  check('MD-3. fresh install and migrated install produce IDENTICAL chip master',
+    chipMaster(fresh) === chipMaster(migrated as typeof fresh));
+  const bomLineMaster = (d: typeof fresh) => JSON.stringify(
+    d.bomLines.map(l => [l.bomId, l.materialItemId, l.quantityRequired, l.unitId]).sort());
+  check('MD-4. BOM lines are identical on both paths (no quantity regression)',
+    bomLineMaster(fresh) === bomLineMaster(migrated as typeof fresh));
+  check('MD-4. BOM ratios unchanged — single 800 KG / 4 ROLL / 66.667 carton, duo 1600 KG / 8 ROLL / 125 carton',
+    qtyOf(bomOf('item-fp-s1')!.lines, CHIP) === 800
+    && qtyOf(bomOf('item-fp-s1')!.lines, FILM_ROLL) === 4
+    && qtyOf(bomOf('item-fp-s1')!.lines, KRAFT_SINGLE) === 66.667
+    && qtyOf(bomOf('item-fp-d1')!.lines, CHIP) === 1600
+    && qtyOf(bomOf('item-fp-d1')!.lines, FILM_ROLL) === 8
+    && qtyOf(bomOf('item-fp-d1')!.lines, KRAFT_DUO) === 125);
+
+  // ---- Idempotence ------------------------------------------------------
+  const norm = (d: typeof fresh) => JSON.stringify({
+    items: d.items.map(i => [i.id, i.code, i.nameAr, i.itemType, i.baseUnitId]).sort(),
+    boms: d.boms.map(b => [b.id, b.version, b.baseQuantity, b.effectiveDate, b.active]).sort(),
+    bomLines: d.bomLines.map(l => [l.id, l.bomId, l.materialItemId, l.quantityRequired, l.unitId]).sort(),
+    suppliers: d.suppliers.map(s => [s.id, s.name, s.currency, s.openingBalance]).sort(),
+    reps: d.salesReps.map(r => [r.id, r.code, r.name]).sort(),
+    customers: d.customers.length,
+    purchaseInvoices: d.purchaseInvoices.length,
+  });
+  const once = applyMasterDataMigration(structuredClone(legacy));
+  const twice = applyMasterDataMigration(structuredClone(once));
+  const thrice = applyMasterDataMigration(structuredClone(twice));
+  check('MD-5. the migration is IDEMPOTENT (1x == 2x == 3x)',
+    norm(once) === norm(twice) && norm(twice) === norm(thrice));
+  check('MD-5. repeated migrations create NO duplicate ids',
+    new Set(once.items.map(i => i.id)).size === once.items.length
+    && new Set(once.boms.map(b => b.id)).size === once.boms.length
+    && new Set(once.bomLines.map(l => l.id)).size === once.bomLines.length
+    && new Set(once.suppliers.map(s => s.id)).size === once.suppliers.length
+    && new Set(once.salesReps.map(r => r.id)).size === once.salesReps.length);
+  check('MD-5. repeated migrations do NOT grow or shrink existing records',
+    once.customers.length === legacyCustomerCount
+    && thrice.customers.length === legacyCustomerCount
+    && thrice.purchaseInvoices.length === legacyPurchaseCount);
+
+  // ---- Master data that must remain unchanged ---------------------------
+  const mustRemain: Array<[string, string]> = [
+    [BOX_SINGLE, 'علبة سينجل'], [BOX_DUO, 'علبة ديو'], [TRAY, 'طبق'],
+    [SAUCE_TRAY, 'طبق صوصات'], [LINER, 'جلافز'], [STICKER, 'ستيكر'],
+    [NAPKIN, 'مناديل مبللة'], [KRAFT_SINGLE, 'كرتون بني خارجي سنجل'],
+    [KRAFT_DUO, 'كرتون بني ديو'], [FILM_ROLL, 'رول'],
+    [CHIP, 'شيبس / فاير فينجر'], [SAUCE.sweetChili, 'صوص سويت شيلي'],
+    [SAUCE.spicyGrilled, 'صوص سبايسي مشوي'], [SAUCE.burger, 'صوص برجر'],
+    [SAUCE.bbq, 'صوص باربكيو'], [SAUCE.mustard, 'صوص مستردة'],
+  ];
+  const changed = mustRemain.filter(([id, ar]) => fresh.items.find(i => i.id === id)?.nameAr !== ar);
+  check('MD: every required material keeps its exact Arabic name on the fresh path',
+    changed.length === 0, changed.map(([id]) => id).join(','));
+  const supplierNames8 = ['المراعي الخضراء', 'مطبعه الشروق', 'الدمياطي', 'الخليجية',
+    'السلام', 'الهلال', 'بلانكو', 'رويال كرتون'];
+  check('MD: the 8 named suppliers are unchanged (names only, no invented facts)',
+    supplierNames8.every(n => fresh.suppliers.some(s => s.name === n))
+    && fresh.suppliers.length === 8
+    && fresh.suppliers.every(s => (Number(s.openingBalance) || 0) === 0 && !(s.taxNumber || '').trim()),
+    fresh.suppliers.map(s => s.name).join(','));
+  check('MD: the representative حمزه حماد / REP-HAMZA-01 is unchanged and carries no transactions',
+    fresh.salesReps.length === 1
+    && fresh.salesReps[0].name === 'حمزه حماد'
+    && fresh.salesReps[0].code === 'REP-HAMZA-01'
+    && fresh.representativeCustodies.length === 0);
 }
 
 // ===========================================================================

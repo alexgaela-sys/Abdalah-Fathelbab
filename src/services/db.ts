@@ -475,8 +475,14 @@ export const SHIPPING_CARTON_ITEMS: Item[] = [
 // Primary food material: the chip / fire-finger. Base unit is KG so that
 // decimal requirements (75 g = 0.075 KG) and the 1 KG -> 0.005 ROLL film ratio
 // are expressed without losing precision.
+//
+// ISSUE 2 FIX: it is a RAW MATERIAL (like the sauces), not packaging. Same id,
+// same code, same Arabic name, same KG unit — only `itemType` is corrected.
 export const CHIP_AND_FRYING_ITEMS: Item[] = [
-  pkgItem('item-raw-chip', 'RM-CHIP-01', 'شيبس / فاير فينجر', 'Chips / Fire Finger', 'unit-kg'),
+  {
+    ...pkgItem('item-raw-chip', 'RM-CHIP-01', 'شيبس / فاير فينجر', 'Chips / Fire Finger', 'unit-kg'),
+    itemType: 'raw_material',
+  },
 ];
 
 // Production Master Catalog: Exact 11 Finished Products (SnakDip) & Essential Raw Materials/Packaging
@@ -1146,7 +1152,7 @@ export const INITIAL_BANK_ACCOUNTS: BankAccount[] = [
 
 // Clean Database initialization with configuration / master data only
 export function createEmptyDatabase(): ERPDatabaseSchema {
-  return {
+  const fresh: ERPDatabaseSchema = {
     company: INITIAL_COMPANY,
     warehouses: INITIAL_WAREHOUSES,
     items: INITIAL_PRODUCTION_ITEMS, // Pre-configured with the 11 Snack products & raw materials
@@ -1192,6 +1198,16 @@ export function createEmptyDatabase(): ERPDatabaseSchema {
     auditLogs: [],
     exportShipments: [],
   };
+
+  // ISSUE 1 FIX — a FRESH install must produce the CURRENT master data
+  // directly. Previously the migrations ran only when localStorage already
+  // held a database, so a brand-new browser showed the previous
+  // finished-product names while an existing install was migrated correctly.
+  // Running the same additive migrations over the fresh database makes BOTH
+  // paths converge on identical master data, with one single source of truth
+  // (the migrations) instead of names duplicated across the seed and the
+  // migration — which is what let the two drift apart.
+  return applyUomMigration(applyMasterDataMigration(fresh));
 }
 
 /**
@@ -1267,6 +1283,13 @@ export function applyMasterDataMigration(db: ERPDatabaseSchema): ERPDatabaseSche
   // the film roll is now named "رول" — rename in place, keep its id
   const film = items.find(i => i.id === 'item-pkg-film');
   if (film) { film.nameAr = 'رول'; film.nameEn = 'Packaging Film Roll'; }
+
+  // ISSUE 2 FIX — the chip / fire-finger is a raw material, not packaging.
+  // Only `itemType` is corrected: id, code, Arabic name, KG unit, BOM
+  // references, quantities, stock, costs and warehouse behaviour are all
+  // preserved. Idempotent, and safe for existing databases.
+  const chip = items.find(i => i.id === 'item-raw-chip');
+  if (chip) { chip.itemType = 'raw_material'; }
 
   // 3) canonical recipe display names for the 11 finished products (ids intact)
   for (const [id, recipe] of Object.entries(CANONICAL_FINISHED_PRODUCTS)) {
