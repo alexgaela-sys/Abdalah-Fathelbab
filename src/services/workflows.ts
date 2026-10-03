@@ -216,10 +216,34 @@ export class WorkflowService {
     let createdInvoice: PurchaseInvoice | undefined;
 
     erpDb.mutate(draft => {
-      // Update supplier balance if credit
+      // Update supplier balance if credit.
+      // QA-24: the supplier ledger is maintained in the BASE currency (EGP),
+      // because GL 2101 is posted with totalAmountEGP. Mixing the foreign
+      // document amount with the EGP ledger breaks the supplier/GL reconciliation.
       if (params.paymentMethod === 'credit') {
         const sup = draft.suppliers.find(s => s.id === params.supplierId);
-        if (sup) sup.currentBalance = (sup.currentBalance || 0) + totalAmount;
+        if (sup) sup.currentBalance = (sup.currentBalance || 0) + totalAmountEGP;
+      }
+
+      // QA-13: a cash purchase moves real money, so it must produce a treasury
+      // document exactly like every other cash movement — otherwise the
+      // Treasury document list and GL 1101 diverge by the purchase amount.
+      if (params.paymentMethod === 'cash' && totalAmountEGP > 0) {
+        const cashAccId = AccountingEngine.getMappedAccountId('cash_treasury', 'acc-1101');
+        const supplierName = supplier.name;
+        draft.treasuryTransactions.push({
+          id: generateErpId('ctx'),
+          receiptNumber: `TRE-${invoiceNumber}`,
+          type: 'cash_payment',
+          amount: totalAmountEGP,
+          partyName: supplierName,
+          date: params.date,
+          description: `سداد نقدي لفاتورة مشتريات ${invoiceNumber} - المورد: ${supplierName}`,
+          glAccountId: cashAccId,
+          documentType: 'purchase_invoice',
+          journalEntryId: jvResult.entry?.id,
+          isTest: params.isTest,
+        } as TreasuryTransaction);
       }
 
       createdInvoice = {
@@ -398,8 +422,38 @@ export class WorkflowService {
     const itemsMap = new Map(db.items.map(i => [i.id, i]));
 
     let bonusQuantity = 0;
-    params.lines.forEach(l => {
-      const item = itemsMap.get(l.itemId);
+    // QA-01: resolve each line's cost from the ACTUAL stock that leaves the
+    // warehouse (FIFO), falling back only to a legitimately configured
+    // standard cost. The previous hard-coded `standardCost || 50` is gone —
+    // a cost is never invented. Resolve everything BEFORE posting so a missing
+    // cost aborts the whole invoice with a clear business message.
+    const lineCosts = new Map<number, { totalUnits: number; unitCost: number; source: 'fifo' | 'standard' }>();
+    params.lines.forEach((l, idx) => {
+      const totalUnits = (Number(l.quantity) || 0) + (Number(l.freeQuantity) || 0);
+      if (totalUnits <= 0) return;
+      // The stock source decides which cost pool is relieved.
+      const costWarehouseId = stockSource === 'rep_custody' ? 'wh-local' : params.warehouseId;
+      const resolved = InventoryEngine.resolveActualUnitCost(l.itemId, costWarehouseId, totalUnits);
+      if (!resolved.ok) {
+        lineCosts.set(idx, { totalUnits, unitCost: Number.NaN, source: 'fifo' });
+        return;
+      }
+      lineCosts.set(idx, { totalUnits, unitCost: resolved.unitCost, source: resolved.source });
+    });
+    for (const [, c] of lineCosts) {
+      if (!Number.isFinite(c.unitCost)) {
+        const idx = [...lineCosts.entries()].find(([, v]) => v === c)?.[0] ?? 0;
+        const item = itemsMap.get(params.lines[idx]?.itemId);
+        return {
+          success: false,
+          error:
+            `لا توجد تكلفة فعلية معرَّفة للصنف (${item?.nameAr || params.lines[idx]?.itemId}) في المستودع المحدد. ` +
+            `يجب إدخال تكلفة الصنف في بطاقة الصنف أو استلامه من مورد بسعر فعلي قبل الترحيل المحاسبي.`,
+        };
+      }
+    }
+
+    params.lines.forEach((l, idx) => {
       // F17: the BONUS quantity is never priced — it is a separate zero-value
       // quantity that still leaves inventory and still hits COGS.
       const lineSub = l.quantity * l.unitPrice * (1 - ((l.discount || 0) / 100));
@@ -411,15 +465,19 @@ export class WorkflowService {
       vatAmount += lineVat;
       bonusQuantity += Number(l.freeQuantity) || 0;
 
-      // Free quantity price = 0, but included in COGS
-      const totalUnits = l.quantity + (l.freeQuantity || 0);
-      const unitCost = item?.standardCost || 50;
-      cogsTotal += totalUnits * unitCost;
+      // Free quantity price = 0, but included in COGS at the real stock cost.
+      const cost = lineCosts.get(idx);
+      if (cost) cogsTotal += cost.totalUnits * cost.unitCost;
     });
 
     const totalAmount = subtotal + vatAmount;
     const totalAmountEGP = totalAmount * (params.currency === 'USD' ? params.exchangeRate : 1);
-    const cogsTotalEGP = cogsTotal * (params.currency === 'USD' ? params.exchangeRate : 1);
+    // QA-01 / AI — FIFO batch costs are stored in the EGP BASE currency (purchases
+    // are converted at their own historical rate when they are booked). Applying
+    // the invoice exchange rate again multiplied export COGS by the rate a second
+    // time (e.g. 10 x 40 EGP became 20,000). COGS is therefore taken at its real
+    // EGP inventory value; the invoice exchange rate only converts REVENUE.
+    const cogsTotalEGP = cogsTotal;
 
     // Credit limit warning check (DO NOT BLOCK SALE)
     let creditWarning: string | undefined;
@@ -563,7 +621,7 @@ export class WorkflowService {
           movementType: 'sales',
           quantityIn: 0,
           quantityOut: totalQty,
-          unitCost: item?.standardCost || 50,
+          unitCost: item?.standardCost ?? 0,
           documentType: 'فاتورة مبيعات',
           documentNumber: invoiceNumber,
           notes: `مبيعات للعميل ${customer.name}${line.freeQuantity ? ` (منها ${line.freeQuantity} بونص مجاني)` : ''}`,
@@ -664,7 +722,7 @@ export class WorkflowService {
           quantity: l.quantity,
           freeQuantity: l.freeQuantity || 0,
           unitPrice: l.unitPrice,
-          unitCost: item?.standardCost || 50,
+          unitCost: lineCosts.get(idx)?.unitCost ?? 0,
           discount: l.discount || 0,
           vatRate: params.taxTreatment === 'exempt' ? 0 : l.vatRate,
           vatAmount: lVat,
@@ -1103,13 +1161,53 @@ export class WorkflowService {
       date: params.date,
       quantityIn: 0,
       quantityOut: params.quantity,
-      unitCost: item?.standardCost || 50,
+      unitCost: item?.standardCost ?? 0,
       documentType: 'تحميل عهدة مندوب',
       documentNumber: custody.custodyNumber,
       notes: `تحميل بضاعة لعهدة ${custody.custodyNumber}`,
     });
 
     if (!moveRes.success) return moveRes;
+
+    // QA-07: loading goods to a representative moves inventory from the
+    // warehouse to the CUSTODY. Without this journal the custody inventory
+    // account 1107 stays at zero and the later custody sale / settlement
+    // credits it into a NEGATIVE balance.
+    //   Dr 1107 Representative Custody Inventory  (goods now with the rep)
+    //   Cr 1109/1110 Finished Goods Warehouse        (goods left the warehouse)
+    const loadCost = moveRes.actualCost || 0;
+    const finishedAccId = params.warehouseId === 'wh-export'
+      ? AccountingEngine.getMappedAccountId('inventory_finished_export', 'acc-1110')
+      : AccountingEngine.getMappedAccountId('inventory_finished_local', 'acc-1109');
+    const custodyAccId = AccountingEngine.getMappedAccountId('rep_custody', 'acc-1107');
+    const finishedAccCode = params.warehouseId === 'wh-export' ? '1110' : '1109';
+
+    if (loadCost > 0) {
+      const jv = AccountingEngine.postJournal({
+        date: params.date,
+        reference: `CUSTODY-LOAD-${custody.custodyNumber}`,
+        description: `تحميل بضاعة مندوب بعهدة ${custody.custodyNumber} - صنف ${item?.nameAr || params.itemId}`,
+        sourceDocumentType: 'rep_custody_load',
+        sourceDocumentId: custody.id,
+        lines: [
+          {
+            id: '', journalEntryId: '', accountId: custodyAccId, accountCode: '1107',
+            accountNameAr: 'عهد مناديب المبيعات (بضائع ونقدية)',
+            debit: loadCost, credit: 0, currency: 'EGP' as const,
+            originalAmount: loadCost, exchangeRate: 1, costCenterId: 'cc-sales',
+            description: `بضاعة في عهدة المندوب ${custody.custodyNumber}`,
+          },
+          {
+            id: '', journalEntryId: '', accountId: finishedAccId, accountCode: finishedAccCode,
+            accountNameAr: 'مخزون الإنتاج التام',
+            debit: 0, credit: loadCost, currency: 'EGP' as const,
+            originalAmount: loadCost, exchangeRate: 1, costCenterId: 'cc-sales',
+            description: `صرف من مستودع المنتج التام بعهدة ${custody.custodyNumber}`,
+          },
+        ],
+      }, 'usr-admin', 'مدير المبيعات');
+      if (!jv.success) return { success: false, error: jv.error || 'تعذر ترحيل قيد تحميل العهدة' };
+    }
 
     erpDb.mutate(draft => {
       draft.custodyMovements.push({
@@ -1140,6 +1238,20 @@ export class WorkflowService {
 
     const item = db.items.find(i => i.id === params.itemId);
 
+    // QA-27: goods coming BACK from a custody must re-enter stock at a real
+    // cost. A zero cost here would create a zero-value batch that later blocks
+    // costed postings and breaks inventory valuation.
+    let returnUnitCost = 0;
+    const prodCost = InventoryEngine.resolveActualUnitCost(params.itemId, params.warehouseId, 0);
+    if (prodCost.ok) returnUnitCost = prodCost.unitCost;
+    if (!(returnUnitCost > 0) && (item && item.actualCost > 0)) returnUnitCost = item.actualCost;
+    if (!(returnUnitCost > 0)) {
+      return {
+        success: false,
+        error: `لا يمكن إرجاع بضاعة العهدة للصنف (${item ? item.nameAr : params.itemId}): لا توجد تكلفة معرَّفة. يجب ضبط تكلفة الصنف قبل الإرجاع.`,
+      };
+    }
+
     InventoryEngine.recordMovement({
       itemId: params.itemId,
       warehouseId: params.warehouseId,
@@ -1147,7 +1259,7 @@ export class WorkflowService {
       date: params.date,
       quantityIn: params.quantity,
       quantityOut: 0,
-      unitCost: item?.standardCost || 50,
+      unitCost: returnUnitCost,
       documentType: 'مرتجع عهدة مندوب',
       documentNumber: custody.custodyNumber,
       notes: `مرتجع بضاعة من عهدة ${custody.custodyNumber}`,
@@ -1296,14 +1408,34 @@ export class WorkflowService {
     });
     const totalAmount = revenueNet + vatTotal;
 
-    // COGS value of returned goods = actual FIFO estimate at selling warehouse (restock cost)
-    // Using the item's actual cost so inventory value is restored faithfully.
+    // COGS value of returned goods.
+    // QA-09: the return must reverse the ECONOMIC effect of the original sale.
+    // The original sales line already carries the real FIFO cost that was
+    // charged to COGS, so THAT is the basis for restoring inventory. Only when
+    // the return is not linked to an invoice line do we fall back to the FIFO
+    // cost of the stock in the return warehouse, then to a configured standard
+    // cost. If none exists the return is blocked with a clear message — a zero
+    // or invented cost is never posted.
     let restockCost = 0;
     const receiptLines: Array<{ itemId: string; quantity: number; unitCost: number; routing: ReturnType<typeof qualityDestinationRouting> }> = [];
-    for (const l of params.lines) {
+    for (const [idx, l] of params.lines.entries()) {
       const item = db.items.find(i => i.id === l.itemId);
-      const unitCost = item?.actualCost || item?.standardCost || 0;
       const routing = qualityDestinationRouting(params.inspectionOverrides?.[l.itemId] || 'saleable');
+      const origLine = lineEconomics[idx]?.origLine;
+      let unitCost = Number(origLine?.unitCost) || 0;
+      if (unitCost <= 0) {
+        const resolved = InventoryEngine.resolveActualUnitCost(l.itemId, routing.warehouseId, l.quantity);
+        if (resolved.ok) unitCost = resolved.unitCost;
+      }
+      if (!(unitCost > 0) && ((item && item.standardCost) || 0) > 0) unitCost = item ? item.standardCost : 0;
+      if (!(unitCost > 0)) {
+        return {
+          success: false,
+          error:
+            `لا يمكن ترحيل مرتجع الصنف (${(item && item.nameAr) || l.itemId}): لا توجد تكلفة مرجعية معرَّافة. ` +
+            `اربط المرتجع بفاتورة البيع الأصلية لاسترجاع تكلفتها المعتمدة.`,
+        };
+      }
       restockCost += l.quantity * unitCost;
       receiptLines.push({ itemId: l.itemId, quantity: l.quantity, unitCost, routing });
     }
@@ -1344,13 +1476,30 @@ export class WorkflowService {
       revJvId = revJv.entry?.id;
     }
 
-    // COGS reversal: Dr Finished Inventory | Cr COGS (restores inventory value)
+    // COGS reversal: Dr Inventory | Cr COGS (restores inventory value).
+    // QA-21: the debit must go to the account that matches where the returned
+    // goods actually landed. Goods routed to WH-04 (damaged) or WH-05 (scrap)
+    // must NOT be added back to the saleable finished-goods account.
     const cogsAcc = AccountingEngine.getMappedAccountId(channel === 'export' ? 'cogs_export' : 'cogs_local', channel === 'export' ? 'acc-5102' : 'acc-5101');
-    const invAcc = AccountingEngine.getMappedAccountId(channel === 'export' ? 'inventory_finished_export' : 'inventory_finished_local', channel === 'export' ? 'acc-1110' : 'acc-1109');
-    const cogsLines: JLine[] = [
-      jl(invAcc, restockCost, 0, restockCost, 1, 'EGP', `مرتجع مبيعات ${returnNumber} - إعادة تقييم مخزون مرتجع`),
-      jl(cogsAcc, 0, restockCost, restockCost, 1, 'EGP', `مرتجع مبيعات ${returnNumber} - عكس تكلفة البضاعة المباعة`),
-    ];
+    const inventoryAccountForRouting = (routingWarehouseId: string): { id: string; code: string } => {
+      if (routingWarehouseId === 'wh-damaged') return { id: AccountingEngine.getMappedAccountId('inventory_damaged', 'acc-1111'), code: '1111' };
+      if (routingWarehouseId === 'wh-scrap') return { id: AccountingEngine.getMappedAccountId('inventory_scrap', 'acc-1112'), code: '1112' };
+      if (routingWarehouseId === 'wh-raw') return { id: AccountingEngine.getMappedAccountId('purchase_raw_inventory', 'acc-1108'), code: '1108' };
+      return {
+        id: AccountingEngine.getMappedAccountId(channel === 'export' ? 'inventory_finished_export' : 'inventory_finished_local', channel === 'export' ? 'acc-1110' : 'acc-1109'),
+        code: channel === 'export' ? '1110' : '1109',
+      };
+    };
+    const cogsLines: JLine[] = [];
+    receiptLines.forEach((r, idx) => {
+      const amt = r.quantity * r.unitCost;
+      if (!(amt > 0)) return;
+      const acc = inventoryAccountForRouting(r.routing.warehouseId);
+      cogsLines.push(
+        jl(acc.id, amt, 0, amt, 1, 'EGP', `مرتجع مبيعات ${returnNumber} - إعادة تقييم مخزون مرتجع إلى ${acc.code} (${r.routing.label})`),
+        jl(cogsAcc, 0, amt, amt, 1, 'EGP', `مرتجع مبيعات ${returnNumber} - عكس تكلفة البضاعة المباعة`),
+      );
+    });
     const cogsJv = AccountingEngine.postJournal({
       date: params.date,
       reference: returnNumber,
@@ -1613,8 +1762,25 @@ export class WorkflowService {
       if (varianceQty === 0) continue;
       hasVariance = true;
 
-      const estimated = InventoryEngine.estimateIssueCost(l.itemId, params.warehouseId, Math.max(1, Math.abs(varianceQty))).actualUnitCost;
-      const unitCost = l.unitCost ?? (estimated !== undefined ? estimated : (item.standardCost || 0));
+      // QA-22: the count variance must be valued at the REAL cost of the stock in
+      // the counted warehouse (FIFO), then a configured standard cost. The old
+      // UI passed a hard-coded 50/unit which mis-stated every shrinkage.
+      // A variance with no resolvable cost is refused, never booked at zero.
+      const resolved = InventoryEngine.resolveActualUnitCost(l.itemId, params.warehouseId, Math.max(1, Math.abs(varianceQty)));
+      let unitCost = 0;
+      if (resolved.ok) {
+        unitCost = resolved.unitCost;
+      } else if (l.unitCost !== undefined && l.unitCost > 0) {
+        unitCost = l.unitCost;
+      } else if (item.standardCost > 0) {
+        unitCost = item.standardCost;
+      }
+      if (!(unitCost > 0)) {
+        return {
+          success: false,
+          error: `لا يمكن ترحيل جرد الصنف (${item.nameAr}) في ${warehouse.nameAr}: لا توجد تكلفة معرَّفة لتسوية الفروق. يجب ضبط تكلفة الصنف الفعلية أولاً.`,
+        };
+      }
       const varianceCost = varianceQty * unitCost;
 
       countLineRecords.push({
@@ -1818,9 +1984,10 @@ export class WorkflowService {
         (s, l) => s + ((l.quantity + (l.freeQuantity || 0)) * (l.unitCost || 0)),
         0
       );
-      productCost = derivedFromLines > 0
-        ? derivedFromLines * (inv.currency === 'USD' ? inv.exchangeRate : 1)
-        : inv.cogsTotal;
+      // The line unit cost is the EGP inventory/FIFO cost — the same value the
+      // invoice booked as COGS. Converting it by the invoice exchange rate a
+      // second time inflated the shipment cost (10 x 70 EGP became 35,000).
+      productCost = derivedFromLines > 0 ? derivedFromLines : inv.cogsTotal;
       productCostDerived = true;
     }
 
@@ -2042,6 +2209,25 @@ export class WorkflowService {
     const isTransfer = params.type === 'cash_transfer';
     const amt = Number(params.amount);
 
+    // QA-30: the treasury counterparty must come from the appropriate EXISTING
+    // source — never invented and never left blank. When the caller did not
+    // name a party, resolve it from the mapped counterparty GL account (the
+    // receivables/payables/control accounts that ARE the party), falling back
+    // to the account's own Arabic name.
+    let partyName = params.partyName?.trim() || '';
+    if (!partyName && !isTransfer) {
+      const recvIds = new Set(Object.entries(db.accountMappings || {})
+        .filter(([, accId]) => ['acc-1105', 'acc-1106', 'acc-1107', 'acc-1110'].includes(accId))
+        .map(([, accId]) => accId));
+      if (recvIds.has(params.glAccountId)) {
+        partyName = isReceipt ? 'تحصيل من عملاء (حساب تحكم)' : 'عهدة/توزيع على عملاء (حساب تحكم)';
+      } else {
+        partyName = targetAcc.nameAr;
+      }
+    } else if (!partyName && isTransfer) {
+      partyName = targetAcc.nameAr;
+    }
+
     const lines: JLine[] = [];
     if (isTransfer) {
       const targetAcc2 = params.targetGlAccountId ? db.accounts.find(a => a.id === params.targetGlAccountId) : undefined;
@@ -2052,10 +2238,10 @@ export class WorkflowService {
       lines.push(jl(params.glAccountId, 0, amt, amt, 1, 'EGP', `تحويل نقدي: ${params.description}`));
     } else if (isReceipt) {
       lines.push(jl(cashAcc, amt, 0, amt, 1, 'EGP', `توريد نقدية: ${params.description}`));
-      lines.push(jl(params.glAccountId, 0, amt, amt, 1, 'EGP', `${params.description}${params.partyName ? ` (${params.partyName})` : ''}`));
+      lines.push(jl(params.glAccountId, 0, amt, amt, 1, 'EGP', `${params.description}${partyName ? ` (${partyName})` : ''}`));
     } else {
       // cash_payment & advance_custody: expense/asset debit, cash credit
-      lines.push(jl(params.glAccountId, amt, 0, amt, 1, 'EGP', `${params.description}${params.partyName ? ` (${params.partyName})` : ''}`));
+      lines.push(jl(params.glAccountId, amt, 0, amt, 1, 'EGP', `${params.description}${partyName ? ` (${partyName})` : ''}`));
       lines.push(jl(cashAcc, 0, amt, amt, 1, 'EGP', `صرف نقدية: ${params.description}`));
     }
 
@@ -2076,7 +2262,7 @@ export class WorkflowService {
         receiptNumber,
         type: params.type,
         amount: amt,
-        partyName: params.partyName,
+        partyName: partyName || undefined,
         date: params.date,
         description: params.description,
         glAccountId: params.glAccountId,
@@ -2460,6 +2646,24 @@ export class WorkflowService {
     const chequeId = generateErpId('chq');
     const chequeNumber = params.chequeNumber.trim();
 
+    // QA-19: cheque numbers must be unique within their natural scope. The
+    // existing business model scopes an incoming cheque to the CUSTOMER and an
+    // outgoing cheque to the SUPPLIER, so two different banks may legitimately
+    // reuse a number across different parties — but the SAME party cannot have
+    // the same cheque number twice, which would double both the cheque account
+    // and the receivable/AP effect.
+    const duplicate = db.cheques.find(c =>
+      c.chequeNumber.toLowerCase() === chequeNumber.toLowerCase() &&
+      c.partyId === params.partyId &&
+      c.status !== 'bounced' && c.status !== 'returned'
+    );
+    if (duplicate) {
+      return {
+        success: false,
+        error: `رقم الشيك (${chequeNumber}) مسجل بالفعل للطرف نفسه بحالة (${duplicate.status}). يجب أن يكون رقم الشيك فريدًا — يُرجى التحقق من رقم الشيك.`,
+      };
+    }
+
     // F8: registration IS the business event that settles the trade balance —
     // the same recognition PATH A posts through recordCustomerPayment/recordSupplierPayment.
     const underCollAcc = AccountingEngine.getMappedAccountId('cheques_under_collection', 'acc-1104');
@@ -2833,10 +3037,21 @@ export class WorkflowService {
     cashCollected?: number; // cash the rep hands over at settlement (treasury IN)
     cashRefunded?: number;  // cash the company refunds to the rep (treasury OUT)
     date: string;
+    /** QA-20: settlement must never silently close a custody that still holds
+     *  unsold goods. Return the goods to stock first (returnGoodsFromRep), or
+     *  pass true to acknowledge the shortfall on the record. */
+    acknowledgeRemainingGoods?: boolean;
     userId?: string;
     userName?: string;
     isTest?: boolean;
-  }): { success: boolean; error?: string; reconciliation?: Array<{ itemId: string; loaded: number; sold: number; returned: number; remaining: number }>; treasuryDelta?: number } {
+  }): {
+    success: boolean;
+    error?: string;
+    reconciliation?: Array<{ itemId: string; loaded: number; sold: number; returned: number; remaining: number }>;
+    treasuryDelta?: number;
+    unsoldGoods?: Array<{ itemId: string; remaining: number }>;
+    warning?: string;
+  } {
     const db = erpDb.getSnapshot();
     const custody = db.representativeCustodies.find(c => c.id === params.custodyId);
     if (!custody) return { success: false, error: 'العهدة غير موجودة' };
@@ -2850,6 +3065,24 @@ export class WorkflowService {
       const sold = movements.filter(m => m.itemId === itemId && m.movementType === 'sold').reduce((s, m) => s + m.quantity, 0);
       const returned = movements.filter(m => m.itemId === itemId && m.movementType === 'returned').reduce((s, m) => s + m.quantity, 0);
       reconciliation.push({ itemId, loaded, sold, returned, remaining: loaded - sold - returned });
+    }
+
+    // QA-20: unsold goods must never disappear silently at settlement.
+    const unsoldGoods = reconciliation
+      .filter(r => r.remaining > 0.01)
+      .map(r => ({ itemId: r.itemId, remaining: Number(r.remaining.toFixed(4)) }));
+    let unsoldWarning: string | undefined;
+    if (unsoldGoods.length > 0) {
+      const detail = unsoldGoods.map(u => {
+        const itm = db.items.find(i => i.id === u.itemId);
+        return `${itm?.nameAr || u.itemId}: ${u.remaining}`;
+      }).join('، ');
+      unsoldWarning = `العهدة ${custody.custodyNumber} ما زالت تحتوي على بضاعة غير مباعة (${detail}). يجب إرجاعها إلى المخزون قبل التسوية.`;
+      if (!params.acknowledgeRemainingGoods) {
+        return { success: false, error: unsoldWarning, reconciliation, unsoldGoods };
+      }
+      // explicitly acknowledged — the settlement proceeds but the shortfall is
+      // reported back so the caller can log it.
     }
 
     const cashCollected = Number(params.cashCollected) || 0;
@@ -2946,6 +3179,8 @@ export class WorkflowService {
       success: true,
       reconciliation,
       treasuryDelta: Number((cashCollected - cashRefunded).toFixed(2)),
+      unsoldGoods: unsoldGoods.length ? unsoldGoods : undefined,
+      warning: unsoldWarning,
     };
   }
 

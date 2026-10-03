@@ -192,13 +192,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             );
             if (visibleItems.length === 0) return null;
 
-            const isCollapsed = collapsed[group.titleAr];
             const hasActive = visibleItems.some(i => i.id === activeTab);
+            // QA-28: the group holding the ACTIVE tab is always expanded.
+            // Previously a manually collapsed group could hide the tab the app
+            // navigated to in-app (deep link / cross-module action), leaving the
+            // current page unreachable from the sidebar.
+            const isCollapsed = !!collapsed[group.titleAr] && !hasActive;
 
             return (
               <div key={group.titleAr}>
                 <button
                   onClick={() => toggleGroup(group.titleAr)}
+                  title={isCollapsed ? 'إظهار' : 'إخفاء'}
                   className="w-full flex items-center gap-2 px-2 py-1.5 text-[10px] font-black uppercase tracking-wider text-cream-500 hover:text-cream-300 transition cursor-pointer group"
                 >
                   <span

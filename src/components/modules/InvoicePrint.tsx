@@ -151,7 +151,13 @@ const InvoicePrint: React.FC<{
   const custody = s.custodyId ? db.representativeCustodies.find(c => c.id === s.custodyId) : undefined;
   const rep = custody ? db.salesReps.find(r => r.id === custody!.repId) : (s.repId ? db.salesReps.find(r => r.id === s.repId) : undefined);
   const bonusTotal = sLines.reduce((sum, l) => sum + (l.freeQuantity || 0), 0);
-  const bonusValue = sLines.reduce((sum, l) => sum + (l.freeQuantity || 0) * (l.unitPrice || 0), 0);
+  // QA-29: the promotional bonus is issued at ZERO price. Multiplying it by the
+  // paid unit price produced the contradictory wording "free bonus ... worth
+  // 150.00" — the printed value is always 0.00, in the document currency.
+  const bonusValue = 0;
+  const bonusUnitAr = sLines.length
+    ? (db.units.find(u => u.id === db.items.find(i => i.id === sLines[0].itemId)?.baseUnitId)?.nameAr || 'PCS')
+    : 'PCS';
 
   return wrap(
     <>
@@ -208,7 +214,7 @@ const InvoicePrint: React.FC<{
               <td className="py-1.5 font-bold">إجمالي البونص المجاني</td>
               <td className="py-1.5 text-center font-mono">{bonusTotal}</td>
               <td className="py-1.5 text-center font-bold">بونص مجاني</td>
-              <td />
+              <td className="py-1.5 text-center">{bonusUnitAr}</td>
               <td className="py-1.5 text-right font-mono font-bold">0.00</td>
               <td />
               <td className="py-1.5 text-right font-mono">0%</td>
@@ -220,7 +226,7 @@ const InvoicePrint: React.FC<{
 
       <div className="mt-3 text-xs space-y-1">
         <div>الإجمالي قبل الضريبة: <b>{fmt(s.subtotal)}</b> {s.currency}</div>
-        <div>بونص مجاني (قيمة صفر — لا يضاف للإيراد): {bonusTotal} قطعة بقيمة {fmt(bonusValue)} {s.currency}</div>
+        <div>بونص مجاني — {bonusTotal} {bonusUnitAr} — {fmt(bonusValue)} {s.currency === 'USD' ? 'USD' : 'EGP'} (قيمة صفر — لا يضاف للإيراد)</div>
         <div>الخصم: {fmt(s.discountAmount || 0)} {s.currency}</div>
         <div>ضريبة القيمة المضافة ({Math.round((s.vatAmount && s.subtotal ? (s.vatAmount / s.subtotal) * 100 : 0))}%): {fmt(s.vatAmount)} {s.currency}</div>
         {s.currency === 'USD' && (

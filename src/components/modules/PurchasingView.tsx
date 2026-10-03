@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useModuleWriteAccess } from '../../hooks/usePermissions';
 import { 
   Plus, Search, ShoppingBag, Truck, Calendar, 
   ArrowRight, TrendingDown, TrendingUp, AlertCircle
@@ -10,6 +11,8 @@ import { PaymentMethod } from '../../types/erp';
 export const PurchasingView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  // QA-25: UI permission affordance (service authorization stays the real wall).
+  const writeAccess = useModuleWriteAccess('purchasing', 'المشتريات');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'invoices' | 'price_comparison'>('invoices');
 
@@ -43,7 +46,10 @@ export const PurchasingView: React.FC = () => {
   );
   const warehouses = db.warehouses.filter(w => w.type === 'raw_materials');
 
-  const addLine = () => {
+  const addLine = (baseLines?: Array<{
+    itemId: string; quantity: number; unitId: string; unitPrice: number;
+    batchNumber: string; productionDate: string; expiryDate: string; vatRate: number;
+  }>) => {
     const first = rawAndPackagingItems[0];
     if (!first) return;
     const today = new Date().toISOString().split('T')[0];
@@ -53,12 +59,14 @@ export const PurchasingView: React.FC = () => {
       : '';
 
     setLines([
-      ...lines,
+      ...(baseLines || lines),
       {
         itemId: first.id,
         quantity: 100,
         unitId: first.baseUnitId,
-        unitPrice: first.standardCost || 50,
+        // Never invent a price: a zero standard cost stays zero and the operator
+        // enters the real supplier price.
+        unitPrice: first.standardCost || 0,
         batchNumber: '', // intentionally empty: user enters the supplier's real batch number
         productionDate: today,
         expiryDate: expDate,
@@ -78,7 +86,7 @@ export const PurchasingView: React.FC = () => {
       const itm = rawAndPackagingItems.find(i => i.id === val);
       if (itm) {
         current.unitId = itm.baseUnitId;
-        current.unitPrice = itm.standardCost || 50;
+        current.unitPrice = itm.standardCost || 0;
         current.vatRate = itm.vatRate;
       }
     }
@@ -87,15 +95,22 @@ export const PurchasingView: React.FC = () => {
   };
 
   const handleOpenCreate = () => {
+    if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
     if (suppliers.length > 0) setSupplierId(suppliers[0].id);
     setWarehouseId('wh-raw');
     setPaymentMethod('credit');
     setCurrency('EGP');
     setReference('');
+    // QA-15: the line list must start EMPTY. The previous code reset with
+    // setLines([]) and then called addLine() from a setTimeout that closed over
+    // the STALE `lines` value, so open -> cancel -> open accumulated rows
+    // (1 -> 2 -> 3). Passing the explicit empty base makes the reset deterministic.
     setLines([]);
+    setCurrency('EGP');
+    setExchangeRate(1);
     setFormError(null);
     setShowCreateModal(true);
-    setTimeout(() => addLine(), 50);
+    setTimeout(() => addLine([]), 0);
   };
 
   const handleSaveInvoice = () => {
@@ -204,7 +219,9 @@ export const PurchasingView: React.FC = () => {
 
         <button
           onClick={handleOpenCreate}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition"
+          disabled={!writeAccess.canCreate}
+          title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus className="w-4 h-4" />
           <span>فاتورة استلام خامات جديدة</span>
@@ -426,6 +443,39 @@ export const PurchasingView: React.FC = () => {
                     className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                   />
                 </div>
+
+                {/* QA-23: document currency and exchange rate are part of the
+                    purchase architecture and must be visible. The document is
+                    kept in the foreign amount while the GL posts the EGP
+                    equivalent (amount x rate); the base currency stays EGP. */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">عملة الفاتورة</label>
+                  <select
+                    value={currency}
+                    onChange={(e) => {
+                      const v = e.target.value as 'EGP' | 'USD';
+                      setCurrency(v);
+                      setExchangeRate(v === 'USD' ? db.company.currentUsdExchangeRate : 1);
+                    }}
+                    className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                  >
+                    <option value="EGP">جنيه مصري (EGP)</option>
+                    <option value="USD">دولار أمريكي (USD)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر الصرف (ج.م / العملة)</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={exchangeRate}
+                    disabled={currency === 'EGP'}
+                    onChange={(e) => setExchangeRate(Number(e.target.value))}
+                    className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs disabled:opacity-60 font-mono"
+                  />
+                </div>
               </div>
 
               {/* Line items */}
@@ -433,7 +483,7 @@ export const PurchasingView: React.FC = () => {
                 <div className="p-3 bg-slate-100 flex items-center justify-between">
                   <span className="font-bold text-xs text-slate-800">الأصناف والخامات المستلمة والتشغيلات</span>
                   <button
-                    onClick={addLine}
+                    onClick={() => addLine()}
                     className="px-2.5 py-1 bg-slate-900 text-white rounded-lg text-xs font-bold"
                   >
                     + إضافة مادة خام / تعبئة
@@ -535,16 +585,21 @@ export const PurchasingView: React.FC = () => {
                 </table>
               </div>
 
-              {/* Total */}
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center text-xs">
-                <span className="text-slate-500">
-                  ملاحظة: تضاف الكميات فورًا لمستودع المواد الخام مع إثبات قيد محاسبي دائن للمورد ومدين للمخزون.
-                  ضريبة القيمة المضافة تُؤخذ افتراضياً من بيانات الصنف ويمكن تعديلها لكل سطر حسب المورد (مدخلات إلى حساب 1113).
-                </span>
-                <div className="text-sm font-black text-slate-900 font-mono">
-                  الإجمالي: {lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (1 + l.vatRate)), 0).toFixed(2)} ج.م
+              {/* Total */}<div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center text-xs">
+                  <span className="text-slate-500">
+                    ملاحظة: تضاف الكميات فورًا لمستودع المواد الخام مع إثبات قيد محاسبي دائن للمورد ومدين للمخزون.
+                    ضريبة القيمة المضافة تُؤخذ افتراضياً من بيانات الصنف ويمكن تعديلها لكل سطر حسب المورد (مدخلات إلى حساب 1113).
+                    {currency === 'USD' && ` قيمة الفاتورة بالدولار تُرحَّل بالجنيه المصري بسعر الصرف المحدد.`}
+                  </span>
+                  <div className="text-sm font-black text-slate-900 font-mono">
+                    الإجمالي: {(lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (1 + l.vatRate)), 0)).toFixed(2)} {currency}
+                    {currency === 'USD' && (
+                      <div className="text-[11px] text-slate-600 font-bold">
+                        ≡ {(lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (1 + l.vatRate)), 0) * exchangeRate).toFixed(2)} ج.م
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
             </div>
 
             <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-end gap-2">

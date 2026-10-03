@@ -15,6 +15,7 @@ import { erpDb, generateErpId } from './db';
 import { AuthorizationService, GuardOptions } from './authorization';
 import { Customer, Supplier, Item, User, RoleName, PermissionAction } from '../types/erp';
 import { ALL_MODULES, ASSIGNABLE_ACTIONS } from './permissions';
+import { channelForCustomerType } from './pricing';
 
 type ModuleAction = { module: any; action: 'create' | 'edit' };
 
@@ -52,7 +53,11 @@ export class MasterDataService {
       code,
       name,
       customerType: params.customerType,
-      channel: params.channel,
+      // QA-26: the persisted channel is DERIVED from the customer master type
+      // using the single existing mapping (the same one SalesView uses), so a
+      // caller passing a stale/blank `channel` can never persist a
+      // contradiction such as "retail customer / wholesale channel".
+      channel: channelForCustomerType(params.customerType),
       address: params.address || '',
       phone: params.phone || '',
       taxNumber: params.taxNumber || '',

@@ -123,53 +123,21 @@ export const ReportsView: React.FC = () => {
   // (posted GL receivable lines), so invoices, returns, cash/bank collections,
   // cheques and bounces, and export collections all net correctly. Credit
   // balances are shown in their own column and are NEVER hidden.
-  const today = new Date();
-  const daysSince = (d: string) => Math.floor((today.getTime() - new Date(d).getTime()) / 86400000);
-
-  interface AgingOpen { date: string; amount: number }
-  const agingOpenByCustomer = new Map<string, AgingOpen[]>();
-
-  db.customers.forEach(c => {
-    const st = LedgerService.buildCustomerStatement({ customerId: c.id });
-    if (Math.abs(st.closingBalance) < 0.01) return;
-    // Unsettled items: the still-open documents of this customer (a credit
-    // balance means an advance/overpayment, shown in the credit column).
-    const openDocs: AgingOpen[] = [];
-    let credited = 0;
-    st.rows.forEach(r => {
-      if (r.debit - r.credit <= 0.01) return;
-      openDocs.push({ date: r.date, amount: r.debit - r.credit });
-    });
-    const openTotal = openDocs.reduce((s, o) => s + o.amount, 0);
-    if (openDocs.length > 0) agingOpenByCustomer.set(c.id, openDocs);
-    else if (Math.abs(st.closingBalance) > 0.01) {
-      agingOpenByCustomer.set(c.id, [{ date: '—', amount: st.closingBalance }]);
-    }
-    void openTotal; void credited;
-  });
-
-  const receivablesAging = Array.from(agingOpenByCustomer.entries())
-    .map(([custId, docs]) => {
-      const st = LedgerService.buildCustomerStatement({ customerId: custId });
-      const openTotal = st.closingBalance;
-      const row = {
-        custId,
-        b0_30: 0, b31_60: 0, b61_90: 0, b90plus: 0,
-        credit: openTotal < 0 ? Math.abs(openTotal) : 0,
-        total: openTotal,
-        cust: db.customers.find(c => c.id === custId)!,
-      };
-      if (openTotal > 0) {
-        docs.forEach(d => {
-          const age = d.date === '—' ? 0 : daysSince(d.date);
-          if (age <= 30) row.b0_30 += d.amount;
-          else if (age <= 60) row.b31_60 += d.amount;
-          else if (age <= 90) row.b61_90 += d.amount;
-          else row.b90plus += d.amount;
-        });
-      }
-      return row;
-    })
+  // QA-10: the aging report is a VIEW over the single authoritative
+  // settlement-aware allocation in LedgerService — the buckets always tie to
+  // the customer statement closing balance, and a cheque receipt settles its
+  // invoice exactly once (no double counting).
+  const receivablesAging = LedgerService.buildReceivablesAging()
+    .map(r => ({
+      custId: r.customerId,
+      b0_30: r.b0_30,
+      b31_60: r.b31_60,
+      b61_90: r.b61_90,
+      b90plus: r.b90plus,
+      credit: r.credit,
+      total: r.total,
+      cust: db.customers.find(c => c.id === r.customerId)!,
+    }))
     .filter(r => r.cust);
 
   const agingTotals = receivablesAging.reduce((acc, r) => ({

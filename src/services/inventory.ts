@@ -274,6 +274,66 @@ export class InventoryEngine {
   }
 
   /**
+   * THE SINGLE SOURCE OF COST RESOLUTION for costed postings (QA-01 / QA-22 / QA-27).
+   *
+   * Priority order — no invented values, no silent fallbacks:
+   *   1. the FIFO / actual cost of the stock that is actually being issued
+   *      (this is what leaves inventory and therefore what must hit COGS);
+   *   2. a LEGITIMATELY CONFIGURED standard cost (`item.standardCost > 0`) —
+   *      the existing configured mechanism, used only when no stock exists yet;
+   *   3. otherwise FAIL, so the caller can show a clear Arabic business message.
+   *
+   * A zero cost is NEVER silently replaced by an arbitrary number.
+   */
+  public static resolveActualUnitCost(
+    itemId: string,
+    warehouseId: string,
+    quantity: number
+  ): { ok: true; unitCost: number; totalCost: number; source: 'fifo' | 'standard' } | { ok: false; error: string } {
+    const db = erpDb.getSnapshot();
+    const item = db.items.find(i => i.id === itemId);
+    if (!item) return { ok: false, error: 'الصنف غير معرف بنظام الأصناف' };
+
+    if (quantity > 0) {
+      const plan = this.planFifoConsumption(db, itemId, warehouseId, quantity, undefined);
+      if (plan.shortfall === 0 && plan.actualCost > 0) {
+        return {
+          ok: true,
+          unitCost: plan.actualCost / quantity,
+          totalCost: plan.actualCost,
+          source: 'fifo',
+        };
+      }
+      // Stock exists but is valued at zero (never purchased / never costed).
+      if (plan.shortfall === 0 && (item.standardCost || 0) > 0) {
+        return {
+          ok: true,
+          unitCost: item.standardCost,
+          totalCost: item.standardCost * quantity,
+          source: 'standard',
+        };
+      }
+      const available = this.getItemBalance(itemId, warehouseId);
+      return {
+        ok: false,
+        error:
+          plan.shortfall > 0
+            ? `الرصيد المتاح من الصنف (${item.nameAr}) في المستودع المحدد هو ${available} ولا يكفي للكمية المطلوبة (${quantity}).`
+            : `لا توجد تكلفة فعلية معرَّفة للصنف (${item.nameAr}) في المستودع المحدد. ` +
+              `يجب إدخال تكلفة الصنف في بطاقة الصنف أو استلامه من مورد بسعر فعلي قبل الترحيل المحاسبي.`,
+      };
+    }
+
+    if ((item.standardCost || 0) > 0) {
+      return { ok: true, unitCost: item.standardCost, totalCost: 0, source: 'standard' };
+    }
+    return {
+      ok: false,
+      error: `لا توجد تكلفة معيارية معرَّفة للصنف (${item.nameAr}). يجب ضبط تكلفة الصنف قبل الترحيل المحاسبي.`,
+    };
+  }
+
+  /**
    * Record a traceable inventory transaction and update perpetual batches — ATOMIC.
    * Everything (batch updates + transaction record) happens inside ONE erpDb.mutate;
    * all validation happens BEFORE any mutation, so a failed operation leaves zero trace.
@@ -476,71 +536,47 @@ export class InventoryEngine {
         if (srcBatch) srcBatch.quantity -= c.quantity;
       }
 
-      // 2) Add to target: same batch number, same cost. Merge if a same-number batch exists.
-      if (primaryBatch) {
-        const existing = draft.batches.find(
-          b => b.itemId === itemId && b.warehouseId === targetWarehouseId && b.batchNumber === primaryBatch
+      // 2) Add to target — the destination mirrors the SOURCE LAYERS EXACTLY.
+      //    One target batch per consumed source layer, carrying that layer's own
+      //    batch number and unit cost. This guarantees:
+      //      total target quantity increase == source quantity decrease,
+      //      and total inventory value is preserved (QA-05 / QA-06).
+      //    (Previously the first layer received the whole transfer quantity AND
+    //     the secondary layers were added again, duplicating stock.)
+      const layers = plan.consumes.length > 0
+        ? plan.consumes
+        : [{ batchNumber: primaryBatch || `${docNum}-L1`, quantity: qty, unitCost: actualUnitCost }];
+      for (const c of layers) {
+        const layerBatchNumber = c.batchNumber || primaryBatch || `${docNum}-L1`;
+        const srcBatch = draft.batches.find(
+          b => b.itemId === itemId && b.warehouseId === sourceWarehouseId && b.batchNumber === layerBatchNumber
         );
-        if (existing) {
-          const preQty = existing.quantity;
-          existing.quantity += qty;
+        const layerQty = c.quantity > 0 ? c.quantity : qty;
+        const layerCost = c.unitCost != null && c.unitCost > 0 ? c.unitCost : actualUnitCost;
+        const tExisting = draft.batches.find(
+          b => b.itemId === itemId && b.warehouseId === targetWarehouseId && b.batchNumber === layerBatchNumber
+        );
+        if (tExisting) {
+          const preQty = tExisting.quantity;
+          tExisting.quantity += layerQty;
           // Weighted average to keep batch cost faithful when merging layers
-          existing.unitCost = ((existing.unitCost || 0) * preQty + actualUnitCost * qty) / (existing.quantity || 1);
-          if (!existing.expiryDate && item.trackExpiry && item.expiryPeriodDays && item.expiryPeriodDays > 0) {
-            const base = new Date(existing.productionDate || dateStr);
+          tExisting.unitCost = ((tExisting.unitCost || 0) * preQty + layerCost * layerQty) / (tExisting.quantity || 1);
+          if (!tExisting.expiryDate && item.trackExpiry && item.expiryPeriodDays && item.expiryPeriodDays > 0) {
+            const base = new Date(tExisting.productionDate || dateStr);
             base.setDate(base.getDate() + item.expiryPeriodDays);
-            existing.expiryDate = base.toISOString().split('T')[0];
+            tExisting.expiryDate = base.toISOString().split('T')[0];
           }
         } else {
-          const srcRef = plan.consumes[0];
-          let productionDate = dateStr;
-          let expiryDate = '';
-          if (srcRef) {
-            const srcBatch = draft.batches.find(
-              b => b.itemId === itemId && b.warehouseId === sourceWarehouseId && b.batchNumber === srcRef.batchNumber
-            );
-            if (srcBatch) {
-              productionDate = srcBatch.productionDate || dateStr;
-              expiryDate = srcBatch.expiryDate || '';
-            }
-          }
           draft.batches.push({
             id: generateErpId('bat'),
-            batchNumber: primaryBatch,
+            batchNumber: layerBatchNumber,
             itemId,
             warehouseId: targetWarehouseId,
-            productionDate,
-            expiryDate,
-            quantity: qty,
-            unitCost: actualUnitCost,
+            productionDate: srcBatch?.productionDate || dateStr,
+            expiryDate: srcBatch?.expiryDate || '',
+            quantity: layerQty,
+            unitCost: layerCost,
           });
-          // Also carry over secondary consumed layers when the transfer spans multiple batches
-          if (plan.consumes.length > 1) {
-            for (const c of plan.consumes.slice(1)) {
-              const srcBatch = draft.batches.find(
-                b => b.itemId === itemId && b.warehouseId === sourceWarehouseId && b.batchNumber === c.batchNumber
-              );
-              const tExisting = draft.batches.find(
-                b => b.itemId === itemId && b.warehouseId === targetWarehouseId && b.batchNumber === c.batchNumber
-              );
-              if (tExisting) {
-                const preQty = tExisting.quantity;
-                tExisting.quantity += c.quantity;
-                tExisting.unitCost = ((tExisting.unitCost || 0) * preQty + (c.unitCost || 0) * c.quantity) / (tExisting.quantity || 1);
-              } else {
-                draft.batches.push({
-                  id: generateErpId('bat'),
-                  batchNumber: c.batchNumber,
-                  itemId,
-                  warehouseId: targetWarehouseId,
-                  productionDate: srcBatch?.productionDate || dateStr,
-                  expiryDate: srcBatch?.expiryDate || '',
-                  quantity: c.quantity,
-                  unitCost: c.unitCost,
-                });
-              }
-            }
-          }
         }
       }
 
@@ -625,6 +661,12 @@ export class InventoryEngine {
       t.itemId === params.itemId && (!warehouseId || t.warehouseId === warehouseId);
 
     const movements = db.inventoryTransactions.filter(inScope);
+    // QA-18: preserve the LEDGER'S OWN posting order as the tiebreaker for
+    // movements that share a date. Sorting by warehouse/document instead made
+    // a transfer's "in" leg appear before its "out" leg, so the running balance
+    // transiently displayed a quantity that never existed.
+    const ledgerOrder = new Map<string, number>();
+    db.inventoryTransactions.forEach((t, idx) => ledgerOrder.set(t.id, idx));
 
     // Opening balance = every movement strictly before the from date.
     const openingBalance = movements
@@ -636,11 +678,10 @@ export class InventoryEngine {
       .sort((a, b) => {
         const byDate = (a.date || '').localeCompare(b.date || '');
         if (byDate !== 0) return byDate;
-        // deterministic tiebreak: warehouse, then document, then id
-        const byWh = (a.warehouseId || '').localeCompare(b.warehouseId || '');
-        if (byWh !== 0) return byWh;
-        const byDoc = (a.documentNumber || '').localeCompare(b.documentNumber || '');
-        if (byDoc !== 0) return byDoc;
+        // stable secondary ordering: the ledger's own posting sequence
+        const seqA = ledgerOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const seqB = ledgerOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+        if (seqA !== seqB) return seqA - seqB;
         return (a.id || '').localeCompare(b.id || '');
       })
       .map(t => ({

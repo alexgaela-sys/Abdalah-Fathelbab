@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useModuleWriteAccess } from '../../hooks/usePermissions';
 import { 
   Factory, Plus, Play, CheckCircle2, AlertCircle, 
   Layers, ChevronRight, Recycle, Trash2, Calendar, PackageOpen,
@@ -13,6 +14,8 @@ import { ProductionOrder, ProductionOrderStatus } from '../../types/erp';
 export const ManufacturingView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  // QA-25: UI permission affordance (service authorization stays the real wall).
+  const writeAccess = useModuleWriteAccess('manufacturing', 'الإنتاج');
   const [showDailyOutputModal, setShowDailyOutputModal] = useState<ProductionOrder | null>(null);
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<ProductionOrder | null>(null);
   const [activeSection, setActiveSection] = useState<'orders' | 'bom'>('orders');
@@ -49,6 +52,33 @@ export const ManufacturingView: React.FC = () => {
   const [defectiveAction, setDefectiveAction] = useState<'to_recycling' | 'to_scrap'>('to_recycling');
   const [wasteReason, setWasteReason] = useState('معيب تغليف مع إعادة تدوير الخلطة');
   const [outputDate, setOutputDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // QA-17: actual conversion-cost capture (standard vs actual = variance).
+  const [convOrderId, setConvOrderId] = useState('');
+  const [convCostType, setConvCostType] = useState<'direct_labor' | 'electricity' | 'gas' | 'maintenance' | 'supervision' | 'other'>('direct_labor');
+  const [convAmount, setConvAmount] = useState(0);
+  const [convDate, setConvDate] = useState(new Date().toISOString().split('T')[0]);
+  const [convError, setConvError] = useState<string | null>(null);
+  const [convNotice, setConvNotice] = useState<string | null>(null);
+  const convBreakdown = convOrderId ? ManufacturingEngine.calculateCostBreakdown(convOrderId) : null;
+
+  const handleRecordConversionCost = () => {
+    if (!writeAccess.canCreate) { setConvError(writeAccess.createDeniedTitle); return; }
+    setConvError(null);
+    setConvNotice(null);
+    if (!convOrderId) { setConvError('اختر أمر الإنتاج أولاً'); return; }
+    const res = ManufacturingEngine.recordConversionCost({
+      orderId: convOrderId,
+      costType: convCostType,
+      amount: Number(convAmount),
+      date: convDate,
+      userId: 'usr-admin',
+      userName: 'مدير الإنتاج',
+    });
+    if (!res.success) { setConvError(res.error || 'تعذر تسجيل التكلفة التحويلية'); return; }
+    setConvNotice('تم تسجيل التكلفة التحويلية الفعلية وربطها بأمر الإنتاج.');
+    setConvAmount(0);
+  };
 
   const finishedProducts = db.items.filter(i => i.itemType === 'finished_product' && i.active);
   const allFinishedProducts = db.items.filter(i => i.itemType === 'finished_product');
@@ -221,6 +251,7 @@ export const ManufacturingView: React.FC = () => {
   };
 
   const handleOpenCreate = () => {
+    if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
     if (finishedProducts.length > 0) setProductId(finishedProducts[0].id);
     setPlannedQty(1000);
     setTargetMarket('local');
@@ -315,7 +346,9 @@ export const ManufacturingView: React.FC = () => {
           {activeSection === 'orders' && (
             <button
               onClick={handleOpenCreate}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition"
+              disabled={!writeAccess.canCreate}
+              title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Plus className="w-4 h-4" />
               <span>أمر إنتاج جديد</span>
@@ -735,6 +768,131 @@ export const ManufacturingView: React.FC = () => {
         </table>
       </div>
       )}
+
+      {/* QA-17 — Standard vs Actual conversion cost (real actuals, never fabricated) */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-3">
+        <div>
+          <h3 className="font-bold text-xs text-slate-800">التكلفة التحويلية: المعياري مقابل الفعلي</h3>
+          <p className="text-[11px] text-slate-500">
+            سجّل المصروفات الفعلية (أجور/كهرباء/غاز/صيانة/إشراف) على أمر الإنتاج، وسيظهر الفرق تلقائياً
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">أمر الإنتاج</label>
+            <select
+              value={convOrderId}
+              onChange={(e) => { setConvOrderId(e.target.value); setConvError(null); setConvNotice(null); }}
+              className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+            >
+              <option value="">— اختر أمر الإنتاج —</option>
+              {db.productionOrders.map(o => (
+                <option key={o.id} value={o.id}>
+                  {o.orderNumber} — {db.items.find(i => i.id === o.productId)?.nameAr || o.productId}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">نوع البند</label>
+            <select
+              value={convCostType}
+              onChange={(e) => setConvCostType(e.target.value as typeof convCostType)}
+              className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+            >
+              <option value="direct_labor">أجور عمالة مباشرة</option>
+              <option value="electricity">كهرباء</option>
+              <option value="gas">غاز</option>
+              <option value="maintenance">صيانة</option>
+              <option value="supervision">إشراف</option>
+              <option value="other">أخرى</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">المبلغ الفعلي (ج.م)</label>
+            <input
+              type="number" min="0" step="0.01"
+              value={convAmount}
+              onChange={(e) => setConvAmount(Number(e.target.value))}
+              className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">التاريخ</label>
+            <div className="flex gap-2">
+              <input
+                type="date"
+                value={convDate}
+                onChange={(e) => setConvDate(e.target.value)}
+                className="flex-1 p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+              />
+              <button
+                onClick={handleRecordConversionCost}
+                disabled={!convOrderId || !(convAmount > 0) || !writeAccess.canCreate}
+                title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
+                className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs disabled:opacity-40 whitespace-nowrap"
+              >
+                تسجيل
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {convError && (
+          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">{convError}</div>
+        )}
+        {convNotice && (
+          <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">{convNotice}</div>
+        )}
+
+        {convBreakdown && (
+          <div className="border border-slate-200 rounded-xl overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-100 text-slate-700 font-bold">
+                <tr>
+                  <th className="p-2.5">البند</th>
+                  <th className="p-2.5 text-center">معياري</th>
+                  <th className="p-2.5 text-center">فعلي</th>
+                  <th className="p-2.5 text-center">الفرق</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-mono">
+                {[
+                  { label: 'خامات ومواد تعبئة', std: convBreakdown.standardMaterialCost, act: convBreakdown.actualMaterialCost, varr: convBreakdown.materialQuantityVariance },
+                  { label: 'أجور عمالة مباشرة', std: convBreakdown.standardLaborCost, act: convBreakdown.actualLaborCost, varr: convBreakdown.laborVariance },
+                  { label: 'كهرباء', std: convBreakdown.standardElectricityCost, act: convBreakdown.actualElectricityCost, varr: convBreakdown.electricityVariance },
+                  { label: 'غاز', std: convBreakdown.standardGasCost, act: convBreakdown.actualGasCost, varr: convBreakdown.gasVariance },
+                  { label: 'صيانة', std: convBreakdown.standardMaintenanceCost, act: convBreakdown.actualMaintenanceCost, varr: convBreakdown.maintenanceVariance },
+                  { label: 'إشراف', std: convBreakdown.standardSupervisionCost, act: convBreakdown.actualSupervisionCost, varr: convBreakdown.supervisionVariance },
+                ].map((row, i) => (
+                  <tr key={i} className="hover:bg-slate-50">
+                    <td className="p-2.5 font-sans font-bold text-slate-800">{row.label}</td>
+                    <td className="p-2.5 text-center">{row.std.toFixed(2)}</td>
+                    <td className="p-2.5 text-center">{row.act.toFixed(2)}</td>
+                    <td className={`p-2.5 text-center font-bold ${row.varr > 0.01 ? 'text-rose-700' : row.varr < -0.01 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                      {row.varr.toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-slate-100 font-black text-slate-900 border-t-2 border-slate-300 font-mono">
+                <tr>
+                  <td className="p-2.5 font-sans">إجمالي تكلفة الإنتاج</td>
+                  <td className="p-2.5 text-center">{convBreakdown.totalStandardCost.toFixed(2)}</td>
+                  <td className="p-2.5 text-center">{convBreakdown.totalActualCost.toFixed(2)}</td>
+                  <td className={`p-2.5 text-center ${convBreakdown.totalProductionVariance > 0.01 ? 'text-rose-700' : convBreakdown.totalProductionVariance < -0.01 ? 'text-emerald-700' : ''}`}>
+                    {convBreakdown.totalProductionVariance.toFixed(2)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+            <p className="p-2.5 text-[10px] text-slate-500">
+              الفرق الموجب = غير مواتٍ (فعلي أعلى من المعياري)، السالب = مواتٍ. القيم الفعلية مأخوذة من المصروفات المسجلة فعلياً على الأمر فقط.
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* Create Order Modal */}
       {showCreateModal && (

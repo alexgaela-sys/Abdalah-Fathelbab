@@ -1715,7 +1715,7 @@ async function runAudit() {
     nameAr: 'تنبيهات تاريخ الصلاحية (خلال 5 أيام) وعدم حظر البيع آليًا',
     passed: expiryPassed,
     expected: 'Batch expiring in 5 days detected by expiry monitor; system shows warning but does NOT block sale',
-    actual: `Batch: ${foundAlert?.batchNumber}, Days to expiry: ${foundAlert?.daysUntilExpiry}, Sale allowed: ${testSaleAlertBatch.success}`,
+    actual: `Batch: ${foundAlert?.batchNumber}, Days to expiry: ${foundAlert?.daysUntilExpiry}, Sale allowed: ${testSaleAlertBatch.success}${testSaleAlertBatch.error ? ` — ${testSaleAlertBatch.error}` : ''}`,
     details: 'ERP rule enforced: Expiry produces dashboard alert for management review while allowing operational sales.',
     dataCreated: [expBatchId]
   });

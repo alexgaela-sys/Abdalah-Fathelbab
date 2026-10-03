@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useModuleWriteAccess } from '../../hooks/usePermissions';
 import { 
   Wallet, Plus, ArrowDownLeft, ArrowUpRight, 
   DollarSign, Calendar, FileText, Printer, Download,
@@ -12,6 +13,8 @@ import { printDocument } from '../printUtils';
 export const TreasuryView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showAddModal, setShowAddModal] = useState(false);
+  // QA-25: UI permission affordance (service authorization stays the real wall).
+  const writeAccess = useModuleWriteAccess('treasury', 'الخزينة');
 
   // Filters
   const [fromDate, setFromDate] = useState(() => {
@@ -168,7 +171,9 @@ export const TreasuryView: React.FC = () => {
           </button>
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer"
+            disabled={!writeAccess.canCreate}
+            title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
             <span>حركة قبض / صرف خزينة</span>

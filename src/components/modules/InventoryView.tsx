@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useModuleWriteAccess } from '../../hooks/usePermissions';
 import { 
   Boxes, ArrowLeftRight, CheckSquare, Search, 
   AlertTriangle, Filter, Plus, Calendar, Check
@@ -16,6 +17,8 @@ export const InventoryView: React.FC = () => {
 
   // Transfer modal state
   const [showTransferModal, setShowTransferModal] = useState(false);
+  // QA-25: UI permission affordance (service authorization stays the real wall).
+  const writeAccess = useModuleWriteAccess('inventory', 'المخزون');
   const [transferItemId, setTransferItemId] = useState('');
   const [fromWhId, setFromWhId] = useState('wh-local');
   const [toWhId, setToWhId] = useState('wh-export');
@@ -68,6 +71,7 @@ export const InventoryView: React.FC = () => {
   });
 
   const handleOpenTransfer = () => {
+    if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
     if (items.length > 0) setTransferItemId(items[0].id);
     setFromWhId('wh-local');
     setToWhId('wh-export');
@@ -85,7 +89,7 @@ export const InventoryView: React.FC = () => {
       fromWhId,
       toWhId,
       Number(transferQty),
-      item?.standardCost || 50,
+      item?.standardCost || undefined,
       undefined,
       transferNotes
     );
@@ -99,17 +103,33 @@ export const InventoryView: React.FC = () => {
   };
 
   const handleOpenPhysicalCount = () => {
-    const whItems = items.map(itm => {
-      const current = InventoryEngine.getItemBalance(itm.id, countWarehouseId);
-      return {
-        itemId: itm.id,
-        systemQty: current,
-        physicalQty: current,
-        unitCost: itm.standardCost || 50,
-      };
-    });
+    if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
+    // QA-11: the count is scoped to the SELECTED warehouse, and only items that
+    // actually hold stock there are listed — no zero rows for unrelated
+    // warehouses, and every warehouse (WH-01..WH-05) is selectable.
+    const whItems = items
+      .map(itm => {
+        const current = InventoryEngine.getItemBalance(itm.id, countWarehouseId);
+        return { itemId: itm.id, systemQty: current };
+      })
+      .filter(x => x.systemQty !== 0)
+      .map(({ itemId, systemQty }) => ({
+        itemId,
+        systemQty,
+        physicalQty: systemQty,
+        unitCost: 0,
+      }));
     setCountLines(whItems);
     setShowCountModal(true);
+  };
+
+  const handleCountWarehouseChange = (whId: string) => {
+    setCountWarehouseId(whId);
+    const whItems = items
+      .map(itm => ({ itemId: itm.id, systemQty: InventoryEngine.getItemBalance(itm.id, whId) }))
+      .filter(x => x.systemQty !== 0)
+      .map(({ itemId, systemQty }) => ({ itemId, systemQty, physicalQty: systemQty, unitCost: 0 }));
+    setCountLines(whItems);
   };
 
   const handleApproveCount = () => {
@@ -149,7 +169,9 @@ export const InventoryView: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={handleOpenTransfer}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition"
+            disabled={!writeAccess.canCreate}
+            title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <ArrowLeftRight className="w-4 h-4 text-indigo-600" />
             <span>تحويل مخزني داخلي</span>
@@ -157,7 +179,9 @@ export const InventoryView: React.FC = () => {
 
           <button
             onClick={handleOpenPhysicalCount}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-md transition"
+            disabled={!writeAccess.canCreate}
+            title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-md transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <CheckSquare className="w-4 h-4" />
             <span>جرد فعلي وتسوية</span>
@@ -439,10 +463,19 @@ export const InventoryView: React.FC = () => {
             </div>
 
             <div className="p-6 overflow-y-auto space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-bold text-slate-700">مستودع الجرد:</span>
-                <span className="font-bold text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200">
-                  {whMap.get(countWarehouseId)}
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="text-xs font-bold text-slate-700">مستودع الجرد:</label>
+                <select
+                  value={countWarehouseId}
+                  onChange={(e) => handleCountWarehouseChange(e.target.value)}
+                  className="p-1.5 rounded-xl bg-slate-50 border border-slate-300 text-xs font-semibold"
+                >
+                  {db.warehouses.map(w => (
+                    <option key={w.id} value={w.id}>{w.code} — {w.nameAr}</option>
+                  ))}
+                </select>
+                <span className="text-[11px] text-slate-500">
+                  الجرد يشمل أصناف المستودع المختار فقط ({countLines.length} صنف)
                 </span>
               </div>
 

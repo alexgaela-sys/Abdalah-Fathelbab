@@ -440,6 +440,7 @@ export type InventoryMovementType =
   | 'warehouse_transfer'
   | 'production_consumption'
   | 'production_issue'
+  | 'production_return'
   | 'production_output'
   | 'sales'
   | 'sales_return'

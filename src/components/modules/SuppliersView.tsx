@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useModuleWriteAccess } from '../../hooks/usePermissions';
 import { 
   Truck, Plus, Search, FileText, Phone, 
   MapPin, DollarSign, ArrowUpRight, ArrowDownLeft,
@@ -15,6 +16,8 @@ export const SuppliersView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'list' | 'statement'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  // QA-25: UI permission affordance (service authorization stays the real wall).
+  const writeAccess = useModuleWriteAccess('suppliers', 'الموردون');
   const [showPaymentModal, setShowPaymentModal] = useState<Supplier | null>(null);
 
   // Statement Filters
@@ -361,10 +364,13 @@ export const SuppliersView: React.FC = () => {
 
           <button
             onClick={() => {
+              if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
               setCode(`SUP-00${db.suppliers.length + 1}`);
               setShowAddModal(true);
             }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer"
+            disabled={!writeAccess.canCreate}
+            title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
             <span>إضافة مورد جديد</span>

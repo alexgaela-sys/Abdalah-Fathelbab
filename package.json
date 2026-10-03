@@ -14,7 +14,8 @@
     "verify": "tsx scripts/verify_integrity.ts",
     "regression": "tsx scripts/regression_fixes.ts",
     "uafix": "tsx scripts/uafix_verification.ts",
-    "masteruat": "tsx scripts/master_uat.ts"
+    "masteruat": "tsx scripts/master_uat.ts",
+    "auditfix": "tsx scripts/audit_fix_regression.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -177,7 +177,11 @@ section('F17 — bonus / free goods: stock & COGS yes, revenue / AR / VAT no');
 
   check('customer receivable increased by the invoice total only (no bonus)',
     near(snap().customers.find(c => c.id === cust.id)!.currentBalance - balBefore, 2280, 0.01));
-  check('COGS includes all 11 units (11 x 100)', near(inv.cogsTotal, 1100, 0.01), `got ${inv.cogsTotal}`);
+  // QA-01: COGS must be the ACTUAL cost of the stock that leaves inventory.
+  // The fixture seeds 500 PCS at 60/unit, so 11 issued units cost 11 x 60 = 660.
+  // The previous expectation (11 x 100) asserted the hard-coded fallback that
+  // ignored the real stock cost; this now verifies genuine FIFO costing.
+  check('COGS includes all 11 units at the real stock cost (11 x 60)', near(inv.cogsTotal, 660, 0.01), `got ${inv.cogsTotal}`);
 
   const jv = snap().journalEntries.find(j => j.id === inv.journalEntryId)!;
   const recv = jv.lines.filter(l => l.accountId === 'acc-1105').reduce((s, l) => s + l.debit - l.credit, 0);
@@ -318,8 +322,17 @@ section('F21 — custody settlement moves treasury only when cash really moves')
 
   // --- non-cash settlement: no cash movement at all ---
   const cashBefore = gl('1101');
-  const nonCash = WorkflowService.settleRepCustody({ custodyId: open.custody!.id, date: TODAY, isTest: true });
+  const blockedClose = WorkflowService.settleRepCustody({ custodyId: open.custody!.id, date: TODAY, isTest: true });
+  check('QA-20: settling a custody that still holds unsold goods is BLOCKED', !blockedClose.success,
+    blockedClose.error || 'ACCEPTED');
+  check('QA-20: the block reports the unsold goods explicitly',
+    Array.isArray(blockedClose.unsoldGoods) && blockedClose.unsoldGoods.length > 0 &&
+    blockedClose.unsoldGoods.some(u => u.itemId === FP.id && u.remaining === 10),
+    JSON.stringify(blockedClose.unsoldGoods));
+  const nonCash = WorkflowService.settleRepCustody({ custodyId: open.custody!.id, date: TODAY, acknowledgeRemainingGoods: true, isTest: true });
   check('non-cash custody settlement succeeds', nonCash.success, nonCash.error || '');
+  check('QA-20: an acknowledged settlement still warns about the unsold goods',
+    !!nonCash.warning && !!nonCash.unsoldGoods && nonCash.unsoldGoods.length > 0, nonCash.warning || 'no warning');
   check('non-cash settlement moves NO treasury cash', gl('1101') === cashBefore, `1101 ${cashBefore} -> ${gl('1101')}`);
   check('non-cash settlement reports a zero treasury delta', near(nonCash.treasuryDelta || 0, 0, 0.001));
   check('non-cash settlement posts no settlement journal',
@@ -333,7 +346,7 @@ section('F21 — custody settlement moves treasury only when cash really moves')
   WorkflowService.loadGoodsToRep({ custodyId: open2.custody!.id, itemId: FP.id, quantity: 10, unitPrice: 0, warehouseId: 'wh-local', date: TODAY });
   const cash2 = gl('1101');
   const custody2 = gl('1107');
-  const settled = WorkflowService.settleRepCustody({ custodyId: open2.custody!.id, cashCollected: 2500, date: TODAY, isTest: true });
+  const settled = WorkflowService.settleRepCustody({ custodyId: open2.custody!.id, cashCollected: 2500, date: TODAY, acknowledgeRemainingGoods: true, isTest: true });
   check('cash custody settlement succeeds', settled.success, settled.error || '');
   check('treasury 1101 INCREASED by the collected cash', near(gl('1101') - cash2, 2500, 0.01), `1101 ${cash2} -> ${gl('1101')}`);
   check('custody account 1107 decreased by the collected cash', near(custody2 - gl('1107'), 2500, 0.01), `1107 ${custody2} -> ${gl('1107')}`);
@@ -346,7 +359,7 @@ section('F21 — custody settlement moves treasury only when cash really moves')
   check('third custody opened for the refund scenario', open3.success, `${rep3.error || ''} | ${open3.error || ''}`);
   WorkflowService.loadGoodsToRep({ custodyId: open3.custody!.id, itemId: FP.id, quantity: 5, unitPrice: 0, warehouseId: 'wh-local', date: TODAY });
   const cash3 = gl('1101');
-  const refunded = WorkflowService.settleRepCustody({ custodyId: open3.custody!.id, cashCollected: 1000, cashRefunded: 300, date: TODAY, isTest: true });
+  const refunded = WorkflowService.settleRepCustody({ custodyId: open3.custody!.id, cashCollected: 1000, cashRefunded: 300, date: TODAY, acknowledgeRemainingGoods: true, isTest: true });
   if (!refunded.success) console.log('    DEBUG refund custody =', JSON.stringify(snap().representativeCustodies.map(c => ({ id: c.id, st: c.status, rep: c.repId }))));
   check('settlement with refund succeeds', refunded.success, refunded.error || '');
   check('treasury moved by the NET amount (1000 - 300)', near(gl('1101') - cash3, 700, 0.01), `delta ${gl('1101') - cash3}`);

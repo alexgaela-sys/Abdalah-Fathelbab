@@ -148,12 +148,31 @@ export const RepresentativesView: React.FC = () => {
     const refundInput = prompt('مبلغ نقدي يُرد للشركة من العهدة إن وجد (صفر أو فارغ = لا رد):', '0');
     if (refundInput === null) return;
 
-    const res = WorkflowService.settleRepCustody({
+    const submit = (acknowledgeRemainingGoods: boolean) => WorkflowService.settleRepCustody({
       custodyId,
       cashCollected: Number(cashInput) > 0 ? Number(cashInput) : undefined,
       cashRefunded: Number(refundInput) > 0 ? Number(refundInput) : undefined,
       date: new Date().toISOString().split('T')[0],
+      acknowledgeRemainingGoods,
     });
+
+    let res = submit(false);
+
+    // QA-20: the service refuses to close a custody that still holds unsold
+    // goods. Offer return-to-stock / explicit acknowledgement — never silently.
+    if (!res.success && res.unsoldGoods && res.unsoldGoods.length > 0) {
+      const detail = res.unsoldGoods.map(u => {
+        const itm = db.items.find(i => i.id === u.itemId);
+        return `- ${itm?.nameAr || u.itemId}: ${u.remaining}`;
+      }).join('\n');
+      const choice = confirm(
+        `${res.error}\n\n${detail}\n\n` +
+        `هل تريد تسوية العهدة الآن مع الإقرار بهذه البضاعة غير المباعة؟\n` +
+        `اضغط "موافق" للإقرار، أو "إلغاء" للرجوع وإرجاع البضاعة للمخزون أولاً.`
+      );
+      if (!choice) return;
+      res = submit(true);
+    }
 
     if (!res.success) {
       alert(res.error || 'خطأ في تسوية العهدة');

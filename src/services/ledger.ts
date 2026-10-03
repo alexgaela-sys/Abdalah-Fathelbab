@@ -20,6 +20,20 @@ export type CustomerDocType =
   | 'sales_invoice' | 'customer_payment' | 'sales_return' | 'cheque'
   | 'cheque_bounce' | 'export_collection' | 'adjustment' | 'other';
 
+/** One customer's aging buckets (QA-10 — buckets always tie to the balance). */
+export interface ReceivablesAgingRow {
+  customerId: string;
+  customerName: string;
+  b0_30: number;
+  b31_60: number;
+  b61_90: number;
+  b90plus: number;
+  /** Overpayment / advance (credit balance), shown separately, never hidden. */
+  credit: number;
+  /** The AUTHORITATIVE statement closing balance (debit = +, credit = -). */
+  total: number;
+}
+
 export interface CustomerStatementRow {
   id: string;
   date: string;
@@ -315,6 +329,93 @@ export class LedgerService {
       customerId: c.id,
       balance: this.buildCustomerStatement({ customerId: c.id }).closingBalance,
     }));
+  }
+
+  /**
+   * QA-10 — SETTLEMENT-AWARE receivables aging, derived from the SAME
+   * authoritative customer statement the GL is posted to.
+   *
+   * The previous display summed the FULL debit of every open-looking document
+   * and never applied the later credits, so a cheque receipt was effectively
+   * counted once as a reduction of `total` and again as an un-applied payment
+   * inside the buckets. Here every credit row on the statement (cash, bank,
+   * cheque receipt, return, adjustment) settles the OLDEST open item first, so:
+   *
+   *   b0_30 + b31_60 + b61_90 + b90plus  ===  max(closingBalance, 0)
+   *   credit (overpayment)               ===  max(-closingBalance, 0)
+   *
+   * i.e. Customer balance = Customer statement = GL receivable = Aging total.
+   */
+  public static buildReceivablesAging(params?: {
+    customerId?: string;
+    asOf?: string;
+  }): Array<ReceivablesAgingRow> {
+    const db = erpDb.getSnapshot();
+    const asOf = params?.asOf ? new Date(params.asOf).getTime() : Date.now();
+    const daysSince = (d: string) =>
+      Math.floor((asOf - new Date(d).getTime()) / 86400000);
+
+    const customers = params?.customerId
+      ? db.customers.filter(c => c.id === params.customerId)
+      : db.customers;
+
+    const rows: ReceivablesAgingRow[] = [];
+    for (const customer of customers) {
+      const st = this.buildCustomerStatement({ customerId: customer.id });
+      if (Math.abs(st.closingBalance) < 0.01) continue;
+
+      // 1) replay the statement: debits open an item, credits settle FIFO.
+      const open: Array<{ date: string; amount: number }> = [];
+      for (const r of st.rows) {
+        const delta = Number((r.debit - r.credit).toFixed(2));
+        if (delta === 0) continue;
+        if (delta > 0) {
+          open.push({ date: r.date || '', amount: delta });
+        } else {
+          let remaining = Number((-delta).toFixed(2));
+          for (const o of open) {
+            if (remaining <= 0.01) break;
+            const used = Math.min(o.amount, remaining);
+            o.amount = Number((o.amount - used).toFixed(2));
+            remaining = Number((remaining - used).toFixed(2));
+          }
+        }
+      }
+      const openDocs = open.filter(o => o.amount > 0.01);
+      const openSum = openDocs.reduce((s, o) => s + o.amount, 0);
+
+      // 2) tie the buckets to the closing balance — an unexplained residual
+      //    (e.g. a manual opening balance on the customer card) is "current".
+      if (st.closingBalance - openSum > 0.01) {
+        openDocs.push({ date: '', amount: Number((st.closingBalance - openSum).toFixed(2)) });
+      }
+
+      const row: ReceivablesAgingRow = {
+        customerId: customer.id,
+        customerName: customer.name,
+        b0_30: 0, b31_60: 0, b61_90: 0, b90plus: 0,
+        credit: 0,
+        total: 0,
+      };
+      for (const d of openDocs) {
+        const age = d.date ? daysSince(d.date) : 0;
+        if (age <= 30) row.b0_30 += d.amount;
+        else if (age <= 60) row.b31_60 += d.amount;
+        else if (age <= 90) row.b61_90 += d.amount;
+        else row.b90plus += d.amount;
+      }
+      if (st.closingBalance < -0.01) {
+        // advance / overpayment — a credit balance, never hidden
+        row.credit = Number(Math.abs(st.closingBalance).toFixed(2));
+      }
+      row.b0_30 = Number(row.b0_30.toFixed(2));
+      row.b31_60 = Number(row.b31_60.toFixed(2));
+      row.b61_90 = Number(row.b61_90.toFixed(2));
+      row.b90plus = Number(row.b90plus.toFixed(2));
+      row.total = Number(st.closingBalance.toFixed(2));
+      rows.push(row);
+    }
+    return rows;
   }
 }
 

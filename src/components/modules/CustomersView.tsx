@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useModuleWriteAccess } from '../../hooks/usePermissions';
 import { 
   Users, Plus, Search, FileText, Phone, 
   MapPin, AlertTriangle, DollarSign, ArrowDownLeft,
@@ -9,6 +10,7 @@ import { Customer, QualityDestination } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
 import { MasterDataService } from '../../services/masterData';
 import { LedgerService } from '../../services/ledger';
+import { channelForCustomerType } from '../../services/pricing';
 import { printDocument } from '../printUtils';
 
 export const CustomersView: React.FC = () => {
@@ -16,6 +18,8 @@ export const CustomersView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'list' | 'statement' | 'returns'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  // QA-25: UI permission affordance (service authorization stays the real wall).
+  const writeAccess = useModuleWriteAccess('customers', 'العملاء');
   const [showPaymentModal, setShowPaymentModal] = useState<Customer | null>(null);
 
   // Sales Return form state
@@ -74,7 +78,10 @@ export const CustomersView: React.FC = () => {
   const [code, setCode] = useState(`CUST-00${db.customers.length + 1}`);
   const [name, setName] = useState('');
   const [customerType, setCustomerType] = useState<'retail' | 'wholesale' | 'export'>('wholesale');
-  const [channel, setChannel] = useState('wholesale');
+  // QA-26: the persisted channel is DERIVED from the customer master type
+  // (the single source of truth already used by SalesView), never a separate
+  // free-choice field that defaulted to "wholesale" for every customer.
+  const channel = channelForCustomerType(customerType);
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
   const [taxNumber, setTaxNumber] = useState('');
@@ -255,10 +262,13 @@ export const CustomersView: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
+              if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
               setCode(`CUST-00${db.customers.length + 1}`);
               setShowAddModal(true);
             }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer"
+            disabled={!writeAccess.canCreate}
+            title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
             <span>إضافة عميل جديد</span>

@@ -194,12 +194,15 @@ export class ManufacturingEngine {
     const qtyRatio = totalProduced > 0 ? totalProduced / qtyBase : 0;
 
     // ---- Standard conversion costs (from StandardCostRate, family-scoped) ----
+    // QA-16: the rate must be the one EFFECTIVE ON THE ORDER'S TRANSACTION DATE
+    // (inclusive on both ends), never simply "whatever is flagged active".
     const family = product?.productFamily;
-    const laborStd = this.getActiveRate(db, 'direct_labor', family);
-    const elecStd = this.getActiveRate(db, 'electricity', family);
-    const gasStd = this.getActiveRate(db, 'gas', family);
-    const maintStd = this.getActiveRate(db, 'maintenance', family);
-    const superStd = this.getActiveRate(db, 'supervision', family);
+    const txDate = (order?.startDate || order?.expectedCompletionDate || new Date().toISOString().split('T')[0]).slice(0, 10);
+    const laborStd = this.getActiveRate(db, 'direct_labor', family, txDate);
+    const elecStd = this.getActiveRate(db, 'electricity', family, txDate);
+    const gasStd = this.getActiveRate(db, 'gas', family, txDate);
+    const maintStd = this.getActiveRate(db, 'maintenance', family, txDate);
+    const superStd = this.getActiveRate(db, 'supervision', family, txDate);
 
     const standardLaborCost = laborStd.rate * (totalProduced / (laborStd.baseQuantity || 1));
     const standardElectricityCost = elecStd.rate * (totalProduced / (elecStd.baseQuantity || 1));
@@ -246,6 +249,10 @@ export class ManufacturingEngine {
     });
 
     const mapKeys = db.accountMappings || {};
+    // QA-17: the SPECIFIC cost-type account must be resolved BEFORE the generic
+    // 'expenses_default' fallback. Checking the generic key first mapped every
+    // actual onto one bucket (and read the credit leg, so the actual came out
+    // negative), which is why the variance was meaningless.
     const findActual = (keys: string[]): number => {
       for (const k of keys) {
         const accId = mapKeys[k];
@@ -254,7 +261,7 @@ export class ManufacturingEngine {
       return 0;
     };
 
-    const actualLaborCost = findActual(['expenses_default', 'variance_direct_labor']);
+    const actualLaborCost = findActual(['variance_direct_labor', 'expenses_default']);
     const actualElectricityCost = findActual(['variance_electricity', 'expenses_default']);
     const actualGasCost = findActual(['variance_gas', 'expenses_default']);
     const actualMaintenanceCost = findActual(['variance_maintenance', 'expenses_default']);
@@ -307,6 +314,111 @@ export class ManufacturingEngine {
       totalActualCost,
       totalProductionVariance,
     };
+  }
+
+  /**
+   * QA-17 — Record ACTUAL conversion costs against a production order.
+   *
+   * The costing architecture already reads actual conversion from posted
+   * `production_conversion_cost` journal entries (see `calculateCostBreakdown`
+   * and `closeProductionOrder`), but nothing could write them, so the variance
+   * was structurally always zero. This is the minimum coherent extension of the
+   * EXISTING architecture — no second costing engine, no invented values:
+   *
+   *   Dr <the real expense account the cost was actually incurred on>
+   *   Cr <accrued/expenses_default>            (absorbed into FG at closure)
+   *
+   * The entry is linked to the order via sourceDocumentType/sourceDocumentId,
+   * which is exactly how the breakdown reads it back.
+   */
+  public static recordConversionCost(params: {
+    orderId: string;
+    costType: 'direct_labor' | 'electricity' | 'gas' | 'maintenance' | 'supervision' | 'other';
+    amount: number;
+    date: string;
+    description?: string;
+    /** Explicit expense account; when omitted it is resolved from accountMappings. */
+    glAccountId?: string;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; error?: string; accountId?: string; journalEntryId?: string } {
+    const db = erpDb.getSnapshot();
+    const order = db.productionOrders.find(o => o.id === params.orderId);
+    if (!order) return { success: false, error: 'أمر الإنتاج غير موجود' };
+    if (order.status === 'completed' || order.status === 'cancelled') {
+      return { success: false, error: 'لا يمكن تسجيل تكاليف تحويلية على أمر إنتاج مغلق أو ملغى' };
+    }
+    const amount = Number(params.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { success: false, error: 'مبلغ التكلفة التحويلية يجب أن يكون رقمًا أكبر من صفر' };
+    }
+
+    // Expense account: explicit, else the existing account-mapping for the cost type.
+    const MAP_KEY: Record<string, string> = {
+      direct_labor: 'variance_direct_labor',
+      electricity: 'variance_electricity',
+      gas: 'variance_gas',
+      maintenance: 'variance_maintenance',
+      supervision: 'variance_overhead',
+      other: 'expenses_default',
+    };
+    const FALLBACK: Record<string, string> = {
+      direct_labor: 'acc-5105',
+      electricity: 'acc-5106',
+      gas: 'acc-5107',
+      maintenance: 'acc-5108',
+      supervision: 'acc-5109',
+      other: 'acc-6101',
+    };
+    const accountId = params.glAccountId || AccountingEngine.getMappedAccountId(MAP_KEY[params.costType], FALLBACK[params.costType]);
+    const acc = db.accounts.find(a => a.id === accountId);
+    if (!acc) return { success: false, error: 'حساب تكلفة التحويل غير موجود بدليل الحسابات' };
+    if (acc.isHeader) return { success: false, error: 'لا يمكن الترحيل على حساب رئيسي تجميعي' };
+
+    const creditAccId = AccountingEngine.getMappedAccountId('expenses_default', 'acc-6101');
+    const creditAcc = db.accounts.find(a => a.id === creditAccId);
+
+    const COST_LABEL_AR: Record<string, string> = {
+      direct_labor: 'أجور عمالة مباشرة',
+      electricity: 'كهرباء',
+      gas: 'غاز',
+      maintenance: 'صيانة',
+      supervision: 'إشراف',
+      other: 'تكاليف تحويلية أخرى',
+    };
+    const desc = params.description?.trim()
+      || `${COST_LABEL_AR[params.costType]} فعلية لأمر إنتاج ${order.orderNumber}`;
+
+    const lines: JournalLine[] = [
+      {
+        id: '', journalEntryId: '',
+        accountId: acc.id, accountCode: acc.code, accountNameAr: acc.nameAr,
+        debit: amount, credit: 0, currency: 'EGP' as const,
+        originalAmount: amount, exchangeRate: 1, costCenterId: 'cc-prod',
+        description: desc,
+      },
+      {
+        id: '', journalEntryId: '',
+        accountId: creditAccId,
+        accountCode: creditAcc?.code || creditAccId,
+        accountNameAr: creditAcc?.nameAr || 'مصروفات مستحقة',
+        debit: 0, credit: amount, currency: 'EGP' as const,
+        originalAmount: amount, exchangeRate: 1, costCenterId: 'cc-prod',
+        description: `تسجيل ${desc}`,
+      },
+    ];
+
+    const jv = AccountingEngine.postJournal({
+      date: params.date,
+      reference: `CONV-${order.orderNumber}-${params.costType}`,
+      description: desc,
+      sourceDocumentType: 'production_conversion_cost',
+      sourceDocumentId: order.id,
+      lines,
+    }, params.userId, params.userName, params.isTest);
+    if (!jv.success) return { success: false, error: jv.error };
+    return { success: true, accountId: acc.id, journalEntryId: jv.entry?.id };
   }
 
   /**
@@ -441,6 +553,8 @@ export class ManufacturingEngine {
     date: string;
     userId: string;
     userName: string;
+    /** Marks the waste-reconciliation journal as test data (QA-12). */
+    isTest?: boolean;
   }): { success: boolean; error?: string } {
     const db = erpDb.getSnapshot();
     const order = db.productionOrders.find(o => o.id === params.orderId);
@@ -458,6 +572,22 @@ export class ManufacturingEngine {
     const scrapQty = Number(params.scrapQuantity) || 0;
     if (goodQty <= 0 && defectiveQty <= 0 && scrapQty <= 0) {
       return { success: false, error: 'يجب تسجيل كمية إنتاج (سليمة أو معيبة أو هالك) أكبر من صفر' };
+    }
+
+    // QA-02: NO PHANTOM FINISHED GOODS.
+    // A production order may only register output once its BOM materials have
+    // actually been ISSUED to it. Previously the output could be booked with
+    // zero consumption, creating finished goods at a ZERO cost that could never
+    // be closed. Require a real material issue first.
+    const consumptions = db.productionConsumptions.filter(c => c.productionOrderId === order.id);
+    const issuedQty = consumptions.reduce((s, c) => s + (Number(c.actualQuantity) || 0), 0);
+    if (issuedQty <= 0) {
+      return {
+        success: false,
+        error:
+          `لا يمكن تسجيل إنتاج لأمر ${order.orderNumber} قبل صرف الخامات والمواد من مستودع الخامات. ` +
+          `اضغط "صرف خامات" على أمر الإنتاج لتحرير صرف المواد وفق معادلة التصنيع أولاً.`,
+      };
     }
 
     const dateStr = params.date || new Date().toISOString().split('T')[0];
@@ -479,6 +609,12 @@ export class ManufacturingEngine {
     const actualUnitCost = totalUnits > 0
       ? (breakdown.actualMaterialCost + appliedConversion) / totalUnits
       : (product.standardCost || 0);
+
+    // QA-12: values of the waste/damaged/recycled stock booked below, captured
+    // so the GL can be reconciled against the physical movement exactly.
+    let scrapValue = 0;
+    let defectiveValue = 0;
+    let recycleValue = 0;
 
     erpDb.mutate(draft => {
       const ord = draft.productionOrders.find(o => o.id === params.orderId);
@@ -529,6 +665,7 @@ export class ManufacturingEngine {
         };
         draft.productionWastes.push(waste);
 
+        const scrapUnitCost = actualUnitCost * 0.1; // Scrap valued at 10% of production cost
         InventoryEngine.recordMovement({
           itemId: ord.productId,
           warehouseId: 'wh-scrap',
@@ -536,12 +673,16 @@ export class ManufacturingEngine {
           date: params.date,
           quantityIn: scrapQty,
           quantityOut: 0,
-          unitCost: actualUnitCost * 0.1, // Scrap valued at 10% of production cost
+          unitCost: scrapUnitCost,
           documentType: 'هالك إنتاج',
           documentNumber: ord.orderNumber,
           batchNumber,
           notes: params.wasteReason || 'هالك خط تعبئة وتغليف',
         });
+        // The inbound movement books no FIFO consumption, so the value the stock
+        // is carried at is computed from the SAME rate used above — this is what
+        // the GL must mirror (QA-12).
+        scrapValue = scrapQty * scrapUnitCost;
       }
 
       // Record Defective Output if any
@@ -563,6 +704,7 @@ export class ManufacturingEngine {
         };
         draft.productionWastes.push(waste);
 
+        const defUnitCost = actualUnitCost * 0.5;
         InventoryEngine.recordMovement({
           itemId: ord.productId,
           warehouseId: targetWh,
@@ -570,12 +712,15 @@ export class ManufacturingEngine {
           date: params.date,
           quantityIn: defectiveQty,
           quantityOut: 0,
-          unitCost: actualUnitCost * 0.5,
+          unitCost: defUnitCost,
           documentType: isRecycle ? 'إعادة تدوير إنتاج معيب' : 'توالف إنتاج',
           documentNumber: ord.orderNumber,
           batchNumber,
           notes: isRecycle ? 'مسترجع إلى مستودع الخامات لإعادة التدوير' : 'محول لمستودع التوالف',
         });
+        const defValue = defectiveQty * defUnitCost;
+        if (isRecycle) recycleValue = defValue;
+        else defectiveValue = defValue;
       }
 
       // Audit Log
@@ -590,6 +735,58 @@ export class ManufacturingEngine {
         description: `تسجيل إنتاج يومي لأمر الإنتاج ${ord.orderNumber}: تم إنتاج ${goodQty} كرتونة سليمة، ${defectiveQty} معيب، ${scrapQty} هالك`,
       });
     });
+
+    // QA-12 — reconcile scrap / damaged / recycled production stock with the GL.
+    // The physical movement above creates inventory in WH-05 (scrap), WH-04
+    // (damaged) and WH-01 (recycled back to raw) — the corresponding asset
+    // accounts 1112 / 1111 / 1108 must move by the SAME value, otherwise
+    // physical inventory and inventory valuation silently disagree with the
+    // GL. The offset is the existing production-variance account (this is the
+    // write-off of production waste), so the journal balances on its own and
+    // cannot disturb the order-closure journal below.
+    const wasteLines: JournalLine[] = [];
+    const pushWasteDebit = (accountId: string, amount: number, desc: string) => {
+      if (amount <= 0.01) return;
+      const acc = db.accounts.find(a => a.id === accountId);
+      wasteLines.push({
+        id: '', journalEntryId: '',
+        accountId, accountCode: acc?.code || '', accountNameAr: acc?.nameAr || '',
+        debit: Number(amount.toFixed(2)), credit: 0, currency: 'EGP' as const,
+        originalAmount: Number(amount.toFixed(2)), exchangeRate: 1, costCenterId: 'cc-prod',
+        description: desc,
+      });
+    };
+    pushWasteDebit(
+      AccountingEngine.getMappedAccountId('inventory_scrap', 'acc-1112'), scrapValue,
+      `مخزون هالك إنتاج — مستودع الهالك والسكراب (أمر ${order.orderNumber})`);
+    pushWasteDebit(
+      AccountingEngine.getMappedAccountId('inventory_damaged', 'acc-1111'), defectiveValue,
+      `مخزون توالف إنتاج — مستودع التوالف (أمر ${order.orderNumber})`);
+    pushWasteDebit(
+      AccountingEngine.getMappedAccountId('purchase_raw_inventory', 'acc-1108'), recycleValue,
+      `مخزون معيب مُسترجع لإعادة التدوير في مستودع الخامات (أمر ${order.orderNumber})`);
+
+    if (wasteLines.length > 0) {
+      const wasteTotal = Number(wasteLines.reduce((s, l) => s + l.debit, 0).toFixed(2));
+      const varAccId = AccountingEngine.getMappedAccountId('variance_material_quantity', 'acc-5104');
+      const varAcc = db.accounts.find(a => a.id === varAccId);
+      const creditLine: JournalLine = {
+        id: '', journalEntryId: '',
+        accountId: varAccId, accountCode: varAcc?.code || varAccId, accountNameAr: varAcc?.nameAr || 'فروق كميات استهلاك المواد',
+        debit: 0, credit: wasteTotal, currency: 'EGP' as const,
+        originalAmount: wasteTotal, exchangeRate: 1, costCenterId: 'cc-prod',
+        description: `إثبات هالك/توالف الإنتاج كفروق كمية — أمر ${order.orderNumber}`,
+      };
+      const jv = AccountingEngine.postJournal({
+        date: params.date,
+        reference: `PROD-WASTE-${order.orderNumber}`,
+        description: `مطابقة هالك وتوالف الإنتاج مع المخزون والدفاتر — أمر ${order.orderNumber}`,
+        sourceDocumentType: 'production_waste',
+        sourceDocumentId: order.id,
+        lines: [...wasteLines, creditLine],
+      }, params.userId, params.userName, params.isTest);
+      if (!jv.success) return { success: false, error: `تعذر إثبات هالك الإنتاج في الدفاتر: ${jv.error}` };
+    }
 
     return { success: true };
   }
@@ -609,7 +806,69 @@ export class ManufacturingEngine {
 
     // Finished-goods unit cost = actual total cost / total produced units
     const totalUnits = (order.producedQuantity || 0) + (order.defectiveQuantity || 0) + (order.scrapQuantity || 0);
+
+    // QA-03: a production order with NO produced units and NO issued material has
+    // no cost basis at all. Fail with a clear business message instead of letting
+    // the accounting engine reject a one-sided journal.
+    if (totalUnits <= 0) {
+      return {
+        success: false,
+        error:
+          `لا يمكن إغلاق أمر الإنتاج ${order.orderNumber}: لم يتم تسجيل أي إنتاج فعلي بعد. ` +
+          `يجب تسجيل الإنتاج اليومي (سليم / معيب / هالك) قبل إغلاق الأمر.`,
+      };
+    }
+    const appliedConversionCost =
+      breakdown.actualLaborCost + breakdown.actualElectricityCost + breakdown.actualGasCost
+      + breakdown.actualMaintenanceCost + breakdown.actualSupervisionCost;
+    if (breakdown.actualMaterialCost <= 0 && appliedConversionCost <= 0) {
+      return {
+        success: false,
+        error:
+          `لا يمكن إغلاق أمر الإنتاج ${order.orderNumber}: لا توجد تكلفة مواد أو تكاليف تحويلية لبيان الإنتاج المسجل. ` +
+          `يجب صرف خامات ومواد التعبئة من مستودع الخامات وفق معادلة التصنيع قبل إغلاق الأمر.`,
+      };
+    }
+
+    // QA-04 — PARTIAL PRODUCTION.
+    // Materials were issued for the PLANNED quantity. The share that belongs to
+    // units that were never produced must NOT stay capitalised in finished goods:
+    // it is returned to the raw-material warehouse at its actual FIFO cost, and
+    // only the consumed share is capitalised into the finished goods.
+    const planned = Number(order.plannedQuantity) || 0;
+    const consumedShare = planned > 0 ? Math.min(1, totalUnits / planned) : 1;
+    const unusedShare = 1 - consumedShare;
+    let materialReturnedCost = 0;
+    let materialConsumedCost = breakdown.actualMaterialCost;
+
+    if (unusedShare > 0.0001 && breakdown.actualMaterialCost > 0) {
+      const consumptions = db.productionConsumptions.filter(c => c.productionOrderId === order.id);
+      for (const c of consumptions) {
+        const backQty = Number(((c.actualQuantity || 0) * unusedShare).toFixed(3));
+        if (backQty <= 0) continue;
+        const back = InventoryEngine.recordMovement({
+          itemId: c.materialItemId,
+          warehouseId: c.warehouseId || 'wh-raw',
+          movementType: 'production_return',
+          date: todayStr,
+          quantityIn: backQty,
+          quantityOut: 0,
+          unitCost: c.unitCost || 0,
+          documentType: 'إرجاع خامات غير مستخدمة',
+          documentNumber: order.orderNumber,
+          notes: `إرجاع مواد لم تُستخدم في الإنتاج الفعلي لأمر ${order.orderNumber}`,
+        });
+        if (back.success) {
+          materialReturnedCost += (back.actualCost || 0);
+        }
+      }
+      materialConsumedCost = Math.max(0, breakdown.actualMaterialCost - materialReturnedCost);
+    }
+
     const actualUnitCost = totalUnits > 0 ? breakdown.totalActualCost / totalUnits : 0;
+
+    // FG is capitalised at what was ACTUALLY consumed (material + conversion).
+    const capitalizedActualCost = materialConsumedCost + appliedConversionCost;
 
     // Post the closure journal: FG at actual cost, raw materials at actual consumption,
     // conversion costs applied, and the NET variance as a single balancing line split
@@ -621,24 +880,27 @@ export class ManufacturingEngine {
 
     const lines: JournalLine[] = [];
 
-    // Debit: Finished goods at ACTUAL total cost
+    // Debit: Finished goods at the ACTUAL CONSUMED cost (QA-04 — the share of
+    // material belonging to units that were never produced is returned to stock
+    // and is NOT capitalised into finished goods).
     lines.push({
       id: '',
       journalEntryId: '',
       accountId: invFinishedAccId,
       accountCode: db.accounts.find(a => a.id === invFinishedAccId)?.code || '',
       accountNameAr: db.accounts.find(a => a.id === invFinishedAccId)?.nameAr || '',
-      debit: breakdown.totalActualCost,
+      debit: capitalizedActualCost,
       credit: 0,
       currency: 'EGP' as const,
-      originalAmount: breakdown.totalActualCost,
+      originalAmount: capitalizedActualCost,
       exchangeRate: 1,
       costCenterId: 'cc-prod',
       description: `استلام منتج تام أمر إنتاج ${order.orderNumber} بالتكلفة الفعلية`,
     });
 
-    // Credit: Raw materials inventory at ACTUAL consumed cost
-    if (breakdown.actualMaterialCost > 0) {
+    // Credit: Raw materials inventory at ACTUAL consumed cost (the unused share
+    // was already returned to stock, so it is NOT capitalised here).
+    if (materialConsumedCost > 0) {
       lines.push({
         id: '',
         journalEntryId: '',
@@ -646,18 +908,18 @@ export class ManufacturingEngine {
         accountCode: db.accounts.find(a => a.id === rawMaterialsAccId)?.code || '',
         accountNameAr: db.accounts.find(a => a.id === rawMaterialsAccId)?.nameAr || '',
         debit: 0,
-        credit: breakdown.actualMaterialCost,
+        credit: materialConsumedCost,
         currency: 'EGP' as const,
-        originalAmount: breakdown.actualMaterialCost,
+        originalAmount: materialConsumedCost,
         exchangeRate: 1,
         costCenterId: 'cc-prod',
-        description: `استهلاك الخامات ومواد التعبئة الفعلية لأمر الإنتاج ${order.orderNumber}`,
+        description: `استهلاك الخامات ومواد التعبئة الفعلية لأمر الإنتاج ${order.orderNumber}`
+          + (materialReturnedCost > 0 ? ` (تم إرجاع ${materialReturnedCost.toFixed(2)} ج.م خامات غير مستخدمة للمخزون)` : ''),
       });
     }
 
     // Applied conversion costs move from accrued expenses to production (absorbed into FG)
-    const conversionApplied = breakdown.actualLaborCost + breakdown.actualElectricityCost + breakdown.actualGasCost
-      + breakdown.actualMaintenanceCost + breakdown.actualSupervisionCost;
+    const conversionApplied = appliedConversionCost;
     if (conversionApplied > 0) {
       lines.push({
         id: '',
@@ -676,7 +938,7 @@ export class ManufacturingEngine {
     }
 
     // Net variance (actual - standard): unfavorable = debit, favorable = credit
-    const netVariance = breakdown.totalProductionVariance;
+    const netVariance = breakdown.totalProductionVariance - materialReturnedCost;
     if (Math.abs(netVariance) > 0.01) {
       const isUnfavorable = netVariance > 0;
       const varianceAccId = AccountingEngine.getMappedAccountId('variance_material_quantity', 'acc-5104');

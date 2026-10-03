@@ -8,6 +8,7 @@ import {
   InventoryCountLine, Payment, PaymentAllocation, Cheque, BankAccount, BankTransaction, 
   TreasuryTransaction, Expense, CostCenter, Account, JournalEntry, AccountingPeriod, 
   StandardCostRate, SalesForecast, AccountMapping, AuditLog, User, ExportShipment,
+  ProductFamily,
   isDebitNatureCategory
 } from '../types/erp';
 
@@ -345,6 +346,10 @@ export const INITIAL_PERIODS: AccountingPeriod[] = [
   }
 ];
 
+// Standard conversion rates are declared OPEN-ENDED (effectiveFrom .. 2099-12-31)
+// so they stay selectable for the current period. Historical / future windows are
+// still fully supported — QA-16 selects the rate whose window actually contains
+// the transaction date, never merely the one flagged `active`.
 export const INITIAL_STANDARD_COST_RATES: StandardCostRate[] = [
   {
     id: 'scr-1',
@@ -352,8 +357,8 @@ export const INITIAL_STANDARD_COST_RATES: StandardCostRate[] = [
     costTypeNameAr: 'عمالة مباشرة',
     baseQuantity: 1000,
     rate: 250, // 250 EGP per 1000 cartons
-    effectiveFrom: '2026-07-01',
-    effectiveTo: '2026-09-30',
+    effectiveFrom: '2026-01-01',
+    effectiveTo: '2099-12-31',
     status: 'active',
   },
   {
@@ -362,8 +367,8 @@ export const INITIAL_STANDARD_COST_RATES: StandardCostRate[] = [
     costTypeNameAr: 'كهرباء صناعية',
     baseQuantity: 1000,
     rate: 100, // 100 EGP per 1000 cartons
-    effectiveFrom: '2026-07-01',
-    effectiveTo: '2026-09-30',
+    effectiveFrom: '2026-01-01',
+    effectiveTo: '2099-12-31',
     status: 'active',
   },
   {
@@ -372,8 +377,8 @@ export const INITIAL_STANDARD_COST_RATES: StandardCostRate[] = [
     costTypeNameAr: 'غاز طبيعي',
     baseQuantity: 1000,
     rate: 5, // 5 EGP per 1000 cartons
-    effectiveFrom: '2026-07-01',
-    effectiveTo: '2026-09-30',
+    effectiveFrom: '2026-01-01',
+    effectiveTo: '2099-12-31',
     status: 'active',
   },
   {
@@ -382,8 +387,8 @@ export const INITIAL_STANDARD_COST_RATES: StandardCostRate[] = [
     costTypeNameAr: 'صيانة دورية وقطع غيار',
     baseQuantity: 1000,
     rate: 50, // 50 EGP per 1000 cartons
-    effectiveFrom: '2026-07-01',
-    effectiveTo: '2026-09-30',
+    effectiveFrom: '2026-01-01',
+    effectiveTo: '2099-12-31',
     status: 'active',
   },
   {
@@ -392,8 +397,8 @@ export const INITIAL_STANDARD_COST_RATES: StandardCostRate[] = [
     costTypeNameAr: 'إشراف ومراقبة إنتاج',
     baseQuantity: 1000,
     rate: 30, // 30 EGP per 1000 cartons
-    effectiveFrom: '2026-07-01',
-    effectiveTo: '2026-09-30',
+    effectiveFrom: '2026-01-01',
+    effectiveTo: '2099-12-31',
     status: 'active',
   },
 ];
@@ -410,6 +415,68 @@ export const INITIAL_USERS: User[] = [
     createdAt: '2026-09-01T08:00:00.000Z',
     lastLogin: '2026-09-28T09:00:00.000Z',
   }
+];
+
+// -----------------------------------------------------------------------------
+// Primary packaging master records (containers / trays / liners / stickers /
+// napkins). Every record is a SEPARATE item — never one generic "علبة".
+// All prices and costs stay ZERO on purpose: the administrator enters the real
+// supplier price. Nothing in the costing engine may silently substitute a value
+// for a zero (see resolveActualUnitCost in services/inventory.ts).
+// -----------------------------------------------------------------------------
+function pkgItem(
+  id: string,
+  code: string,
+  nameAr: string,
+  nameEn: string,
+  unitId: string = 'unit-piece',
+): Item {
+  return {
+    id,
+    code,
+    barcode: '',
+    nameAr,
+    nameEn,
+    itemType: 'packaging_material',
+    baseUnitId: unitId,
+    purchaseUnitId: unitId,
+    vatRate: 0.14,
+    vatCategory: 'standard',
+    trackBatch: false,
+    trackExpiry: false,
+    expiryPeriodDays: 0,
+    standardCost: 0,
+    actualCost: 0,
+    sellingPriceRetail: 0,
+    sellingPriceWholesale: 0,
+    sellingPriceExportUSD: 0,
+    active: true,
+    minStockLevel: 0,
+  };
+}
+
+export const CONTAINER_AND_PACKAGING_ITEMS: Item[] = [
+  pkgItem('item-pkg-box-single', 'PKG-BOX-SGL', 'علبة سينجل', 'Single Box'),
+  pkgItem('item-pkg-box-duo', 'PKG-BOX-DUO', 'علبة ديو', 'Duo Box'),
+  pkgItem('item-pkg-tray', 'PKG-TRY-01', 'طبق', 'Tray'),
+  pkgItem('item-pkg-sauce-tray', 'PKG-TRY-02', 'طبق صوصات', 'Sauce Tray'),
+  pkgItem('item-pkg-liner', 'PKG-LIN-01', 'جلافز', 'Liner'),
+  pkgItem('item-pkg-sticker', 'PKG-STK-01', 'ستيكر', 'Sticker'),
+  pkgItem('item-pkg-napkin', 'PKG-NAP-01', 'مناديل مبللة', 'Wet Napkins'),
+];
+
+// Secondary packaging: kraft shipping cartons consumed at 1 carton per
+// 15 SINGLE pieces and per 8 DUO pieces (NOT one carton per piece).
+export const SHIPPING_CARTON_ITEMS: Item[] = [
+  pkgItem('item-pkg-kraft-single', 'PKG-KRF-SGL', 'كرتون بني خارجي سنجل', 'Kraft Shipping Carton — Single'),
+  pkgItem('item-pkg-kraft-duo', 'PKG-KRF-DUO', 'كرتون بني ديو', 'Kraft Shipping Carton — Duo'),
+];
+
+// Primary food material: the chip / fire-finger. Base unit is KG so that
+// decimal requirements (75 g = 0.075 KG) and the 1 KG -> 0.005 ROLL film ratio
+// are expressed without losing precision.
+export const CHIP_AND_FRYING_ITEMS: Item[] = [
+  pkgItem('item-raw-chip', 'RM-CHIP-01', 'شيبس / فاير فينجر', 'Chips / Fire Finger', 'unit-kg'),
 ];
 
 // Production Master Catalog: Exact 11 Finished Products (SnakDip) & Essential Raw Materials/Packaging
@@ -464,8 +531,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     id: 'item-raw-flavor-sweet-chili',
     code: 'RM-FLV-01',
     barcode: '',
-    nameAr: 'صوص ونكهة سويت تشيلي',
-    nameEn: 'Sweet Chili Sauce & Seasoning',
+    nameAr: 'صوص سويت شيلي',
+    nameEn: 'Sweet Chili Sauce',
     itemType: 'raw_material',
     baseUnitId: 'unit-kg',
     purchaseUnitId: 'unit-kg',
@@ -486,8 +553,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     id: 'item-raw-flavor-spicy-grilled',
     code: 'RM-FLV-02',
     barcode: '',
-    nameAr: 'صوص ونكهة سبايسي جريلد',
-    nameEn: 'Spicy Grilled Sauce & Seasoning',
+    nameAr: 'صوص سبايسي مشوي',
+    nameEn: 'Spicy Grilled Sauce',
     itemType: 'raw_material',
     baseUnitId: 'unit-kg',
     purchaseUnitId: 'unit-kg',
@@ -508,8 +575,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     id: 'item-raw-flavor-honey-mustard',
     code: 'RM-FLV-03',
     barcode: '',
-    nameAr: 'صوص ونكهة هاني ماسترد',
-    nameEn: 'Honey Mustard Sauce & Seasoning',
+    nameAr: 'صوص مستردة',
+    nameEn: 'Honey Mustard Sauce',
     itemType: 'raw_material',
     baseUnitId: 'unit-kg',
     purchaseUnitId: 'unit-kg',
@@ -530,8 +597,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     id: 'item-raw-flavor-smokey-burger',
     code: 'RM-FLV-04',
     barcode: '',
-    nameAr: 'صوص ونكهة سموكي برجر',
-    nameEn: 'Smokey Burger Sauce & Seasoning',
+    nameAr: 'صوص برجر',
+    nameEn: 'Burger Sauce',
     itemType: 'raw_material',
     baseUnitId: 'unit-kg',
     purchaseUnitId: 'unit-kg',
@@ -552,8 +619,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     id: 'item-raw-flavor-honey-bbq',
     code: 'RM-FLV-05',
     barcode: '',
-    nameAr: 'صوص ونكهة هاني باربيكيو',
-    nameEn: 'Honey BBQ Sauce & Seasoning',
+    nameAr: 'صوص باربكيو',
+    nameEn: 'BBQ Sauce',
     itemType: 'raw_material',
     baseUnitId: 'unit-kg',
     purchaseUnitId: 'unit-kg',
@@ -574,8 +641,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     id: 'item-pkg-film',
     code: 'PKG-FLM-01',
     barcode: '',
-    nameAr: 'فيلم تغليف أكياس مطبوع',
-    nameEn: 'Printed Packaging Film',
+    nameAr: 'رول',
+    nameEn: 'Packaging Film Roll',
     itemType: 'packaging_material',
     baseUnitId: 'unit-roll',
     purchaseUnitId: 'unit-roll',
@@ -592,6 +659,12 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     active: true,
     minStockLevel: 0,
   },
+
+  // ---- PRIMARY PACKAGING: containers, trays, liners, stickers, napkins ----
+  ...CONTAINER_AND_PACKAGING_ITEMS,
+
+  // ---- PRIMARY FOOD MATERIAL: the chip / fire-finger itself (KG, decimal) ----
+  ...CHIP_AND_FRYING_ITEMS,
   {
     id: 'item-pkg-carton',
     code: 'PKG-BOX-01',
@@ -614,6 +687,9 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     active: true,
     minStockLevel: 0,
   },
+
+  // ---- SECONDARY PACKAGING: kraft shipping cartons (single / duo ratios) ----
+  ...SHIPPING_CARTON_ITEMS,
 
   // EXACT 11 Finished Products (Source: https://snakdip.com/collections/all-product)
   // SINGLE PRODUCTS — 6:
@@ -875,49 +951,169 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
 ];
 
 /**
- * Production Bill of Materials for the 11 seeded finished products.
- * Each product gets an active V1 BOM (base: 1,000 finished pieces PCS) built ONLY from
- * raw/packaging materials that exist in INITIAL_PRODUCTION_ITEMS above —
- * so manufacturing is possible immediately after a clean initialization.
- * Quantities per 1,000 finished pieces (PCS): corn 800kg, oil 180kg, flavor sauce 45kg,
- * shipping cartons 1,000 pcs — i.e. 0.8 / 0.18 / 0.045 KG per finished piece.
- * The flavor line is matched to each product's actual seeded flavor sauce.
+ * CANONICAL FINISHED-PRODUCT CATALOG.
+ *
+ * The eleven finished products are identified by their RECIPE, never by their
+ * category: each entry states the exact sauce item(s) the recipe requires, the
+ * packaging family (Single vs Duo) and therefore the correct container and
+ * shipping-carton master record.
+ *
+ * IDs are NOT changed — the existing 11 items, their BOMs, stock and documents
+ * keep their identity. Only the canonical display names and the recipe mapping
+ * are (re)stated here, and `applyMasterDataMigration` applies them additively.
  */
-const SINGLE_FLAVOR_BY_DIP: Record<string, string> = {
-  'Sweet Chili Dip': 'item-raw-flavor-sweet-chili',
-  'Spicy Grilled Dip': 'item-raw-flavor-spicy-grilled',
-  'Honey Mustard Dip': 'item-raw-flavor-honey-mustard',
-  'Smokey Burger Dip': 'item-raw-flavor-smokey-burger',
-  'Honey BBQ Dip': 'item-raw-flavor-honey-bbq',
+export interface FinishedProductRecipe {
+  code: string;
+  nameAr: string;
+  nameEn: string;
+  family: ProductFamily;
+  /** Exact sauce item id(s) this recipe consumes, in recipe order. */
+  sauceItemIds: string[];
+}
+
+export const CANONICAL_FINISHED_PRODUCTS: Record<string, FinishedProductRecipe> = {
+  'item-fp-s1': { code: 'FP-SNG-01', nameAr: 'سنجل فاير سويت',   nameEn: 'Single Fire Sweet',     family: 'Single', sauceItemIds: ['item-raw-flavor-sweet-chili'] },
+  'item-fp-s2': { code: 'FP-SNG-02', nameAr: 'سنجل فاير سبايسي', nameEn: 'Single Fire Spicy',     family: 'Single', sauceItemIds: ['item-raw-flavor-spicy-grilled'] },
+  'item-fp-s3': { code: 'FP-SNG-03', nameAr: 'سنجل ناتشوز باربكيو', nameEn: 'Single Nacho BBQ',      family: 'Single', sauceItemIds: ['item-raw-flavor-honey-bbq'] },
+  'item-fp-s4': { code: 'FP-SNG-04', nameAr: 'سنجل ناتشوز سويت', nameEn: 'Single Nacho Sweet',    family: 'Single', sauceItemIds: ['item-raw-flavor-sweet-chili'] },
+  'item-fp-s5': { code: 'FP-SNG-05', nameAr: 'سنجل ناتشوز برجر', nameEn: 'Single Nacho Burger',   family: 'Single', sauceItemIds: ['item-raw-flavor-smokey-burger'] },
+  'item-fp-s6': { code: 'FP-SNG-06', nameAr: 'سنجل كرينكل مستردة', nameEn: 'Single Krinkl Mustard', family: 'Single', sauceItemIds: ['item-raw-flavor-honey-mustard'] },
+  'item-fp-d1': { code: 'FP-DUO-01', nameAr: 'ديو لحمة برجر باربكيو', nameEn: 'Duo Beef Burger BBQ',     family: 'Duo', sauceItemIds: ['item-raw-flavor-smokey-burger', 'item-raw-flavor-honey-bbq'] },
+  'item-fp-d2': { code: 'FP-DUO-02', nameAr: 'ديو لحمة برجر مستردة', nameEn: 'Duo Beef Burger Mustard', family: 'Duo', sauceItemIds: ['item-raw-flavor-smokey-burger', 'item-raw-flavor-honey-mustard'] },
+  'item-fp-d3': { code: 'FP-DUO-03', nameAr: 'ديو فراخ سويت سبايسي', nameEn: 'Duo Chicken Sweet Spicy',  family: 'Duo', sauceItemIds: ['item-raw-flavor-sweet-chili', 'item-raw-flavor-spicy-grilled'] },
+  'item-fp-d4': { code: 'FP-DUO-04', nameAr: 'ديو فراخ سويت باربكيو', nameEn: 'Duo Chicken Sweet BBQ',    family: 'Duo', sauceItemIds: ['item-raw-flavor-sweet-chili', 'item-raw-flavor-honey-bbq'] },
+  'item-fp-d5': { code: 'FP-DUO-05', nameAr: 'ديو قوقعة سويت باربكيو', nameEn: 'Duo Koosa Sweet BBQ',     family: 'Duo', sauceItemIds: ['item-raw-flavor-sweet-chili', 'item-raw-flavor-honey-bbq'] },
 };
 
+// -----------------------------------------------------------------------------
+// PRODUCTION RATES — the ONLY place the recipe quantities are declared.
+// Everything downstream scales them linearly; nothing is hard-coded downstream.
+//
+// BASE = 1,000 finished pieces (PCS). Finished products are measured in PCS,
+// raw materials keep their own independent UOM (KG / PCS / ROLL).
+// -----------------------------------------------------------------------------
+export const PRODUCTION_RATES_CHIP_KG_PER_PIECE = 800 / 1000;
+
+export const PRODUCTION_RATES = {
+  /** grams of sauce per finished piece (0.075 KG = 75 g, full decimal precision) */
+  SAUCE_KG_PER_PIECE: 0.075,
+  /** chips consumed per SINGLE piece / per DUO piece */
+  CHIPS_PER_SINGLE: 1,
+  CHIPS_PER_DUO: 2,
+  /**
+   * Finished (fried) chip yield in KG per chip piece.
+   * Derived from the configured chip input rate (CORN_KG_PER_1000 spread over
+   * CHIPS_PER_SINGLE pieces), so it declares NO new business fact:
+   * 1 chip/piece x 1000 pieces = 800 KG of chips per 1,000 finished pieces.
+   */
+  CHIP_KG_PER_PIECE: PRODUCTION_RATES_CHIP_KG_PER_PIECE,
+  /** 1 KG of chips consumes 0.005 ROLL of film — decimals must survive scaling */
+  ROLL_PER_KG_CHIPS: 0.005,
+  /** raw inputs that produce the chips, per 1,000 finished pieces */
+  CORN_KG_PER_1000: 800,
+  OIL_KG_PER_1000: 180,
+  /** 1 kraft carton per N finished pieces (SINGLE 15, DUO 8) — NOT 1:1 */
+  SINGLE_CARTON_RATIO: 15,
+  DUO_CARTON_RATIO: 8,
+} as const;
+
+/**
+ * Production Bill of Materials for the 11 finished products.
+ * Each product gets an active V1 BOM on PCS base 1,000 built ONLY from raw /
+ * packaging master records that exist in INITIAL_PRODUCTION_ITEMS above.
+ *
+ * Per 1,000 finished pieces:
+ *   common raw   : corn 800 KG, oil 180 KG (frying inputs for the chips)
+ *   chips        : 1 per SINGLE piece / 2 per DUO piece
+ *   film (رول)   : chips_KG x 0.005  -> 0.005 ROLL per KG, never rounded to 0
+ *   sauce        : 0.075 KG per sauce unit the recipe requires (1 for SINGLE,
+ *                  2 for DUO) — each DUO recipe names its OWN two sauces
+ *   container    : علبة سينجل (Single) or علبة ديو (Duo)
+ *   tray/labels  : 1 tray, 1 sticker, 1 wet napkin per SINGLE;
+ *                  2 stickers + 2 napkins per DUO, plus 1 tray + 1 sauce tray
+ *                  + 1 liner per DUO
+ *   kraft carton : 1 per 15 SINGLE pieces, 1 per 8 DUO pieces
+ */
 function buildInitialBoms(): { boms: BomHeader[]; bomLines: BomLine[] } {
   const boms: BomHeader[] = [];
   const bomLines: BomLine[] = [];
+  const BASE = 1000;
 
   INITIAL_PRODUCTION_ITEMS
     .filter(i => i.itemType === 'finished_product')
     .forEach(fp => {
+      const recipe = CANONICAL_FINISHED_PRODUCTS[fp.id];
+      if (!recipe) return;
       const bomId = `bom-${fp.id}`;
       boms.push({
         id: bomId,
         bomNumber: `BOM-${fp.code}-V1`,
         finishedItemId: fp.id,
         version: 1,
-        baseQuantity: 1000,
+        baseQuantity: BASE,
         unitId: 'unit-piece',
         active: true,
         effectiveDate: '2026-01-01',
-        notes: `معادلة تصنيع 1000 قطعة من ${fp.nameAr}`,
+        notes: `معادلة تصنيع ${BASE} قطعة من ${recipe.nameAr}`,
       });
 
-      const flavorItemId = SINGLE_FLAVOR_BY_DIP[fp.flavor || ''] || 'item-raw-flavor-sweet-chili';
-      bomLines.push(
-        { id: `bline-${bomId}-1`, bomId, materialItemId: 'item-raw-corn', quantityRequired: 800, unitId: 'unit-kg' },
-        { id: `bline-${bomId}-2`, bomId, materialItemId: 'item-raw-oil', quantityRequired: 180, unitId: 'unit-kg' },
-        { id: `bline-${bomId}-3`, bomId, materialItemId: flavorItemId, quantityRequired: 45, unitId: 'unit-kg' },
-        { id: `bline-${bomId}-4`, bomId, materialItemId: 'item-pkg-carton', quantityRequired: 1000, unitId: 'unit-piece' }
-      );
+      const isDuo = recipe.family === 'Duo';
+      // Chips are consumed BY PIECE (1 per SINGLE piece, 2 per DUO piece) but the
+      // chip material is KG-based, so the BOM carries the resulting KG weight —
+      // which is also what drives the packaging film.
+      const chipPieces = (isDuo ? PRODUCTION_RATES.CHIPS_PER_DUO : PRODUCTION_RATES.CHIPS_PER_SINGLE) * BASE;
+      const chipKg = chipPieces * PRODUCTION_RATES.CHIP_KG_PER_PIECE;
+      const lines: Array<{ materialItemId: string; quantityRequired: number; unitId: string }> = [
+        // --- raw inputs for the chips / frying ---
+        { materialItemId: 'item-raw-corn', quantityRequired: PRODUCTION_RATES.CORN_KG_PER_1000, unitId: 'unit-kg' },
+        { materialItemId: 'item-raw-oil', quantityRequired: PRODUCTION_RATES.OIL_KG_PER_1000, unitId: 'unit-kg' },
+        // --- the chip / fire-finger itself, in KG (its own base unit) ---
+        {
+          materialItemId: 'item-raw-chip',
+          quantityRequired: Number(chipKg.toFixed(4)),
+          unitId: 'unit-kg',
+        },
+        // --- packaging film: 1 KG of chips consumes 0.005 ROLL ---
+        { materialItemId: 'item-pkg-film', quantityRequired: Number((chipKg * PRODUCTION_RATES.ROLL_PER_KG_CHIPS).toFixed(6)), unitId: 'unit-roll' },
+        // --- sauces: one entry per sauce the recipe actually requires ---
+        ...recipe.sauceItemIds.map(id => ({
+          materialItemId: id,
+          quantityRequired: PRODUCTION_RATES.SAUCE_KG_PER_PIECE * BASE,
+          unitId: 'unit-kg',
+        })),
+        // --- primary container: singles and duos use DIFFERENT boxes ---
+        {
+          materialItemId: isDuo ? 'item-pkg-box-duo' : 'item-pkg-box-single',
+          quantityRequired: BASE,
+          unitId: 'unit-piece',
+        },
+        // --- tray / liner / sticker / napkin ---
+        { materialItemId: 'item-pkg-tray', quantityRequired: BASE, unitId: 'unit-piece' },
+        ...(isDuo
+          ? [
+              { materialItemId: 'item-pkg-sauce-tray', quantityRequired: BASE, unitId: 'unit-piece' },
+              { materialItemId: 'item-pkg-liner', quantityRequired: BASE, unitId: 'unit-piece' },
+            ]
+          : []),
+        { materialItemId: 'item-pkg-sticker', quantityRequired: isDuo ? 2 * BASE : BASE, unitId: 'unit-piece' },
+        { materialItemId: 'item-pkg-napkin', quantityRequired: isDuo ? 2 * BASE : BASE, unitId: 'unit-piece' },
+        // --- kraft shipping carton: 1 per 15 SINGLE / per 8 DUO ---
+        {
+          materialItemId: isDuo ? 'item-pkg-kraft-duo' : 'item-pkg-kraft-single',
+          quantityRequired: Number((BASE / (isDuo ? PRODUCTION_RATES.DUO_CARTON_RATIO : PRODUCTION_RATES.SINGLE_CARTON_RATIO)).toFixed(3)),
+          unitId: 'unit-piece',
+        },
+      ];
+
+      lines.forEach((l, idx) => {
+        bomLines.push({
+          id: `bline-${bomId}-${idx + 1}`,
+          bomId,
+          materialItemId: l.materialItemId,
+          quantityRequired: l.quantityRequired,
+          unitId: l.unitId,
+        });
+      });
     });
 
   return { boms, bomLines };
@@ -964,8 +1160,8 @@ export function createEmptyDatabase(): ERPDatabaseSchema {
     productionWastes: [],
     qualityInspections: [],
     customers: [],
-    suppliers: [],
-    salesReps: [],
+    suppliers: [...INITIAL_SUPPLIERS],
+    salesReps: [...INITIAL_SALES_REPS],
     representativeCustodies: [],
     custodyMovements: [],
     salesInvoices: [],
@@ -996,6 +1192,177 @@ export function createEmptyDatabase(): ERPDatabaseSchema {
     auditLogs: [],
     exportShipments: [],
   };
+}
+
+/**
+ * Supplier master records. NAMES ONLY — no tax numbers, addresses, phone
+ * numbers, balances, credit limits or opening balances are invented. The
+ * administrator supplies the real business facts later.
+ */
+export const INITIAL_SUPPLIERS: Supplier[] = (
+  [
+    ['sup-maraa', 'المراعي الخضراء'],
+    ['sup-shorouq', 'مطبعه الشروق'],
+    ['sup-dumiaty', 'الدمياطي'],
+    ['sup-khaleejia', 'الخليجية'],
+    ['sup-salam', 'السلام'],
+    ['sup-hilal', 'الهلال'],
+    ['sup-blanco', 'بلانكو'],
+    ['sup-royal-carton', 'رويال كرتون'],
+  ] as Array<[string, string]>
+).map(([id, name]): Supplier => ({
+  id,
+  code: id.toUpperCase().replace(/-/g, ''),
+  name,
+  taxNumber: '',
+  contactPerson: '',
+  phone: '',
+  address: '',
+  paymentTerms: '',
+  currency: 'EGP',
+  openingBalance: 0,
+  currentBalance: 0,
+  active: true,
+}));
+
+/** A single sales-representative master record — no custody, no transactions. */
+export const INITIAL_SALES_REPS: SalesRepresentative[] = [
+  {
+    id: 'rep-hamza-hamad',
+    code: 'REP-HAMZA-01',
+    name: 'حمزه حماد',
+    phone: '',
+    active: true,
+    targetMonthlySales: 0,
+  },
+];
+
+/**
+ * ADDITIVE, IDEMPOTENT, BACKWARD-COMPATIBLE migration (master data completion).
+ *
+ * Guarantees:
+ *  - NEVER deletes or recreates an existing item, BOM, supplier or document.
+ *  - NEVER changes an existing id, and NEVER alters stock, batches, journals
+ *    or any posted quantity.
+ *  - Only ADDS missing master records, applies the canonical product display
+ *    names and EXTENDS the existing 11 BOMs with the real packaging recipe.
+ */
+export function applyMasterDataMigration(db: ERPDatabaseSchema): ERPDatabaseSchema {
+  // 1) units + conversions needed for decimal PCS/KG/ROLL recipes
+  const units = Array.isArray(db.units) && db.units.length ? db.units : [...INITIAL_UNITS];
+  for (const u of INITIAL_UNITS) if (!units.some(x => x.id === u.id)) units.push(u);
+  const conversions = Array.isArray(db.unitConversions) ? db.unitConversions : [];
+  for (const c of INITIAL_UNIT_CONVERSIONS) {
+    if (!conversions.some(x => x.fromUnitId === c.fromUnitId && x.toUnitId === c.toUnitId)) conversions.push(c);
+  }
+  db.units = units;
+  db.unitConversions = conversions;
+
+  // 2) ADD missing material master records (never touch existing ones)
+  const items = Array.isArray(db.items) ? db.items : [];
+  const haveItem = new Set(items.map(i => i.id));
+  for (const it of [...CONTAINER_AND_PACKAGING_ITEMS, ...CHIP_AND_FRYING_ITEMS, ...SHIPPING_CARTON_ITEMS]) {
+    if (!haveItem.has(it.id)) { items.push(it); haveItem.add(it.id); }
+  }
+  // the film roll is now named "رول" — rename in place, keep its id
+  const film = items.find(i => i.id === 'item-pkg-film');
+  if (film) { film.nameAr = 'رول'; film.nameEn = 'Packaging Film Roll'; }
+
+  // 3) canonical recipe display names for the 11 finished products (ids intact)
+  for (const [id, recipe] of Object.entries(CANONICAL_FINISHED_PRODUCTS)) {
+    const fp = items.find(i => i.id === id);
+    if (!fp) continue;
+    fp.nameAr = recipe.nameAr;
+    fp.nameEn = recipe.nameEn;
+    fp.productFamily = recipe.family;
+    fp.flavor = recipe.sauceItemIds.length === 1 ? recipe.sauceItemIds[0] : recipe.sauceItemIds.join(' + ');
+  }
+  db.items = items;
+
+  // 4) EXTEND the existing 11 BOMs with the real packaging recipe.
+  //    Existing headers keep their id/version/effective date; BOM lines are
+  //    rebuilt from the recipe because the generic "one carton per piece" line
+  //    was itself the defect being corrected (1 carton per 15 / per 8 pieces).
+  const seeded = INITIAL_PRODUCTION_BOMS;
+  const boms = Array.isArray(db.boms) ? db.boms : [];
+  const bomLines = Array.isArray(db.bomLines) ? db.bomLines : [];
+  for (const bom of seeded.boms) {
+    const existing = boms.find(b => b.id === bom.id);
+    if (!existing) {
+      boms.push(bom);
+    } else {
+      existing.finishedItemId = bom.finishedItemId;
+      existing.unitId = bom.unitId;
+      if (!existing.baseQuantity || existing.baseQuantity <= 0) existing.baseQuantity = bom.baseQuantity;
+      if (!existing.effectiveDate) existing.effectiveDate = bom.effectiveDate;
+      if (existing.active === undefined) existing.active = true;
+    }
+  }
+  const finishedIds = new Set(items.filter(i => i.itemType === 'finished_product').map(i => i.id));
+  for (const bom of boms) {
+    const finishedItemId = bom.finishedItemId || (bom as unknown as { productId?: string }).productId;
+    if (!finishedItemId || !finishedIds.has(finishedItemId)) continue;
+    bom.unitId = 'unit-piece';
+    const seededLines = seeded.bomLines.filter(l => l.bomId === bom.id);
+    if (seededLines.length === 0) continue;
+    const wanted = new Set(seededLines.map(l => l.materialItemId));
+    for (let i = bomLines.length - 1; i >= 0; i--) {
+      if (bomLines[i].bomId === bom.id && !wanted.has(bomLines[i].materialItemId)) bomLines.splice(i, 1);
+    }
+    for (const sl of seededLines) {
+      const existing = bomLines.find(l => l.bomId === bom.id && l.materialItemId === sl.materialItemId);
+      if (existing) {
+        existing.quantityRequired = sl.quantityRequired;
+        existing.unitId = sl.unitId;
+      } else {
+        bomLines.push({ ...sl, id: `bline-${bom.id}-${sl.materialItemId}` });
+      }
+    }
+  }
+  db.boms = boms;
+  db.bomLines = bomLines;
+
+  // 5) suppliers + representative (names only, no financial facts)
+  const suppliers = Array.isArray(db.suppliers) ? db.suppliers : [];
+  for (const s of INITIAL_SUPPLIERS) {
+    if (!suppliers.some(x => x.id === s.id)) suppliers.push(s);
+  }
+  db.suppliers = suppliers;
+
+  const reps = Array.isArray(db.salesReps) ? db.salesReps : [];
+  for (const r of INITIAL_SALES_REPS) {
+    if (!reps.some(x => x.id === r.id)) reps.push(r);
+  }
+  db.salesReps = reps;
+
+  // 6) QA-26 — customer channel must agree with the customer master type.
+  //    Additive/idempotent: only the mismatched `channel` field is corrected,
+  //    every other customer field (including manual UAT data) is untouched.
+  const customers = Array.isArray(db.customers) ? db.customers : [];
+  for (const c of customers) {
+    const expected = c.customerType === 'export' ? 'export' : c.customerType === 'wholesale' ? 'wholesale' : 'retail';
+    if (c.channel !== expected) c.channel = expected;
+  }
+  db.customers = customers;
+
+  // 7) QA-16 — the seeded standard conversion rates shipped with a window that
+  //    has already elapsed, so every cost breakdown silently reported a ZERO
+  //    standard conversion cost. Open-ended them (additive, values unchanged);
+  //    rate SELECTION is still strictly date-scoped in getActiveRate.
+  const rates = Array.isArray(db.standardCostRates) ? db.standardCostRates : [];
+  for (const seeded of INITIAL_STANDARD_COST_RATES) {
+    const existing = rates.find(r => r.id === seeded.id);
+    if (!existing) { rates.push({ ...seeded }); continue; }
+    if (existing.effectiveTo && existing.effectiveTo < seeded.effectiveTo) {
+      existing.effectiveTo = seeded.effectiveTo;
+    }
+    if (existing.effectiveFrom && existing.effectiveFrom > seeded.effectiveFrom) {
+      existing.effectiveFrom = seeded.effectiveFrom;
+    }
+  }
+  db.standardCostRates = rates;
+
+  return db;
 }
 
 /**
@@ -1117,8 +1484,8 @@ class ERPDatabaseService {
           users: loadedUsers,
         };
 
-        this.saveToStorage(applyUomMigration(merged));
-        return applyUomMigration(merged);
+        this.saveToStorage(applyUomMigration(applyMasterDataMigration(merged)));
+        return applyUomMigration(applyMasterDataMigration(merged));
       }
       }
     } catch (e) {

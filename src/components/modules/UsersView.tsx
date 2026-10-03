@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useModuleWriteAccess } from '../../hooks/usePermissions';
 import { 
   KeyRound, Plus, Shield, UserCheck, 
   Lock, Check, Trash2, Key
@@ -14,6 +15,8 @@ import {
 export const UsersView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showAddModal, setShowAddModal] = useState(false);
+  // QA-25: UI permission affordance (service authorization stays the real wall).
+  const writeAccess = useModuleWriteAccess('users', 'إدارة المستخدمين');
   // F23: explicit per-user, per-module, per-action permission assignment.
   const [permUserId, setPermUserId] = useState<string>('');
   const [permDraft, setPermDraft] = useState<Record<string, PermissionAction[]>>({});
@@ -137,7 +140,9 @@ export const UsersView: React.FC = () => {
 
         <button
           onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer"
+          disabled={!writeAccess.canCreate}
+          title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Plus className="w-4 h-4" />
           <span>إضافة مستخدم جديد</span>
