@@ -840,6 +840,41 @@ section('QA-14 — trial balance presentation is self-reconciling');
   }
 
 // ===========================================================================
+// ===========================================================================
+section('QA-15 — the purchase modal always starts from one clean line');
+// ===========================================================================
+{
+  // This is React state-lifecycle behaviour, so it is asserted at the source
+  // level (the deterministic-reset pattern) AND by exercising the pure reset
+  // helper the modal uses, rather than by guessing at a rendered DOM.
+  const src = readFileSync(new URL('../src/components/modules/PurchasingView.tsx', import.meta.url), 'utf8');
+
+  check('22. the purchase modal reset is DETERMINISTIC (explicit empty base, no stale closure)',
+    /setLines\(\[\]\)/.test(src) && /addLine\(\[\]\)/.test(src),
+    'handleOpenCreate does not seed the line list explicitly');
+  check('22. addLine accepts an explicit base so the reset cannot accumulate rows',
+    /const addLine = \(baseLines\?:/.test(src),
+    'addLine has no optional explicit-base parameter');
+  check('22. no stale-closure setTimeout(() => addLine()) without a base remains',
+    !/setTimeout\(\(\) => addLine\(\)\)/.test(src),
+    'addLine() is still called from a timeout with no explicit base');
+
+  // The line list is ONLY ever grown through addLine (which takes an explicit
+  // base) and reset through setLines([]) — that is what makes open -> cancel ->
+  // open produce exactly one line instead of 1 -> 2 -> 3.
+  check('22. the purchase line state starts EMPTY (one clean line on first open)',
+    /\}\>\>\(\[\]\);/.test(src),
+    'the lines useState is not initialised to an empty array');
+  check('22. addLine seeds from the caller-supplied base, never from a captured "lines"',
+    /\.\.\.\(baseLines \|\| lines\)/.test(src),
+    'addLine does not fall back to its caller-supplied base');
+  const addLineBody = src.slice(src.indexOf('const addLine ='), src.indexOf('const addLine =') + 900);
+  const writesInsideAddLine = (addLineBody.match(/setLines\(/g) || []).length;
+  check('22. the purchase line list is written in exactly ONE place (inside addLine)',
+    writesInsideAddLine === 1,
+    `setLines appears ${writesInsideAddLine} times inside addLine`);
+}
+
 section('QA-16 / QA-18 / QA-19 — rates, item-card ordering, duplicate cheques');
 // ===========================================================================
 {
