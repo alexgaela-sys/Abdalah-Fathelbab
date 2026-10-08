@@ -7,6 +7,18 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { ManufacturingEngine } from '../../services/manufacturing';
+
+/** Resolve the selected order's finished product base-unit display name. */
+function productionUnitLabel(db: ReturnType<typeof erpDb.getSnapshot>, order: { productId?: string } | null): string {
+  if (order?.productId) {
+    const itm = db.items.find((i) => i.id === order.productId);
+    if (itm?.baseUnitId) {
+      const u = db.units.find((u) => u.id === itm.baseUnitId);
+      if (u?.nameAr) return u.nameAr;
+    }
+  }
+  return 'قطعة';
+}
 import { AuthService } from '../../services/auth';
 import { PermissionService } from '../../services/permissions';
 import { ProductionOrder, ProductionOrderStatus } from '../../types/erp';
@@ -323,12 +335,43 @@ export const ManufacturingView: React.FC = () => {
   };
 
   const handleCloseOrder = (orderId: string) => {
-    if (confirm('تأكيد إغلاق أمر الإنتاج نهائياً، واحتساب التكاليف المعيارية والفعلية وترحيل قيود الانحرافات بالدفاتر؟')) {
-      const res = ManufacturingEngine.closeProductionOrder(orderId, 'usr-admin', 'مدير الإنتاج');
-      if (!res.success) {
-        alert(res.error || 'خطأ في إغلاق أمر الإنتاج');
-      }
+    // FIX 2 — try a FULL close first. An order produced below its plan is
+    // refused here by the engine, and is then offered the explicit partial-close
+    // workflow (reason + per-material disposition of the remainder).
+    const full = ManufacturingEngine.closeProductionOrder(orderId, 'usr-admin', 'مدير الإنتاج');
+    if (full.success) {
+      alert('تم إغلاق أمر الإنتاج بنجاح (إغلاق كامل).');
+      return;
     }
+    if (full.mode !== 'partial') {
+      alert(full.error || 'خطأ في إغلاق أمر الإنتاج');
+      return;
+    }
+    if (!confirm(`${full.error}\n\nهل تريد المتابعة بالإغلاق الجزئي؟`)) return;
+
+    const recon = ManufacturingEngine.getMaterialReconciliation(orderId)
+      .filter(r => r.remainderQuantity > 0);
+    const summary = recon.length
+      ? `\n\nالمطلوب تصرّفه لكل مادة (مصروف − مستهلك):\n${recon
+          .map(r => `• ${r.itemNameAr}: إرجاع ${r.remainderQuantity} من وحدة الأساس`)
+          .join('\n')}`
+      : '';
+    const reason = prompt(`سبب الإغلاق الجزئي (إلزامي ويُحفظ بسجل الأمر):${summary}`)?.trim();
+    if (!reason) {
+      alert('تم إلغاء الإغلاق: لا يمكن إغلاق أمر الإنتاج جزئيًا بدون سبب صريح.');
+      return;
+    }
+
+    const res = ManufacturingEngine.closeProductionOrder(orderId, 'usr-admin', 'مدير الإنتاج', {
+      mode: 'partial',
+      reason,
+      dispositions: recon.map(r => ({ materialItemId: r.materialItemId, returnQuantity: r.remainderQuantity })),
+    });
+    if (!res.success) {
+      alert(res.error || 'خطأ في إغلاق أمر الإنتاج');
+      return;
+    }
+    alert('تم الإغلاق الجزئي وإرجاع الخامات غير المستهلكة إلى تشغيلاتها الأصلية.');
   };
 
   return (
@@ -1019,7 +1062,7 @@ export const ManufacturingView: React.FC = () => {
 
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">كمية الإنتاج التام السليم (كرتونة)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">كمية الإنتاج التام السليم ({productionUnitLabel(db, showDailyOutputModal)})</label>
                 <input
                   type="number"
                   min="0"
@@ -1031,7 +1074,7 @@ export const ManufacturingView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">كمية الإنتاج المعيب (كرتونة)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">كمية الإنتاج المعيب ({productionUnitLabel(db, showDailyOutputModal)})</label>
                   <input
                     type="number"
                     min="0"
@@ -1042,7 +1085,7 @@ export const ManufacturingView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">كمية الهالك والسكراب (كرتونة)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">كمية الهالك والسكراب ({productionUnitLabel(db, showDailyOutputModal)})</label>
                   <input
                     type="number"
                     min="0"

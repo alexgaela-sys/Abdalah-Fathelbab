@@ -590,8 +590,24 @@ section('QA-02 / QA-03 / QA-04 — production guards (parts G / H / I)');
 
   const rawBeforeClose = snap().accounts.find(a => a.code === '1108')!.currentBalance;
   const fgBeforeClose = snap().accounts.find(a => a.code === '1109')!.currentBalance;
-  const closed = ManufacturingEngine.closeProductionOrder(order.order!.id, 'usr-admin', 'اختبار');
-  check('QA-04: the partially produced order closes', closed.success, closed.error || '');
+
+  // FIX 2: a 150-planned / 105-produced order must NOT close silently as a
+  // completed order any more. The plain close is refused first, then the
+  // explicit partial-close workflow (mode + reason + per-material disposition)
+  // is used.
+  const plainClose = ManufacturingEngine.closeProductionOrder(order.order!.id, 'usr-admin', 'اختبار');
+  check('QA-04: a plain close of a partially produced order is BLOCKED',
+    !plainClose.success && /كأمر مكتمل/.test(plainClose.error || ''), plainClose.error || 'ACCEPTED');
+
+  const recon = ManufacturingEngine.getMaterialReconciliation(order.order!.id);
+  const closed = ManufacturingEngine.closeProductionOrder(order.order!.id, 'usr-admin', 'اختبار', {
+    mode: 'partial',
+    reason: 'أمر العميل قُلل — إنتاج جزئي',
+    dispositions: recon.filter(r => r.remainderQuantity > 0)
+      .map(r => ({ materialItemId: r.materialItemId, returnQuantity: r.remainderQuantity })),
+  });
+  check('QA-04: the partially produced order closes through the PARTIAL-CLOSE workflow',
+    closed.success, closed.error || '');
 
   const dbAfter = snap();
   const fgAfter = dbAfter.accounts.find(a => a.code === '1109')!.currentBalance;
@@ -608,8 +624,19 @@ section('QA-02 / QA-03 / QA-04 — production guards (parts G / H / I)');
     capitalisedFg > 0 && capitalisedFg < consumedMaterial + consumedMaterial * 0.35,
     `fg=${capitalisedFg.toFixed(2)} consumedMaterial=${consumedMaterial.toFixed(2)}`);
   check('13. the closure journal is balanced',
-    dbAfter.journalEntries.filter(j => j.sourceDocumentId === order.order!.id && j.sourceDocumentType === 'production_closure')
-      .every(j => near(j.lines.reduce((s, l) => s + l.debit, 0), j.lines.reduce((s, l) => s + l.credit, 0), 0.01)));
+    (() => {
+      const jvs = dbAfter.journalEntries.filter(j => j.sourceDocumentId === order.order!.id && j.sourceDocumentType === 'production_order_close');
+      return jvs.length > 0 && jvs.every(j => near(j.lines.reduce((s, l) => s + l.debit, 0), j.lines.reduce((s, l) => s + l.credit, 0), 0.01));
+    })());
+  const closedOrder = dbAfter.productionOrders.find(o => o.id === order.order!.id);
+  check('FIX2: the partial close persisted its mode and its reason',
+    closedOrder?.closeMode === 'partial' && Boolean((closedOrder?.closeReason || '').trim()),
+    `mode=${closedOrder?.closeMode} reason=${closedOrder?.closeReason || '<empty>'}`);
+  check('FIX2: the closure reconciles EVERY material (issued = consumed + returned + variance)',
+    Boolean(closedOrder?.materialReconciliation?.length) &&
+    closedOrder!.materialReconciliation!.every(r =>
+      Math.abs(r.issuedQuantity - (r.consumedQuantity + r.returnedQuantity + r.approvedVarianceQuantity)) <= 1e-3),
+    JSON.stringify(closedOrder?.materialReconciliation || []));
   check('QA-12: scrap/damaged stock is reconciled to the GL (1112 / 1111 / 1108)',
     dbAfter.journalEntries.some(j => j.sourceDocumentType === 'production_waste' && j.sourceDocumentId === order.order!.id),
     'no production_waste journal was posted');

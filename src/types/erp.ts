@@ -173,6 +173,38 @@ export interface ProductionOrder {
   expectedCompletionDate: string;
   actualCompletionDate?: string;
   status: ProductionOrderStatus;
+  /**
+   * FIX 2 — HOW the order was closed. An order produced below its planned
+   * quantity can never be closed as `full`: it must go through the explicit
+   * partial-close workflow (mode + persisted reason + material reconciliation).
+   */
+  closeMode?: 'full' | 'partial';
+  /** FIX 2 — mandatory, persisted, auditable reason of a PARTIAL close. */
+  closeReason?: string;
+  closedByUserId?: string;
+  closedByName?: string;
+  closedAt?: string;
+  /**
+   * FIX 2 — cumulative cost already booked into this order's finished-goods
+   * batches (material + conversion). The difference to `consumed + conversion`
+   * is reconciled into the batches at closure so the batch ledger and the FG
+   * journal always agree to the cent.
+   */
+  fgCapitalizedCost?: number;
+  /** Conversion cost already booked into the FG batches (see fgCapitalizedCost). */
+  fgConversionCapitalized?: number;
+  /**
+   * FIX 2 — the per-material reconciliation snapshot taken at close time:
+   * `issued = consumed + returned + approvedVariance` for EVERY material.
+   */
+  materialReconciliation?: Array<{
+    materialItemId: string;
+    issuedQuantity: number;
+    consumedQuantity: number;
+    returnedQuantity: number;
+    approvedVarianceQuantity: number;
+    approvedVarianceReason?: string;
+  }>;
   destinationWarehouseId: string; // Local or Export
   targetMarket: 'local' | 'export';
   notes?: string;
@@ -187,10 +219,23 @@ export interface ProductionConsumption {
   materialItemId: string;
   batchId?: string;
   warehouseId: string; // raw materials
+  /** FIX 1 — the unit the BOM line was expressed in; quantities below are the
+   * item's BASE inventory unit (requirement converted before the issue). */
+  unitId?: string;
   plannedQuantity: number;
   actualQuantity: number;
   unitCost: number;
   date: string;
+  /**
+   * FIX 2 — the exact FIFO batch layers this issue drew from, so a later return
+   * of unconsumed material can be posted back to the ORIGINAL batches (identity,
+   * production date and expiry preserved) instead of inventing a new batch.
+   */
+  batchAllocations?: Array<{ batchNumber: string; quantity: number; unitCost: number }>;
+  /** FIX 2 — reconciliation (base unit): actualQuantity = consumed + returned + approvedVariance. */
+  returnedQuantity?: number;
+  approvedVarianceQuantity?: number;
+  approvedVarianceReason?: string;
 }
 
 export interface ProductionWaste {
@@ -287,6 +332,7 @@ export interface CustodyMovement {
   itemId: string;
   movementType: 'loaded' | 'sold' | 'returned';
   quantity: number;
+  unitCost?: number;
   unitPrice: number;
   batchNumber?: string;
   date: string;

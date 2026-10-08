@@ -15,7 +15,12 @@
     "regression": "tsx scripts/regression_fixes.ts",
     "uafix": "tsx scripts/uafix_verification.ts",
     "masteruat": "tsx scripts/master_uat.ts",
-    "auditfix": "tsx scripts/audit_fix_regression.ts"
+    "auditfix": "tsx scripts/audit_fix_regression.ts",
+    "fix1": "tsx scripts/fix1_uom_e2e.ts",
+    "fix2": "tsx scripts/fix2_partial_close.ts",
+    "fix6": "tsx scripts/fix6_conversion_costs.ts",
+    "uom": "tsx scripts/qa_uom_conversion.ts",
+    "partialclose": "tsx scripts/qa_partial_closure.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -177,6 +177,31 @@ export const INITIAL_UNITS: Unit[] = [
   { id: 'unit-roll', code: 'ROLL', nameAr: 'بكرة تغليف', isBase: true },
 ];
 
+// Ground-truth unit conversion, built from the declared unit conversions.
+export function unitConversion(db: ERPDatabaseSchema, fromUnitId: string, toUnitId: string): number | null {
+  if (fromUnitId === toUnitId) return 1;
+  const direct = db.unitConversions.find(
+    (c) => c.fromUnitId === fromUnitId && c.toUnitId === toUnitId
+  );
+  if (direct) return direct.factor;
+  const inverse = db.unitConversions.find(
+    (c) => c.fromUnitId === toUnitId && c.toUnitId === fromUnitId
+  );
+  if (inverse) return 1 / inverse.factor;
+  return null;
+}
+
+export function getUnitConversion(db: ERPDatabaseSchema, fromUnitId: string, toUnitId: string): number {
+  const factor = unitConversion(db, fromUnitId, toUnitId);
+  if (factor === null) {
+    throw new Error(
+      `Missing unit conversion from ${fromUnitId} to ${toUnitId} — the ERP cannot convert these two units safely. ` +
+      'Configure the pair in unitConversions before using them in BOM requirements or stock movements.'
+    );
+  }
+  return factor;
+}
+
 export const INITIAL_UNIT_CONVERSIONS: UnitConversion[] = [
   { id: 'uc-1', fromUnitId: 'unit-ton', toUnitId: 'unit-kg', factor: 1000 },
   // UOM change (master UAT): finished goods are measured in PCS. Small raw-material
@@ -310,6 +335,10 @@ export const INITIAL_ACCOUNT_MAPPINGS: Record<string, string> = {
 
   // Expenses
   expenses_default: 'acc-6101',
+  // FIX 6 — credit side of a recorded conversion cost: an ACCRUED LIABILITY,
+  // never an expense account (crediting 6101 made an unrelated expense go
+  // negative every time a conversion cost was booked).
+  conversion_cost_payable: 'acc-2104',
   rep_expense: 'acc-6106',
   export_costs: 'acc-6104',
   bank_fees: 'acc-6109',

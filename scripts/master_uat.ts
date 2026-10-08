@@ -339,30 +339,63 @@ section('F21 — custody settlement moves treasury only when cash really moves')
     !snap().journalEntries.some(j => j.sourceDocumentType === 'rep_custody_settlement' && j.sourceDocumentId === open.custody!.id));
   check('settlement reconciliation is returned to the caller', Array.isArray(nonCash.reconciliation) && nonCash.reconciliation.length > 0);
 
-  // --- cash settlement: treasury in ---
+  // --- cash settlement: the ONLY cash a rep can hand over is a CASH SALE made
+  //     from this custody (that sale already recognised the money in 1101). ---
   const rep2Code = `UAT-REP3-${Math.random().toString(36).slice(2, 6)}`;
   const rep2 = WorkflowService.createSalesRepresentative({ code: rep2Code, name: `مندوب اختبار ${rep2Code}`, isTest: true });
   const open2 = WorkflowService.openRepCustody(rep2.rep!.id, 'UAT settlement cash');
   WorkflowService.loadGoodsToRep({ custodyId: open2.custody!.id, itemId: FP.id, quantity: 10, unitPrice: 0, warehouseId: 'wh-local', date: TODAY });
+
+  // (a) a figure with no cash behind it is refused and writes NOTHING (E / T-02)
+  const unbacked = WorkflowService.settleRepCustody({ custodyId: open2.custody!.id, cashCollected: 2500, date: TODAY, acknowledgeRemainingGoods: true, isTest: true });
+  check('an unbacked settlement amount is REFUSED', !unbacked.success, unbacked.success ? 'ACCEPTED' : unbacked.error || '');
+  check('the refusal names the actual cash on hand', (unbacked.error || '').includes('تجاوز النقد'), unbacked.error || '');
+  check('the refused settlement wrote NOTHING (no journal, no treasury row)',
+    !snap().journalEntries.some(j => j.sourceDocumentType === 'rep_custody_settlement' && j.sourceDocumentId === open2.custody!.id));
+
+  // (b) the same custody once it really holds cash from a custody CASH sale
+  const cashCust = mkCustomer('retail');
+  const cashSale = WorkflowService.createSalesInvoice({
+    customerId: cashCust.id, channel: 'retail', warehouseId: 'wh-local',
+    stockSource: 'rep_custody', custodyId: open2.custody!.id,
+    paymentMethod: 'cash', currency: 'EGP', exchangeRate: 1, date: TODAY, isTest: true,
+    lines: [{ itemId: FP.id, quantity: 4, unitPrice: 100, vatRate: 0 }],
+  });
+  check('custody cash sale posted (the rep now really carries 400 EGP)', cashSale.success, cashSale.error || '');
   const cash2 = gl('1101');
   const custody2 = gl('1107');
-  const settled = WorkflowService.settleRepCustody({ custodyId: open2.custody!.id, cashCollected: 2500, date: TODAY, acknowledgeRemainingGoods: true, isTest: true });
+  const settled = WorkflowService.settleRepCustody({ custodyId: open2.custody!.id, cashCollected: 400, date: TODAY, acknowledgeRemainingGoods: true, isTest: true });
   check('cash custody settlement succeeds', settled.success, settled.error || '');
-  check('treasury 1101 INCREASED by the collected cash', near(gl('1101') - cash2, 2500, 0.01), `1101 ${cash2} -> ${gl('1101')}`);
-  check('custody account 1107 decreased by the collected cash', near(custody2 - gl('1107'), 2500, 0.01), `1107 ${custody2} -> ${gl('1107')}`);
-  check('settlement reports the treasury delta', near(settled.treasuryDelta || 0, 2500, 0.01));
+  check('custody cash-on-hand is computed from its own cash sales', near(settled.cashOnHand || 0, 400, 0.01), `${settled.cashOnHand}`);
+  check('cashCollected is echoed back', near(settled.cashCollected || 0, 400, 0.01), `${settled.cashCollected}`);
+  check('treasury 1101 unchanged — the cash was already recognised by its cash sale',
+    near(gl('1101') - cash2, 0, 0.01), `1101 ${cash2} -> ${gl('1101')}`);
+  check('custody 1107 unchanged — never credited with cash it never held (T-02 fixed)',
+    near(gl('1107') - custody2, 0, 0.01), `1107 ${custody2} -> ${gl('1107')}`);
+  check('settlement reports the treasury delta as zero (nothing moved AT the settlement)',
+    near(settled.treasuryDelta || 0, 0, 0.001), `${settled.treasuryDelta}`);
 
-  // --- refund: treasury out ---
+  // --- refund: treasury out (Dr 1107 | Cr 1101) ---
   const rep3Code = `UAT-REP4-${Math.random().toString(36).slice(2, 6)}`;
   const rep3 = WorkflowService.createSalesRepresentative({ code: rep3Code, name: `مندوب اختبار ${rep3Code}`, isTest: true });
   const open3 = WorkflowService.openRepCustody(rep3.rep!.id, 'UAT settlement refund');
   check('third custody opened for the refund scenario', open3.success, `${rep3.error || ''} | ${open3.error || ''}`);
   WorkflowService.loadGoodsToRep({ custodyId: open3.custody!.id, itemId: FP.id, quantity: 5, unitPrice: 0, warehouseId: 'wh-local', date: TODAY });
+  const refundCust = mkCustomer('retail');
+  const refundSale = WorkflowService.createSalesInvoice({
+    customerId: refundCust.id, channel: 'retail', warehouseId: 'wh-local',
+    stockSource: 'rep_custody', custodyId: open3.custody!.id,
+    paymentMethod: 'cash', currency: 'EGP', exchangeRate: 1, date: TODAY, isTest: true,
+    lines: [{ itemId: FP.id, quantity: 5, unitPrice: 100, vatRate: 0 }],
+  });
+  check('refund custody cash sale posted', refundSale.success, refundSale.error || '');
   const cash3 = gl('1101');
-  const refunded = WorkflowService.settleRepCustody({ custodyId: open3.custody!.id, cashCollected: 1000, cashRefunded: 300, date: TODAY, acknowledgeRemainingGoods: true, isTest: true });
-  if (!refunded.success) console.log('    DEBUG refund custody =', JSON.stringify(snap().representativeCustodies.map(c => ({ id: c.id, st: c.status, rep: c.repId }))));
+  const refunded = WorkflowService.settleRepCustody({ custodyId: open3.custody!.id, cashCollected: 400, cashRefunded: 300, date: TODAY, isTest: true });
   check('settlement with refund succeeds', refunded.success, refunded.error || '');
-  check('treasury moved by the NET amount (1000 - 300)', near(gl('1101') - cash3, 700, 0.01), `delta ${gl('1101') - cash3}`);
+  check('treasury moved OUT by the REFUND only (the collected cash was already in 1101)',
+    near(gl('1101') - cash3, -300, 0.01), `delta ${gl('1101') - cash3}`);
+  check('refund reports a negative treasury delta (direction D)',
+    near(refunded.treasuryDelta || 0, -300, 0.01), `${refunded.treasuryDelta}`);
 
   // ---- F29: the treasury ledger shows all of this exactly once ----
   const led = TreasuryLedgerService.build(ALL);
