@@ -47,6 +47,14 @@ export class MasterDataService {
       return { success: false, error: `العميل (${name}) مسجل بالفعل` };
     }
 
+    // MD-CUST-04 — a credit limit is a CEILING (how much the customer may owe),
+    // never a signed amount. Reject negatives and non-numeric input instead of
+    // coercing them, so a bad value can never weaken the credit check downstream.
+    const creditLimit = Number(params.creditLimit ?? 0);
+    if (!Number.isFinite(creditLimit) || creditLimit < 0) {
+      return { success: false, error: 'الحد الائتماني لا يمكن أن يكون سالباً' };
+    }
+
     const opening = Number(params.openingBalance) || 0;
     const customer: Customer = {
       id: generateErpId('cust'),
@@ -62,7 +70,7 @@ export class MasterDataService {
       phone: params.phone || '',
       taxNumber: params.taxNumber || '',
       currency: params.currency || 'EGP',
-      creditLimit: Number(params.creditLimit) || 0,
+      creditLimit,
       currentBalance: opening,
       paymentTerms: params.paymentTerms || '',
       openingBalance: opening,
@@ -81,6 +89,72 @@ export class MasterDataService {
     });
 
     return { success: true, customer };
+  }
+
+  /**
+   * MD-CUST-06 — edit a customer's PROFILE fields (code, name, type, contact,
+   * currency, credit limit, payment terms). Balances (currentBalance /
+   * openingBalance) and every posted transaction are deliberately untouched:
+   * editing a master record must never rewrite history.
+   */
+  public static updateCustomer(customerId: string, params: {
+    code?: string; name?: string; customerType?: Customer['customerType'];
+    address?: string; phone?: string; taxNumber?: string;
+    currency?: 'EGP' | 'USD'; creditLimit?: number; paymentTerms?: string;
+    userId?: string; userName?: string; isTest?: boolean;
+  }): { success: boolean; customer?: Customer; error?: string } {
+    const g = guard({ module: 'customers', action: 'edit' }, params);
+    if (!g.allowed) return { success: false, error: g.error };
+
+    const db = erpDb.getSnapshot();
+    const existing = db.customers.find(c => c.id === customerId);
+    if (!existing) return { success: false, error: 'العميل غير موجود' };
+
+    const code = params.code !== undefined ? String(params.code).trim() : existing.code;
+    const name = params.name !== undefined ? String(params.name).trim() : existing.name;
+    if (!code) return { success: false, error: 'كود العميل مطلوب' };
+    if (!name) return { success: false, error: 'اسم العميل مطلوب' };
+    if (db.customers.some(c => c.id !== customerId && c.code.toLowerCase() === code.toLowerCase())) {
+      return { success: false, error: `كود العميل (${code}) مستخدم بالفعل` };
+    }
+    if (db.customers.some(c => c.id !== customerId && c.name.trim() === name)) {
+      return { success: false, error: `العميل (${name}) مسجل بالفعل` };
+    }
+
+    // MD-CUST-04 applies to edits too: a credit limit is a ceiling, never signed.
+    let creditLimit = existing.creditLimit;
+    if (params.creditLimit !== undefined) {
+      creditLimit = Number(params.creditLimit);
+      if (!Number.isFinite(creditLimit) || creditLimit < 0) {
+        return { success: false, error: 'الحد الائتماني لا يمكن أن يكون سالباً' };
+      }
+    }
+
+    erpDb.mutate(draft => {
+      const c = draft.customers.find(x => x.id === customerId);
+      if (!c) return;
+      c.code = code;
+      c.name = name;
+      if (params.customerType !== undefined) {
+        c.customerType = params.customerType;
+        c.channel = channelForCustomerType(params.customerType);
+      }
+      if (params.address !== undefined) c.address = params.address;
+      if (params.phone !== undefined) c.phone = params.phone;
+      if (params.taxNumber !== undefined) c.taxNumber = params.taxNumber;
+      if (params.currency !== undefined) c.currency = params.currency;
+      c.creditLimit = creditLimit;
+      if (params.paymentTerms !== undefined) c.paymentTerms = params.paymentTerms;
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: g.userId, userName: g.userName,
+        module: 'إدارة العملاء', action: 'edit', recordId: customerId,
+        description: `تعديل بيانات العميل ${code} - ${name}`,
+      });
+    });
+
+    return { success: true, customer: erpDb.getSnapshot().customers.find(c => c.id === customerId) };
   }
 
   /** Toggle customer active flag without touching their balance or history. */

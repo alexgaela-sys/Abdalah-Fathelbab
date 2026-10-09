@@ -73,13 +73,20 @@ export function App() {
   };
 
   const handleRoleChange = (role: RoleName) => {
-    // Service-level restriction: only a Super Admin session may switch roles
+    // Service-level restriction: only a Super Admin session may switch roles.
+    // updateSessionRole mutates the user object in place AND persists to
+    // localStorage, so we re-read the session afterwards to get a clean object
+    // with the new role — relying on the mutated `prev` would carry stale shape.
     const res = AuthService.updateSessionRole(role);
     if (!res.success) {
       alert(res.error || 'غير مصرح بتبديل الدور');
       return;
     }
-    setCurrentRole(role);
+    const session = AuthService.getCurrentSession();
+    if (session) {
+      setCurrentUser({ ...session.user });
+      setCurrentRole(session.user.role);
+    }
     // If the new role cannot view the currently open tab, bounce to the dashboard
     if (!PermissionService.canView(role, activeTab)) {
       setActiveTab('dashboard');

@@ -568,7 +568,7 @@ export class WorkflowService {
         id: '',
         journalEntryId: '',
         accountId: cogsAcc,
-        accountCode: params.channel === 'export' ? '5102' : '5101',
+        accountCode: (db.accounts.find(a => a.id === cogsAcc)?.code) || (params.channel === 'export' ? '5102' : '5101'),
         accountNameAr: params.channel === 'export' ? 'تكلفة البضاعة المباعة - تصدير' : 'تكلفة البضاعة المباعة - محلي',
         debit: cogsTotalEGP,
         credit: 0,
@@ -1238,6 +1238,22 @@ export class WorkflowService {
 
     const item = db.items.find(i => i.id === params.itemId);
 
+    // REP-04: a custody can only give back what it actually holds. Without this
+    // guard an over-return injects units into the warehouse out of thin air
+    // (inventory inflation with no custody movement or batch behind it).
+    if (!(Number(params.quantity) > 0)) {
+      return { success: false, error: 'كمية الإرجاع يجب أن تكون أكبر من صفر' };
+    }
+    const heldForItem = db.custodyMovements
+      .filter(m => m.custodyId === custody.id && m.itemId === params.itemId)
+      .reduce((s, m) => s + (m.movementType === 'loaded' ? m.quantity : -m.quantity), 0);
+    if (params.quantity > heldForItem + 0.0001) {
+      return {
+        success: false,
+        error: `الكمية المطلوب إرجاعها (${params.quantity}) تتجاوز رصيد العهدة الحالي من هذا الصنف (${heldForItem}) — لا يمكن إرجاع أكثر مما تحمله العهدة.`,
+      };
+    }
+
     // QA-27: goods coming BACK from a custody must re-enter stock at a real
     // cost. A zero cost here would create a zero-value batch that later blocks
     // costed postings and breaks inventory valuation.
@@ -1252,7 +1268,7 @@ export class WorkflowService {
       };
     }
 
-    InventoryEngine.recordMovement({
+    const moveRes = InventoryEngine.recordMovement({
       itemId: params.itemId,
       warehouseId: params.warehouseId,
       movementType: 'rep_return',
@@ -1264,6 +1280,15 @@ export class WorkflowService {
       documentNumber: custody.custodyNumber,
       notes: `مرتجع بضاعة من عهدة ${custody.custodyNumber}`,
     });
+    if (!moveRes.success) return { success: false, error: moveRes.error };
+
+    // The inventory movement above re-enters the goods into the warehouse batch
+    // ledger at their real cost. The custody's GL value lives in 1107 (Dr 1107 on
+    // load, Cr 1107 on sale COGS); it is cleared to zero by the later settlement
+    // when the custody closes, so a return does NOT post a GL journal — posting
+    // Dr 1109 | Cr 1107 here would desynchronise the GL from the batch ledger
+    // (the batch gains the stock value but GL 1107 is credited separately).
+    // Treasury: none (no cash moves).
 
     erpDb.mutate(draft => {
       draft.custodyMovements.push({
@@ -1377,6 +1402,27 @@ export class WorkflowService {
       if (!db.items.find(i => i.id === l.itemId)) return { success: false, error: 'صنف في المرتجع غير معرف بالنظام' };
       if (!db.customers.find(c => c.id === params.customerId)) return { success: false, error: 'العميل غير موجود' };
       if (Number(l.quantity) <= 0) return { success: false, error: 'كمية المرتجع يجب أن تكون أكبر من صفر' };
+    }
+
+    // F22: a return must not exceed what was actually sold on the original
+    // invoice line (paid quantity + bonus quantity). Returning more than was
+    // sold creates inventory and COGS reversals that have no source sale to
+    // reverse, which silently inflates inventory and deflates COGS.
+    if (params.invoiceId) {
+      const invLines = db.salesInvoiceLines.filter(sl => sl.invoiceId === params.invoiceId);
+      for (const l of params.lines) {
+        const orig = invLines.find(sl => sl.itemId === l.itemId);
+        if (orig) {
+          const returnedQty = Math.max(0, l.quantity);
+          const allowedQty = Math.max(0, (orig.quantity || 0)) + Math.max(0, Number(orig.freeQuantity || 0));
+          if (returnedQty > allowedQty + 0.0001) {
+            return {
+              success: false,
+              error: `كمية المرتجع من الصنف (${(db.items.find(i => i.id === l.itemId)?.nameAr || l.itemId)}) هي ${returnedQty} لكن الفاتورة الأصلية تحتوي على ${allowedQty} فقط (تم البيع ${orig.quantity} + bonus ${orig.freeQuantity}). لا يمكن ترجيع أكثر مما بُيع.`,
+            };
+          }
+        }
+      }
     }
 
     const channel = customer.customerType === 'export' ? 'export' : (customer.customerType === 'wholesale' ? 'wholesale' : 'retail');
@@ -2643,6 +2689,21 @@ export class WorkflowService {
     if (Number(params.amount) <= 0) return { success: false, error: 'مبلغ الشيك يجب أن يكون أكبر من صفر' };
     const amount = Number(params.amount);
 
+    // F-CHQ-03: a cheque's due date must not precede its issue date.
+    // The same rule recordCustomerPayment/recordSupplierPayment enforce for
+    // cheques created through the payment path must also apply to manual
+    // registration, otherwise the same invalid state can be entered two ways.
+    if (params.issueDate && params.dueDate) {
+      const issue = new Date(params.issueDate);
+      const due = new Date(params.dueDate);
+      if (isNaN(issue.getTime()) || isNaN(due.getTime())) {
+        return { success: false, error: 'تاريخ الإصدار وتاريخ الاستحقاق يجب أن يكونا تواريخ صحيحة' };
+      }
+      if (due < issue) {
+        return { success: false, error: 'تاريخ استحقاق الشيك لا يمكن أن يكون قبل تاريخ إصداره' };
+      }
+    }
+
     const chequeId = generateErpId('chq');
     const chequeNumber = params.chequeNumber.trim();
 
@@ -3034,8 +3095,8 @@ export class WorkflowService {
    */
   public static settleRepCustody(params: {
     custodyId: string;
-    cashCollected?: number; // cash the rep hands over at settlement (treasury IN)
-    cashRefunded?: number;  // cash the company refunds to the rep (treasury OUT)
+    cashCollected?: number; // cash the rep hands over — capped by this custody's own cash sales (already recognised in 1101; NO new GL entry)
+    cashRefunded?: number;  // cash the company pays out to the rep at settlement (treasury OUT)
     date: string;
     /** QA-20: settlement must never silently close a custody that still holds
      *  unsold goods. Return the goods to stock first (returnGoodsFromRep), or
@@ -3048,7 +3109,16 @@ export class WorkflowService {
     success: boolean;
     error?: string;
     reconciliation?: Array<{ itemId: string; loaded: number; sold: number; returned: number; remaining: number }>;
+    /** T-02: cash this custody's own cash sales already delivered to the treasury. */
+    cashOnHand?: number;
+    /** Echo of what the caller claimed to hand over (validated against cashOnHand). */
+    cashCollected?: number;
+    /** Echo of the treasury payout made in this settlement. */
+    cashRefunded?: number;
     treasuryDelta?: number;
+    /** D6: value of the ACKNOWLEDGED remaining goods written off 1107 at close
+     *  (sourceDocumentType 'rep_custody_shortage') so no custody value is stranded. */
+    shortageWriteOff?: { amount: number; accountId: string; journalEntryId?: string };
     unsoldGoods?: Array<{ itemId: string; remaining: number }>;
     warning?: string;
   } {
@@ -3091,35 +3161,103 @@ export class WorkflowService {
       return { success: false, error: 'مبالغ التسوية النقدية يجب أن تكون أرقامًا موجبة' };
     }
 
+    // T-02 / requirement E: the ONLY cash a rep can hand over is the cash that
+    // this custody's own CASH sales already delivered to the treasury (that sale
+    // recognised the money in 1101 at posting). Anything above it has no cash
+    // behind it and is refused BEFORE any write — never Dr 1101 | Cr 1107
+    // against money the company never received, and never a negative 1107.
+    const cashOnHand = db.salesInvoices
+      .filter(i => i.custodyId === custody.id && i.paymentMethod === 'cash' && i.status === 'posted')
+      .reduce((s, i) => s + (i.totalAmountEGP || 0), 0);
+    if (cashCollected > cashOnHand + 0.005) {
+      return {
+        success: false,
+        error: `المبلغ المطلوب تحصيله يتجاوز النقد الفعلي الموجود على هذه العهدة (النقد المتاح من مبيعات العهدة النقدية: ${cashOnHand.toFixed(2)} ج.م)`,
+      };
+    }
+    // A payout is treasury OUT (Dr 1107 | Cr 1101) and can never exceed what the
+    // rep actually handed over in the same settlement (S8).
+    if (cashRefunded > cashCollected + 0.005) {
+      return { success: false, error: 'المبلغ المُرتجع للمندوب لا يمكن أن يتجاوز النقد المُسلَّم في نفس التسوية' };
+    }
+
     const rep = db.salesReps.find(r => r.id === custody.repId);
 
-    // F21: treasury moves ONLY with real cash.
-    //  - cashCollected  -> Dr Cash 1101 | Cr Custody 1107  (treasury IN)
+    // F21/T-02: treasury moves ONLY with a real REFUND.
+    //  - cashCollected  -> NO entry: that cash was recognised in 1101 by the
+    //    custody's own cash sale at posting; posting it again would double-count
+    //    the money and drive GL 1107 negative.
     //  - cashRefunded   -> Dr Custody 1107 | Cr Cash 1101  (treasury OUT)
     //  - neither        -> purely non-cash: NO cash movement at all.
     let jvId: string | undefined;
-    if (cashCollected > 0 || cashRefunded > 0) {
+    if (cashRefunded > 0) {
       const cashAcc = AccountingEngine.getMappedAccountId('cash_treasury', 'acc-1101');
       const custodyAcc = AccountingEngine.getMappedAccountId('rep_custody', 'acc-1107');
       const lines: JLine[] = [];
-      if (cashCollected > 0) {
-        lines.push(jl(cashAcc, cashCollected, 0, cashCollected, 1, 'EGP', `استلام نقدي من تسوية عهدة ${custody.custodyNumber}`));
-        lines.push(jl(custodyAcc, 0, cashCollected, cashCollected, 1, 'EGP', `تخفيض عهدة المندوب النقدية ${custody.custodyNumber}`));
-      }
-      if (cashRefunded > 0) {
-        lines.push(jl(custodyAcc, cashRefunded, 0, cashRefunded, 1, 'EGP', `زيادة عهدة المندوب النقدية ${custody.custodyNumber} (استرداد)`));
-        lines.push(jl(cashAcc, 0, cashRefunded, cashRefunded, 1, 'EGP', `صرف نقدي لرد تسوية عهدة ${custody.custodyNumber}`));
-      }
+      lines.push(jl(custodyAcc, cashRefunded, 0, cashRefunded, 1, 'EGP', `زيادة عهدة المندوب النقدية ${custody.custodyNumber} (استرداد)`));
+      lines.push(jl(cashAcc, 0, cashRefunded, cashRefunded, 1, 'EGP', `صرف نقدي لرد تسوية عهدة ${custody.custodyNumber}`));
       const jv = AccountingEngine.postJournal({
         date: params.date,
         reference: `CUST-SETTLE-${custody.custodyNumber}`,
-        description: `تسوية عهدة مندوب ${custody.custodyNumber}${cashCollected > 0 ? ` - استلام نقدي ${cashCollected}` : ''}${cashRefunded > 0 ? ` - رد نقدي ${cashRefunded}` : ''}`,
+        description: `تسوية عهدة مندوب ${custody.custodyNumber} - رد نقدي ${cashRefunded}`,
         sourceDocumentType: 'rep_custody_settlement',
         sourceDocumentId: custody.id,
         lines,
       }, params.userId, params.userName, params.isTest);
       if (!jv.success) return { success: false, error: jv.error };
       jvId = jv.entry?.id;
+    }
+
+    // D6 / D-CUSTODY-1 — an ACKNOWLEDGED settlement must never strand the value
+    // of goods that never came back in 1107 while the custody closes. The
+    // shortfall is written off so THIS custody's share of 1107 ends at zero:
+    //   residual > 0 (value still carried):  Dr 6106 rep-expenses/shortage | Cr 1107
+    //   residual < 0 (over-relieved):        Dr 1107 | Cr 6106
+    // The residual is derived from this custody's OWN GL legs (load debits +
+    // return credits + invoice-COGS credits on account 1107), never from the
+    // shared 1107 balance, so other custodies are untouched.
+    // Journal type 'rep_custody_shortage'. Treasury: none. Inventory: none —
+    // the acknowledged goods genuinely never return to stock.
+    let shortageWriteOff: { amount: number; accountId: string; journalEntryId?: string } | undefined;
+    if (params.acknowledgeRemainingGoods && unsoldGoods.length > 0) {
+      const custodyAccId = AccountingEngine.getMappedAccountId('rep_custody', 'acc-1107');
+      const custodyInvoiceIds = new Set(db.salesInvoices.filter(i => i.custodyId === custody.id).map(i => i.id));
+      let goodsDr = 0;
+      let goodsCr = 0;
+      for (const j of db.journalEntries) {
+        const ownDoc = (j.sourceDocumentType === 'rep_custody_load' || j.sourceDocumentType === 'rep_custody_return')
+          && j.sourceDocumentId === custody.id;
+        if (!ownDoc && !(j.sourceDocumentId && custodyInvoiceIds.has(j.sourceDocumentId))) continue;
+        for (const l of j.lines) {
+          if (l.accountId !== custodyAccId) continue;
+          goodsDr += Number(l.debit) || 0;
+          goodsCr += Number(l.credit) || 0;
+        }
+      }
+      const goodsResidual = goodsDr - goodsCr;
+      if (Math.abs(goodsResidual) > 0.01) {
+        const shortageAccId = AccountingEngine.getMappedAccountId('rep_custody_shortage', 'acc-6106');
+        const amt = Number(Math.abs(goodsResidual).toFixed(2));
+        const lines: JLine[] = goodsResidual > 0
+          ? [
+              jl(shortageAccId, amt, 0, amt, 1, 'EGP', `إقرار عجز بضاعة عهدة ${custody.custodyNumber} — بضاعة لم تُعد ولم تُبَع`),
+              jl(custodyAccId, 0, amt, amt, 1, 'EGP', `صرف قيمة البضاعة المتبقية بعهدة ${custody.custodyNumber}`),
+            ]
+          : [
+              jl(custodyAccId, amt, 0, amt, 1, 'EGP', `تسوية فائض رصيد عهدة ${custody.custodyNumber}`),
+              jl(shortageAccId, 0, amt, amt, 1, 'EGP', `عكس عجز بضاعة عهدة ${custody.custodyNumber}`),
+            ];
+        const jv = AccountingEngine.postJournal({
+          date: params.date,
+          reference: `CUST-SHORTAGE-${custody.custodyNumber}`,
+          description: `تسوية عجز بضاعة عهدة ${custody.custodyNumber} عند التسوية بالإقرار بالبضاعة المتبقية`,
+          sourceDocumentType: 'rep_custody_shortage',
+          sourceDocumentId: custody.id,
+          lines,
+        }, params.userId, params.userName, params.isTest);
+        if (!jv.success) return { success: false, error: jv.error || 'تعذر ترحيل قيد عجز العهدة' };
+        shortageWriteOff = { amount: amt, accountId: shortageAccId, journalEntryId: jv.entry?.id };
+      }
     }
 
     erpDb.mutate(draft => {
@@ -3131,22 +3269,9 @@ export class WorkflowService {
       }
 
       // F21/F29: the treasury ledger carries the same cash the GL just moved.
+      // (No cash_receipt row for cashCollected — that receipt was recorded when
+      //  the custody's cash sale posted; a second one would double-count it.)
       const cashAcc = AccountingEngine.getMappedAccountId('cash_treasury', 'acc-1101');
-      if (cashCollected > 0) {
-        draft.treasuryTransactions.push({
-          id: generateErpId('ctx'),
-          receiptNumber: nextDocNumber(draft as unknown as Record<string, unknown>, 'treasuryTransactions', 'CSH', 4, 'receiptNumber'),
-          type: 'cash_receipt',
-          amount: cashCollected,
-          partyName: rep?.name || custody.custodyNumber,
-          date: params.date,
-          description: `تحصيل نقدي من تسوية عهدة المندوب ${custody.custodyNumber}`,
-          glAccountId: cashAcc,
-          documentType: 'rep_custody_settlement',
-          journalEntryId: jvId,
-          isTest: params.isTest,
-        });
-      }
       if (cashRefunded > 0) {
         draft.treasuryTransactions.push({
           id: generateErpId('ctx'),
@@ -3171,14 +3296,20 @@ export class WorkflowService {
         module: 'المناديب - تسوية العهد',
         action: 'approve',
         recordId: custody.id,
-        description: `تسوية وإغلاق عهدة ${custody.custodyNumber}: ${reconciliation.length} صنف، بقايا غير مباعة ${reconciliation.filter(r => r.remaining > 0).length} صنف${jvId ? ` مع ترحيل القيد المحاسبي - صافي حركة الخزينة ${cashCollected - cashRefunded}` : ' (تسوية غير نقدية - لا حركة نقدية)'}`,
+        description: `تسوية وإغلاق عهدة ${custody.custodyNumber}: ${reconciliation.length} صنف، بقايا غير مباعة ${reconciliation.filter(r => r.remaining > 0).length} صنف${cashCollected > 0 ? `، تحصيل نقدي ${cashCollected} (مُسجَّل مسبقًا في الخزينة ببيعات العهدة النقدية)` : ''}${jvId ? ` مع ترحيل القيد المحاسبي - حركة الخزينة ${-cashRefunded}` : ' (لا حركة خزينة جديدة عند التسوية)'}${shortageWriteOff ? `، ترحيل عجز بضاعة معترف بها ${shortageWriteOff.amount} ج.م لخروجها من 1107` : ''}`,
       });
     });
 
     return {
       success: true,
       reconciliation,
-      treasuryDelta: Number((cashCollected - cashRefunded).toFixed(2)),
+      cashOnHand: Number(cashOnHand.toFixed(2)),
+      cashCollected,
+      cashRefunded,
+      // At settlement NOTHING moves for the collected cash (it has been in 1101
+      // since its sale); only the refund takes money out of the treasury.
+      treasuryDelta: Number((-cashRefunded).toFixed(2)),
+      shortageWriteOff,
       unsoldGoods: unsoldGoods.length ? unsoldGoods : undefined,
       warning: unsoldWarning,
     };

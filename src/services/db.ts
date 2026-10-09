@@ -307,6 +307,9 @@ export const INITIAL_ACCOUNT_MAPPINGS: Record<string, string> = {
 
   // Rep Custody
   rep_custody: 'acc-1107',
+  // D6 — acknowledged unsold goods at settlement are written off here
+  // (Dr 6106 | Cr 1107) so no custody value is stranded on close.
+  rep_custody_shortage: 'acc-6106',
 
   // Cash, Banks, Cheques
   cash_treasury: 'acc-1101',
