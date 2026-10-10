@@ -1,0 +1,203 @@
+{
+  "suite": "06_sales",
+  "generatedAt": "2026-10-09T02:05:33.637Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "06_sales",
+      "id": "SETUP-CUST",
+      "name": "Setup: test customer created through the UI",
+      "status": "PASS",
+      "detail": "id=cust-mv0boefd-002",
+      "ts": "2026-10-09T02:04:37.532Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "FIFO-SETUP",
+      "name": "Setup: three FIFO cost layers created (100@60, 100@65, 100@70)",
+      "status": "PASS",
+      "detail": "FIFO-A=100@60, FIFO-B=100@65, FIFO-C=100@70",
+      "ts": "2026-10-09T02:04:42.516Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "FIFO-01",
+      "name": "FIFO: a 250-unit movement consumes the oldest layers first (A@60, B@65, part of C@70)",
+      "status": "PASS",
+      "detail": "expected=[\"FIFO-A:100@60\",\"FIFO-B:100@65\",\"FIFO-C:50@70\"]; remainingWH01=50; layers=wh-raw/FIFO-A=0@60, wh-raw/FIFO-B=0@65, wh-raw/FIFO-C=50@70, wh-local/FIFO-A=100@60, wh-local/FIFO-B=100@65, wh-local/FIFO-C=50@70",
+      "ts": "2026-10-09T02:04:45.560Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SETUP-BOM",
+      "name": "Setup: BOM available for the finished good",
+      "status": "PASS",
+      "detail": "bom=bom-item-fp-s1; lines=10",
+      "ts": "2026-10-09T02:04:45.596Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SETUP-PROD-ORDER",
+      "name": "SETUP-PROD: production order released through the UI",
+      "status": "PASS",
+      "detail": "order=PRD-2026-0001; planned=1000; dialogs=",
+      "ts": "2026-10-09T02:04:59.969Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SETUP-PROD-ISSUE",
+      "name": "SETUP-PROD: materials issued from WH-01 against the BOM",
+      "status": "PASS",
+      "detail": "rawValue 192587700→192437308.33 (Δ150391.68); dialogs=confirm:صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج PRD-2026-0001 وفق معادلة |alert:تم صرف المواد بنجاح بتكلفة فعلية ١٥٠٬٣٩١٫٦٧٥ ج.م",
+      "ts": "2026-10-09T02:05:01.650Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SETUP-PROD-OUTPUT",
+      "name": "SETUP-PROD: 400 cartons received into WH-02",
+      "status": "PASS",
+      "detail": "FG WH-02=400; orderStatus=in_progress",
+      "ts": "2026-10-09T02:05:04.360Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SETUP-PROD-CLOSE",
+      "name": "SETUP-PROD: order closed",
+      "status": "PASS",
+      "detail": "dialogs=confirm:لا يمكن إغلاق أمر الإنتاج PRD-2026-0001 كأمر مكتمل: الكمية المخططة 1000 والكمية الفعلية 40 | prompt:سبب الإغلاق الجزئي (إلزامي ويُحفظ بسجل الأمر):\n\nالمطلوب تصرّفه لكل مادة (مصروف − مستهلك):\n | alert:تم الإغلاق الجزئي وإرجاع الخامات غير المستهلكة إلى تشغيلاتها الأصلية.",
+      "ts": "2026-10-09T02:05:05.948Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SETUP-FG",
+      "name": "Setup: finished goods available in WH-02 for the sales scenario",
+      "status": "PASS",
+      "detail": "FG WH-02=400",
+      "ts": "2026-10-09T02:05:06.073Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-01",
+      "name": "Local sales invoice posts once: invoice, stock deduction, journal",
+      "status": "PASS",
+      "detail": "invoices 0→1; FG stock 400→350; newJournals=1; dialogs=",
+      "ts": "2026-10-09T02:05:09.704Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-02",
+      "name": "COGS equals an independent FIFO recomputation of the pre-sale WH-02 layers",
+      "status": "PASS",
+      "detail": "cogsOnInvoice=7688.33375; expectedFIFO=7688.33; consumed=PRD-PRD-2026-0001-20261009:50@153.766675; invoice={\"sub\":5000,\"vat\":0,\"total\":5000,\"bonus\":0,\"wh\":\"wh-local\"}",
+      "ts": "2026-10-09T02:05:09.704Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-03",
+      "name": "All journals balanced after the sale",
+      "status": "PASS",
+      "detail": "unbalanced=none",
+      "ts": "2026-10-09T02:05:09.704Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-04",
+      "name": "Invoice numbers unique",
+      "status": "PASS",
+      "detail": "SINV-2026-00001",
+      "ts": "2026-10-09T02:05:09.704Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-05",
+      "name": "Rapid repeated save creates exactly one invoice",
+      "status": "PASS",
+      "detail": "invoices 1→2",
+      "ts": "2026-10-09T02:05:13.359Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-06",
+      "name": "Zero-quantity invoice line is rejected",
+      "status": "PASS",
+      "detail": "invoices 2→2; dialogs=",
+      "ts": "2026-10-09T02:05:16.253Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-07",
+      "name": "Sale beyond available stock is rejected with no partial deduction",
+      "status": "PASS",
+      "detail": "invoices 2→2; stock 340→340; inline=true; dialogs=",
+      "ts": "2026-10-09T02:05:19.886Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-08",
+      "name": "Bonus 10+1: free unit has zero selling value but is still issued from stock",
+      "status": "PASS",
+      "detail": "bonusClicked=true; label=\"عرض 10+1\"; bonusFieldAfterClick=1; bonusQuantity=1; subtotal=1000; total=1000; lines=[{\"item\":\"item-fp-s1\",\"q\":10,\"price\":100,\"free\":1}]; expectedIssue=11; stock 340→329 (Δ11)",
+      "ts": "2026-10-09T02:05:24.604Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-09",
+      "name": "Credit-limit policy evidence on credit sales",
+      "status": "PASS",
+      "detail": "dialogs=صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج PRD-2026-0001 وفق معادلة التصنيع؟ || تم صرف المواد بنجاح بتكلفة فعلية ١٥٠٬٣٩١٫٦٧٥ ج.م || لا يمكن إغلاق أمر الإنتاج PRD-2026-0001 كأمر مكتمل: الكمية المخططة 1000 والكمية الفعلية 400. يجب است || سبب الإغلاق الجزئي (إلزامي ويُحفظ بسجل الأمر):\n\nالمطلوب تصرّفه لكل مادة (مصروف − مستهلك):\n• ذرة صفرا || تم الإغلاق الجزئي وإرجاع الخامات غير المستهلكة إلى تشغيلاتها الأصلية. || تنبيه ائتماني: العميل تجاوز الحد الائتماني المسموح به (٥٬٠٠٠ ج.م) وسيصبح رصيده (٦٬٠٠٠ ج.م). تم السما || تنبيه ائتماني: العميل تجاوز الحد الائتماني المسموح به (٥٬٠٠٠ ج.م) وسيصبح رصيده (٧٬٠٠٠ ج.م). تم السما",
+      "ts": "2026-10-09T02:05:24.604Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-10",
+      "name": "Invoice print view opens with real document content and invokes printing",
+      "status": "PASS",
+      "detail": "rowButtons=[\"عرض\"]; opened=true; window.print calls=1; preview=فاتورة مبيعات: SINV-2026-00001 ✕ التاريخ: 2026-10-09 العميل: عميل مبيعات UAT القناة: wholesale القيمة الإجمالية: ٥٬٠٠٠ EGP الصنف الكمية المباعة بونص مجاني سعر الوحدة الإجمالي سنجل فاير سويت 50 قطعة 0 100 5000.00 طباعة الفاتورة إغلاق",
+      "ts": "2026-10-09T02:05:27.513Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-12",
+      "name": "Customer statement shows invoices and the running balance",
+      "status": "PASS",
+      "detail": "dbBalance=7000; totalSalesEGP=7000; excerpt=إدارة العملاء والحسابات المدينة (Receivables) سجل العملاء، كشف الحساب التفصيلي مع الرصيد التراكمي، سندات التحصيل، ومطابقة الأستاذ العام إضافة عميل جديد دليل وسجل العملاء (1) كشف حساب عميل تفصيلي (Statement) مرتجعات المبيعات (0) اختيار العميل * CUST-SALES-01 - ",
+      "ts": "2026-10-09T02:05:31.225Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-13",
+      "name": "Customer list export downloads a real file",
+      "status": "NOT APPLICABLE",
+      "detail": "no export control on the customers screen",
+      "ts": "2026-10-09T02:05:32.013Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-14",
+      "name": "Sales returns screen offers a create action",
+      "status": "PASS",
+      "detail": "controls=3",
+      "ts": "2026-10-09T02:05:33.552Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-CONSOLE",
+      "name": "No console/page errors during sales testing",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-09T02:05:33.552Z"
+    },
+    {
+      "suite": "06_sales",
+      "id": "SALE-DIALOGS",
+      "name": "Dialogs observed during the sales run",
+      "status": "PASS",
+      "detail": "[\"confirm:صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج PRD-2026-0001 وفق معادلة \",\"alert:تم صرف المواد بنجاح بتكلفة فعلية ١٥٠٬٣٩١٫٦٧٥ ج.م\",\"confirm:لا يمكن إغلاق أمر الإنتاج PRD-2026-0001 كأمر مكتمل: الكمية المخططة 1000 والكمية \",\"prompt:سبب الإغلاق الجزئي (إلزامي ويُحفظ بسجل الأمر):\\n\\nالمطلوب تصرّفه لكل مادة (مصروف −\",\"alert:تم الإغلاق الجزئي وإرجاع الخامات غير المستهلكة إلى تشغيلاتها الأصلية.\",\"alert:تنبيه ائتماني: العميل تجاوز الحد الائتماني المسموح به (٥٬٠٠٠ ج.م) وسيصبح رصيده (\",\"alert:تنبيه ائتماني: العميل تجاوز الحد الائتماني المسموح به (٥٬٠٠٠ ج.م) وسيصبح رصيده (\"]",
+      "ts": "2026-10-09T02:05:33.552Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

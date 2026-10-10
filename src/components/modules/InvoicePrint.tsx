@@ -9,7 +9,7 @@
 // Only the `.print-area` below reaches the printer (see printDocument() and the
 // @media print block in src/index.css) — the sidebar, header and every button in
 // the application are hidden.
-import React from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { erpDb } from '../../services/db';
 import { printDocument } from '../printUtils';
 import { SalesInvoice, SalesInvoiceLine, PurchaseInvoice, PurchaseInvoiceLine } from '../../types/erp';
@@ -31,6 +31,61 @@ const InvoicePrint: React.FC<{
 }> = ({ invoiceId, purchaseInvoiceId, onClose }) => {
   const db = erpDb.getSnapshot();
 
+  // F19 — print action owned by the preview itself.
+  const [printHint, setPrintHint] = useState<string | null>(null);
+  const hintTimer = useRef<number | null>(null);
+  const didAutoPrint = useRef(false);
+
+  const clearHintTimer = () => {
+    if (hintTimer.current !== null) {
+      window.clearTimeout(hintTimer.current);
+      hintTimer.current = null;
+    }
+  };
+
+  const runPrint = () => {
+    setPrintHint(null);
+    clearHintTimer();
+    const ok = printDocument();
+    if (!ok) {
+      setPrintHint('تعذّر فتح نافذة الطباعة في هذا المتصفح. اضغط الزر مرة أخرى، أو افتح التطبيق في تبويب متصفح كامل ثم أعد الطباعة.');
+      return;
+    }
+    // The dialog is modal in some engines and asynchronous in others. If the
+    // page still owns focus a moment later, nothing opened — say so instead of
+    // leaving a silent no-op. The hint never removes the print scoping.
+    hintTimer.current = window.setTimeout(() => {
+      if (document.body.classList.contains('print-only-doc') && document.hasFocus()) {
+        setPrintHint('لم تُفتح نافذة الطباعة تلقائيًا — اضغط "طباعة / حفظ PDF" مرة أخرى. إذا كنت داخل إطار معاينة مضمّن، افتح التطبيق في تبويب كامل.');
+      }
+    }, 2000);
+  };
+
+  useEffect(() => {
+    const clear = () => { setPrintHint(null); clearHintTimer(); };
+    window.addEventListener('afterprint', clear);
+    return () => { window.removeEventListener('afterprint', clear); clearHintTimer(); };
+  }, []);
+
+  // ITEM 16 — the print preview can always be dismissed with Escape (the X
+  // button in the chrome already covers the pointer path).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  // A) "طباعة الفاتورة" opens the browser print dialog directly; the preview
+  // stays underneath so the user can cancel and retry. The ref guard keeps
+  // React StrictMode's double effect from opening the dialog twice.
+  useLayoutEffect(() => {
+    if (didAutoPrint.current) return;
+    didAutoPrint.current = true;
+    runPrint();
+  }, []);
+
   const sales = db.salesInvoices.find((i) => i.id === invoiceId) || null;
   const purchase = purchaseInvoiceId
     ? db.purchaseInvoices.find((p) => p.id === purchaseInvoiceId) || null
@@ -41,6 +96,35 @@ const InvoicePrint: React.FC<{
   // Screen: a full-screen preview overlay. Print: only `.print-area` survives.
   const wrap = (children: React.ReactNode) => (
     <div className="print-area fixed inset-0 z-[60] overflow-y-auto bg-slate-100 p-4">
+      {/* ---------- SCREEN CHROME (never printed) ----------
+          Kept ABOVE the document so the print action is always visible instead
+          of sitting below a long invoice, out of sight. ---------- */}
+      <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 bg-slate-900 text-slate-100 px-4 py-2 text-xs print:hidden">
+        <span className="flex items-center gap-2 font-bold">
+          <Printer className="w-4 h-4" />
+          {isPurchase ? 'فاتورة مشتريات — معاينة الطباعة' : 'فاتورة مبيعات — معاينة الطباعة'}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={runPrint}
+            className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs"
+          >
+            طباعة / حفظ PDF
+          </button>
+          <button
+            onClick={onClose}
+            className="px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold inline-flex items-center gap-1"
+          >
+            <X className="w-3 h-3" /> إغلاق
+          </button>
+        </div>
+      </div>
+      {printHint && (
+        <div className="mt-2 rounded-lg bg-amber-100 border border-amber-300 px-3 py-2 text-[11px] font-bold text-amber-900 print:hidden">
+          {printHint}
+        </div>
+      )}
+
       {/* ---------- DOCUMENT ---------- */}
       <div className="print-doc max-w-3xl mx-auto bg-white p-6 shadow-xl border border-slate-200">
         <div className="text-center border-b-4 border-slate-900 pb-3">
@@ -69,27 +153,6 @@ const InvoicePrint: React.FC<{
         {children}
       </div>
 
-      {/* ---------- SCREEN CHROME (never printed) ---------- */}
-      <div className="flex items-center justify-between bg-slate-900 text-slate-100 px-4 py-2 text-xs mt-3 print:hidden">
-        <span className="flex items-center gap-2">
-          <Printer className="w-4 h-4" />
-          {isPurchase ? 'فاتورة مشتريات — معاينة الطباعة' : 'فاتورة مبيعات — معاينة الطباعة'}
-        </span>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={printDocument}
-            className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs"
-          >
-            طباعة / حفظ PDF
-          </button>
-          <button
-            onClick={onClose}
-            className="px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold inline-flex items-center gap-1"
-          >
-            <X className="w-3 h-3" /> إغلاق
-          </button>
-        </div>
-      </div>
     </div>
   );
 
@@ -120,6 +183,8 @@ const InvoicePrint: React.FC<{
               <th className="py-1.5 text-center">الوحدة</th>
               <th className="py-1.5 text-right">سعر الوحدة</th>
               <th className="py-1.5 text-right">الإجمالي</th>
+              <th className="py-1.5 text-right">الخصم %</th>
+              <th className="py-1.5 text-right">ضريبة %</th>
             </tr>
           </thead>
           <tbody>
@@ -130,6 +195,8 @@ const InvoicePrint: React.FC<{
                 <td className="py-1.5 text-center">{db.units.find(u => u.id === l.unitId)?.nameAr || ''}</td>
                 <td className="py-1.5 text-right font-mono">{fmt(l.unitPrice)}</td>
                 <td className="py-1.5 text-right font-mono">{fmt(l.netTotal)}</td>
+                <td className="py-1.5 text-right font-mono">{fmt(l.vatRate || 0)}%</td>
+                <td className="py-1.5 text-right font-mono">{fmt(l.vatAmount)}</td>
               </tr>
             ))}
           </tbody>

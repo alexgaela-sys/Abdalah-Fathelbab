@@ -1,0 +1,195 @@
+{
+  "suite": "08_production",
+  "generatedAt": "2026-10-09T12:24:58.975Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "08_production",
+      "id": "PROD-SETUP",
+      "name": "Setup: all BOM materials purchased into WH-01 through the UI",
+      "status": "PASS",
+      "detail": "rawValue=266655025; bomLines=10; materials=item-raw-corn,item-raw-oil,item-raw-chip,item-pkg-film,item-raw-flavor-sweet-chili,item-pkg-box-single,item-pkg-tray,item-pkg-sticker,item-pkg-napkin,item-pkg-kraft-single",
+      "ts": "2026-10-09T12:23:15.499Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-BOM-01",
+      "name": "BOM editor lists the recipe with materials and quantities",
+      "status": "PASS",
+      "detail": "chars=1115; hasProduct=true; sample=إدارة الإنتاج والتصنيع (Manufacturing) أوامر التشغيل متعددة الأيام، معادلات التصنيع (BOM)، معالجة التوالف والسكراب، وتتبع تكلفة المنتج — راجع تبويب «إدارة معادلات التصنيع (BOM)» لإنشاء/تعديل/تفعيل المعادلة قبل بناء أمر الإنتاج أوامر الإنتاج إدارة معادلات التصن",
+      "ts": "2026-10-09T12:23:17.074Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-01",
+      "name": "Production order released with planned quantity and BOM linkage",
+      "status": "PASS",
+      "detail": "order=PRD-2026-0001; planned=1000; status=released; dialogs=",
+      "ts": "2026-10-09T12:23:20.955Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-02",
+      "name": "Order details show required raw/packaging quantities (BOM × planned)",
+      "status": "PASS",
+      "detail": "chars=660; excerpt=معادلة التصنيع (BOM) واحتياجات الخامات لأمر: PRD-2026-0001 ✕ المادة الخام / التعبئة الكمية المطلوبة المتاح بمستودع الخامات حالة الكفاية ذرة صفراء مجروشة 800 كيلوجرام 1440000 كيلوجرام كافٍ للتشغيل زيت نخيل أولين نقي 180 كيلوجرام 324000 كيلوجرام كافٍ للتشغيل شيبس / فاير فينجر 800 كيلوجرام 1440000 كيلو",
+      "ts": "2026-10-09T12:23:21.750Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-03",
+      "name": "Recording output BEFORE issuing materials does not silently consume raw stock",
+      "status": "PASS",
+      "detail": "fgGained=0; rawSpent=0; consumptionRecords=0; dialogs=alert:لا يمكن تسجيل إنتاج لأمر PRD-2026-0001 قبل صرف الخامات والمواد من مستودع الخامات",
+      "ts": "2026-10-09T12:23:24.686Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-04",
+      "name": "Issue materials posts consumption records and deducts WH-01 value",
+      "status": "PASS",
+      "detail": "consumptionLines=10; rawValue 266655025→266506883.33 (Δ148141.68); expectedQty=5925667; dialogs=confirm:صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج PRD-2026-0001 و|alert:تم صرف المواد بنجاح بتكلفة فعلية ١٤٨٬١٤١٫٦٧٥ ج.م",
+      "ts": "2026-10-09T12:23:27.014Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-05",
+      "name": "Issuing materials twice does not double-consume WH-01",
+      "status": "PASS",
+      "detail": "consumptionLines 10→10; rawValue 266506883.33→266506883.33 (Δ0); secondIssueDialogs=صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج PRD-2026-0001 و|صرف مكرر على أمر الإنتاج PRD-2026-0001: المادة (ذرة صفراء مجروشة) منصر",
+      "ts": "2026-10-09T12:23:28.574Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-OUT-A",
+      "name": "Partial production run (400 good) received exactly once",
+      "status": "PASS",
+      "detail": "FG WH-02 0→400 (Δ400); WH-05 0→0; dialogs=",
+      "ts": "2026-10-09T12:23:31.367Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-OUT-B",
+      "name": "Partial production run (500 good, 10 defective, 5 scrap) received exactly once",
+      "status": "PASS",
+      "detail": "FG WH-02 400→900 (Δ500); WH-05 0→5; dialogs=",
+      "ts": "2026-10-09T12:23:34.269Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-OUT-OVER",
+      "name": "Partial production run (200 good) received exactly once",
+      "status": "PASS",
+      "detail": "FG WH-02 900→1100 (Δ200); WH-05 5→5; dialogs=",
+      "ts": "2026-10-09T12:23:37.003Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-CLOSE-1",
+      "name": "Order close is either executed or explicitly blocked with a reason",
+      "status": "PASS",
+      "detail": "status=completed; produced=1100; dialogs=alert:تم إغلاق أمر الإنتاج بنجاح (إغلاق كامل).",
+      "ts": "2026-10-09T12:23:38.748Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-CLOSE-2",
+      "name": "Second close attempt does not post a duplicate closing entry",
+      "status": "PASS",
+      "detail": "closeControlStillPresent=false; journals 3→3; produced=1100",
+      "ts": "2026-10-09T12:23:40.291Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-CLOSE-FULL",
+      "name": "A fully produced order closes successfully and posts its closing journal once",
+      "status": "PASS",
+      "detail": "order2=PRD-2026-0002; produced=100/100; status=completed; newJournals=1; dialogs=alert:تم إغلاق أمر الإنتاج بنجاح (إغلاق كامل).",
+      "ts": "2026-10-09T12:23:49.497Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-COST-01",
+      "name": "Cost variance screen shows the order with standard vs actual",
+      "status": "PASS",
+      "detail": "chars=1084; excerpt=إدارة التكاليف المعيارية والفعلية (Costing) معدلات التحويل الربع سنوية، مقارنة المعياري بالفعلي، انحرافات التشغيل، ودقة التنبؤ بالمبيعات تحديث معدل تكلفة معياري جديد معدلات التكاليف المعيارية (الربع سنوية) انحرافات تكلفة أوامر الإنتاج (Variances) مقارنة التنبؤ بالمبيعات بالفعلي (Forecast vs Actual) ",
+      "ts": "2026-10-09T12:23:51.242Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-COST-02",
+      "name": "Standard conversion rates come from configuration (250/100/5/50/30 per 1,000 cartons)",
+      "status": "PASS",
+      "detail": "rates=250/100/5/50/30; produced=1100; expectedConversionEGP=478.5",
+      "ts": "2026-10-09T12:23:51.242Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-GL-01",
+      "name": "All journals balanced after the production cycle",
+      "status": "PASS",
+      "detail": "unbalanced=none",
+      "ts": "2026-10-09T12:23:51.242Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-TRACE-01",
+      "name": "Finished-goods batches are traceable back to the production order",
+      "status": "PASS",
+      "detail": "batches=PRD-PRD-2026-0001-20261009, PRD-PRD-2026-0002-20261009; traceable=1; order=PRD-2026-0001",
+      "ts": "2026-10-09T12:23:51.242Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-STOCK-01",
+      "name": "Post-cycle stock: WH-01 issued, WH-02 received good output, WH-05 holds scrap",
+      "status": "PASS",
+      "detail": "FG WH-02=1200; FG WH-05=5; rawValue=266492069.15",
+      "ts": "2026-10-09T12:23:51.242Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "QC-01",
+      "name": "QC inspection (pass → saleable) recorded through the UI",
+      "status": "PASS",
+      "detail": "inspections 0→1; FG stock 1200→1200; dialogs=",
+      "ts": "2026-10-09T12:23:54.598Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "QC-02",
+      "name": "QC inspection (reject → WH-04 defective) recorded through the UI",
+      "status": "PASS",
+      "detail": "inspections=2; FG WH-02=1200; dialogs=",
+      "ts": "2026-10-09T12:24:57.910Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "QC-03",
+      "name": "QC register lists the recorded inspections",
+      "status": "PASS",
+      "detail": "إدارة ومراقبة الجودة (Quality Inspection) فحص الخامات الواردة، مخرجات خطوط الإنتاج، وتحديد وجهة المعيب والتوالف والهالك تسجيل محضر فحص جودة سجل محاضر فحص الجودة وتوجيهات المستودعات عدد المحاضر: 2 نوع المستند رقم المستند الصنف رقم التشغيلة ا",
+      "ts": "2026-10-09T12:24:58.897Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-CONSOLE",
+      "name": "No console/page errors during production testing",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-09T12:24:58.897Z"
+    },
+    {
+      "suite": "08_production",
+      "id": "PROD-DIALOGS",
+      "name": "Dialogs observed during the production run",
+      "status": "PASS",
+      "detail": "[\"alert:لا يمكن تسجيل إنتاج لأمر PRD-2026-0001 قبل صرف الخامات والمواد من مستو\",\"confirm:صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج PRD-2026-0001 و\",\"alert:تم صرف المواد بنجاح بتكلفة فعلية ١٤٨٬١٤١٫٦٧٥ ج.م\",\"confirm:صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج PRD-2026-0001 و\",\"alert:صرف مكرر على أمر الإنتاج PRD-2026-0001: المادة (ذرة صفراء مجروشة) منصر\",\"alert:تم إغلاق أمر الإنتاج بنجاح (إغلاق كامل).\",\"confirm:صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج PRD-2026-0002 و\",\"alert:تم صرف المواد بنجاح بتكلفة فعلية ١٤٬٨١٤٫١٧٥ ج.م\",\"alert:تم إغلاق أمر الإنتاج بنجاح (إغلاق كامل).\"]",
+      "ts": "2026-10-09T12:24:58.897Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

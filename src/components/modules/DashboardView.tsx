@@ -6,10 +6,12 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { InventoryEngine } from '../../services/inventory';
+import { SettingsService } from '../../services/settings';
 import { PageHeader, SectionCard, EmptyState, formatEGP, formatNum } from '../ui';
 
 interface DashboardViewProps {
-  onNavigateTab: (tab: string) => void;
+  /** ITEM 18 — optional sub-target lets cards deep-link into a specific report. */
+  onNavigateTab: (tab: string, sub?: string) => void;
   openTestRunner: () => void;
 }
 
@@ -76,7 +78,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
     .reduce((sum, a) => sum + a.currentBalance, 0);
   const netProfit = totalRevenue - totalCOGS - totalExpenses;
 
-  const expiringBatches = InventoryEngine.getExpiringBatches(10);
+  // ITEM 13 — the dashboard reads the CONFIGURED expiry threshold (settings),
+  // so changing the setting updates the card, the count and the heading.
+  const expiryThresholdDays = SettingsService.getExpiryWarningDays();
+  const expiringBatches = InventoryEngine.getExpiringBatches(expiryThresholdDays);
   const isEmptySystem =
     db.salesInvoices.length === 0 && db.purchaseInvoices.length === 0 && db.batches.length === 0;
 
@@ -123,7 +128,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
   const whMax = Math.max(1, ...warehouseSeries.map(w => w.value));
 
   // Best-selling products from salesInvoiceLines
-  const productSalesMap = new Map<string, { nameAr: string; qty: number; revenue: number }>();
+  const productSalesMap = new Map<string, { nameAr: string; qty: number; revenue: number; baseUnitId?: string }>();
   const itemsMap = new Map(db.items.map(i => [i.id, i]));
   db.salesInvoiceLines.forEach(line => {
     const item = itemsMap.get(line.itemId);
@@ -131,6 +136,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
       nameAr: item?.nameAr || line.itemId,
       qty: 0,
       revenue: 0,
+      baseUnitId: item?.baseUnitId,
     };
     existing.qty += line.quantity;
     existing.revenue += line.netTotal;
@@ -139,6 +145,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
   const bestSelling = Array.from(productSalesMap.values())
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 5);
+  // ITEM 14: show the product's REAL selling unit (sales lines are booked in
+  // the item's base unit) instead of a hardcoded "كرتونة".
+  const unitNameMap = new Map(db.units.map(u => [u.id, u.nameAr]));
 
   // Production flow strip steps
   const flowSteps = [
@@ -401,9 +410,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
           <div className="flex items-center justify-between pb-3 border-b border-cream-200">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-brand-600" />
-              <h3 className="font-black text-ink-900 text-sm">أصناف قاربت الصلاحية (خلال 10 أيام)</h3>
+              <h3 className="font-black text-ink-900 text-sm">أصناف قاربت الصلاحية (خلال {expiryThresholdDays} أيام)</h3>
             </div>
-            <span className="badge-brand">{expiringBatches.length} تشغيلات</span>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => onNavigateTab('reports', 'expiry_status')}
+                className="text-xs font-black text-brand-600 hover:text-brand-700 cursor-pointer flex items-center gap-1"
+              >
+                تقرير الصلاحية <ArrowLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="badge-brand">{expiringBatches.length} تشغيلات</span>
+            </div>
           </div>
 
           <div className="mt-4 space-y-2.5 max-h-72 overflow-y-auto">
@@ -464,7 +481,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
                       <span className="font-bold text-ink-900">{p.nameAr}</span>
                     </div>
                     <div className="flex items-center gap-4 font-mono">
-                      <span className="text-cream-700 font-semibold">{p.qty} كرتونة</span>
+                      <span className="text-cream-700 font-semibold">{p.qty} {unitNameMap.get(p.baseUnitId || '') || 'وحدة'}</span>
                       <span className="font-black text-emerald-700">{formatEGP(p.revenue)}</span>
                     </div>
                   </div>

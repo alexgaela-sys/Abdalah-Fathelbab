@@ -6,9 +6,11 @@ import {
 import { erpDb } from '../../services/db';
 import { isDebitNatureCategory } from '../../types/erp';
 import { LedgerService } from '../../services/ledger';
+import { InventoryEngine } from '../../services/inventory';
+import { SettingsService } from '../../services/settings';
 import { printDocument } from '../printUtils';
 
-type ReportType = 
+export type ReportType = 
   | 'trial_balance'
   | 'income_statement'
   | 'balance_sheet'
@@ -16,11 +18,20 @@ type ReportType =
   | 'payables_aging'
   | 'inventory_valuation'
   | 'sales_analysis'
-  | 'vat_report';
+  | 'vat_report'
+  | 'expiry_status'
+  | 'raw_material_variance'
+  | 'material_differences'
+  | 'production_orders';
 
-export const ReportsView: React.FC = () => {
+export const ReportsView: React.FC<{
+  /** ITEM 18 — contextual deep-link (dashboard → this report). */
+  initialReport?: ReportType;
+  /** ITEM 18 — contextual links back to the working screens. */
+  onNavigateTab?: (tab: string) => void;
+}> = ({ initialReport, onNavigateTab }) => {
   const db = erpDb.getSnapshot();
-  const [selectedReport, setSelectedReport] = useState<ReportType>('trial_balance');
+  const [selectedReport, setSelectedReport] = useState<ReportType>(initialReport || 'trial_balance');
 
   // ---------- Period filter (F13: reports are period-aware, nothing is hidden) ----------
   const firstOfMonth = new Date();
@@ -28,6 +39,66 @@ export const ReportsView: React.FC = () => {
   const [fromDate, setFromDate] = useState(firstOfMonth.toISOString().split('T')[0]);
   const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
   const [allPeriods, setAllPeriods] = useState(true);
+
+  // ---------- ITEM 7 / 10-11 / 13 / 18: report derivations ----------
+  // ITEM 13 — expiry status uses the CONFIGURED threshold from settings,
+  // never a hardcoded "10 days".
+  const expiryThresholdDays = SettingsService.getExpiryWarningDays();
+  const expiryRows = InventoryEngine.getExpiringBatches(expiryThresholdDays);
+
+  // ITEM 7 — raw-material deviation: standard vs REAL book cost on the stock,
+  // plus issued-vs-planned usage from actual production consumption records.
+  const rawMaterialRows = db.items
+    .filter(i => i.itemType === 'raw_material' || i.itemType === 'packaging_material')
+    .map(item => {
+      const qty = InventoryEngine.getItemBalance(item.id);
+      const stockValue = InventoryEngine.getItemValue(item.id);
+      const actualUnit = qty > 0 ? stockValue / qty : (item.actualCost || item.standardCost || 0);
+      const standardUnit = item.standardCost || 0;
+      const priceDeltaUnit = actualUnit - standardUnit;
+      const stockPriceDeviation = qty * priceDeltaUnit;
+      const cons = db.productionConsumptions.filter(c => c.materialItemId === item.id);
+      const issuedQty = cons.reduce((s, c) => s + (c.actualQuantity || 0), 0);
+      const plannedQty = cons.reduce((s, c) => s + (c.plannedQuantity || 0), 0);
+      const usageDeltaValue = cons.reduce(
+        (s, c) => s + ((c.actualQuantity || 0) - (c.plannedQuantity || 0)) * (c.unitCost || 0),
+        0,
+      );
+      return { item, qty, actualUnit, standardUnit, priceDeltaUnit, stockPriceDeviation, issuedQty, plannedQty, usageDeltaValue };
+    })
+    .filter(r => r.qty > 0 || r.issuedQty > 0);
+
+  // ITEM 10-11 — REAL differences only. Recovered material is booked at its
+  // documented cost; defective and scrap stay QUANTITIES with no invented
+  // 50% defective value and no automatic 10% scrap valuation.
+  const recoveryValueByOrder = new Map<string, number>();
+  db.inventoryTransactions
+    .filter(t => t.documentType === 'استرداد خامات من إنتاج معيب')
+    .forEach(t => {
+      recoveryValueByOrder.set(
+        t.documentNumber,
+        (recoveryValueByOrder.get(t.documentNumber) || 0) + (t.totalCost || 0),
+      );
+    });
+
+  // ITEM 18 — production orders overview (shared with the real-differences report).
+  const productionOrderRows = db.productionOrders.map(order => {
+    const product = db.items.find(i => i.id === order.productId);
+    const recoveryValue = recoveryValueByOrder.get(order.orderNumber) || 0;
+    const quantityGap = (order.producedQuantity || 0) - (order.plannedQuantity || 0);
+    const yieldPct = order.plannedQuantity > 0
+      ? ((order.producedQuantity || 0) / order.plannedQuantity) * 100
+      : 0;
+    return { order, product, recoveryValue, quantityGap, yieldPct };
+  });
+
+  const ORDER_STATUS_AR: Record<string, string> = {
+    draft: 'مسودة',
+    released: 'معتمد ومحرر',
+    in_progress: 'قيد التنفيذ',
+    completed: 'مكتمل',
+    cancelled: 'ملغى',
+  };
 
   const inPeriod = (dateStr: string) => {
     if (allPeriods) return true;
@@ -67,7 +138,10 @@ export const ReportsView: React.FC = () => {
     });
 
     const isDebitNature = isDebitNatureCategory(acc.category);
-    const net = isDebitNature ? (totalDebit - totalCredit) : (totalCredit - totalDebit);
+    // Raw balance: > 0 = debit balance, < 0 = credit balance (what رصيد مدين / رصيد دائن mean).
+    const rawBalance = totalDebit - totalCredit;
+    // Nature-signed view used for the "طبيعة الحساب" column and abnormal detection.
+    const net = isDebitNature ? rawBalance : -rawBalance;
 
     return {
       acc,
@@ -75,8 +149,12 @@ export const ReportsView: React.FC = () => {
       totalCredit,
       net,
       isDebitNature,
-      closingDebit: net >= 0 ? net : 0,
-      closingCredit: net < 0 ? Math.abs(net) : 0,
+      // Present each balance on the side it actually sits on, so the totals row
+      // always balances (Σ debit balances = Σ credit balances) — even when an
+      // account carries an opposite-to-nature (abnormal) balance, which stays
+      // visible through `abnormal` + the nature-signed net column.
+      closingDebit: rawBalance > 0 ? rawBalance : 0,
+      closingCredit: rawBalance < 0 ? -rawBalance : 0,
       abnormal: net < 0,
     };
   }).filter(r => Math.abs(r.totalDebit) > 0.005 || Math.abs(r.totalCredit) > 0.005 || Math.abs(r.net) > 0.005);
@@ -263,6 +341,38 @@ export const ReportsView: React.FC = () => {
           }`}
         >
           إقرار ضريبة القيمة المضافة (VAT)
+        </button>
+        <button
+          onClick={() => setSelectedReport('expiry_status')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+            selectedReport === 'expiry_status' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          الصلاحية (Expiry)
+        </button>
+        <button
+          onClick={() => setSelectedReport('raw_material_variance')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+            selectedReport === 'raw_material_variance' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          انحراف الخامات (Material Variance)
+        </button>
+        <button
+          onClick={() => setSelectedReport('material_differences')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+            selectedReport === 'material_differences' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          فروق الإنتاج الحقيقية (Real Differences)
+        </button>
+        <button
+          onClick={() => setSelectedReport('production_orders')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+            selectedReport === 'production_orders' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          أوامر الإنتاج (Production Orders)
         </button>
       </div>
 
@@ -526,7 +636,8 @@ export const ReportsView: React.FC = () => {
           </div>
 
           <table className="w-full text-right text-xs">
-            <thead className="bg-slate-100 text-slate-700 font-bold">                <tr>
+            <thead className="bg-slate-100 text-slate-700 font-bold">
+              <tr>
                   <th className="p-3.5">العميل</th>
                   <th className="p-3.5 text-center">الرصيد الكلي</th>
                   <th className="p-3.5 text-center">سارٍ (0 - 30 يوم)</th>
@@ -620,6 +731,343 @@ export const ReportsView: React.FC = () => {
               <div>عدد قيود ضريبة المخرجات (2103) في الفترة: <span className="font-bold">{outputVatCredits.length}</span></div>
               <div>فواتير التصدير (صفرية الضريبة) لا تُنشئ قيود على 2103 بالتصميم.</div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ITEM 13 — Expiry status (threshold from settings) */}
+      {selectedReport === 'expiry_status' && (
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900">تقرير صلاحية المخزون (Expiry Status)</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                عتبة التنبيه الحالية: <span className="font-black text-slate-800">{expiryThresholdDays}</span> يوم — تشمل الأصناف المنتهية وقاربة الانتهاء (قابلة للتعديل من الإعدادات)
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onNavigateTab?.('settings')}
+                className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-[11px]"
+              >
+                ضبط العتبة
+              </button>
+              <button
+                onClick={() => onNavigateTab?.('inventory')}
+                className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-[11px]"
+              >
+                شاشة المخزون
+              </button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-100 text-slate-700 font-bold">
+                <tr>
+                  <th className="p-3">الصنف</th>
+                  <th className="p-3">التشغيلة</th>
+                  <th className="p-3">المستودع</th>
+                  <th className="p-3 text-center">الكمية</th>
+                  <th className="p-3">تاريخ الانتهاء</th>
+                  <th className="p-3 text-center">الأيام المتبقية</th>
+                  <th className="p-3 text-center">الحالة</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {expiryRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-400">
+                      لا توجد أصناف منتهية أو قاربة على الانتهاء خلال {expiryThresholdDays} يوم
+                    </td>
+                  </tr>
+                ) : (
+                  expiryRows.map(b => (
+                    <tr key={b.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-bold text-slate-900">{b.itemNameAr}</td>
+                      <td className="p-3 font-mono text-slate-600">{b.batchNumber}</td>
+                      <td className="p-3 text-slate-600">{b.warehouseNameAr}</td>
+                      <td className="p-3 text-center font-mono">{b.quantity}</td>
+                      <td className="p-3 font-mono text-slate-600">{b.expiryDate}</td>
+                      <td className="p-3 text-center font-mono font-bold">
+                        <span className={b.daysUntilExpiry <= 0 ? 'text-rose-600' : b.daysUntilExpiry <= 7 ? 'text-amber-600' : 'text-slate-700'}>
+                          {b.daysUntilExpiry <= 0 ? 'منتهي' : b.daysUntilExpiry}
+                        </span>
+                      </td>
+                      <td className="p-3 text-center">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                          b.daysUntilExpiry <= 0
+                            ? 'bg-rose-100 text-rose-800'
+                            : b.daysUntilExpiry <= expiryThresholdDays
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                        }`}>
+                          {b.daysUntilExpiry <= 0 ? 'منتهي الصلاحية' : 'قارب الانتهاء'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ITEM 7 — Raw-material cost & usage deviation */}
+      {selectedReport === 'raw_material_variance' && (
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900">تقرير انحراف الخامات (Raw Material Variance)</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                انحراف سعر الوحدة (معيارية مقابل التكلفة الدفترية الفعلية) وانحراف استخدام الكميات (المصروف مقابل المخطط) — من قيود فعلية فقط
+              </p>
+            </div>
+            <button
+              onClick={() => onNavigateTab?.('manufacturing')}
+              className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-[11px]"
+            >
+              شاشة التصنيع
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-100 text-slate-700 font-bold">
+                <tr>
+                  <th className="p-3">الصنف</th>
+                  <th className="p-3">الوحدة</th>
+                  <th className="p-3 text-center">الرصيد</th>
+                  <th className="p-3 text-left">معيارية</th>
+                  <th className="p-3 text-left">فعلية (دفتر)</th>
+                  <th className="p-3 text-left">فرق/وحدة</th>
+                  <th className="p-3 text-left">انحراف سعر الرصيد</th>
+                  <th className="p-3 text-center">مستهلك فعلي / مخطط</th>
+                  <th className="p-3 text-left">قيمة انحراف الاستخدام</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rawMaterialRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                      لا توجد خامات برصيد أو حركة استهلكان مسجلة
+                    </td>
+                  </tr>
+                ) : (
+                  rawMaterialRows.map(r => (
+                    <tr key={r.item.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-bold text-slate-900">
+                        {r.item.nameAr}
+                        <span className="block text-[10px] font-mono text-slate-400">{r.item.code}</span>
+                      </td>
+                      <td className="p-3 text-slate-600">{db.units.find(u => u.id === r.item.baseUnitId)?.nameAr || ''}</td>
+                      <td className="p-3 text-center font-mono">{r.qty}</td>
+                      <td className="p-3 text-left font-mono text-slate-600">{r.standardUnit.toFixed(2)}</td>
+                      <td className="p-3 text-left font-mono text-slate-800">{r.actualUnit.toFixed(2)}</td>
+                      <td className="p-3 text-left font-mono font-bold">
+                        <span className={r.priceDeltaUnit === 0 ? 'text-slate-500' : r.priceDeltaUnit > 0 ? 'text-rose-600' : 'text-emerald-600'}>
+                          {r.priceDeltaUnit > 0 ? '+' : ''}{r.priceDeltaUnit.toFixed(2)}
+                        </span>
+                      </td>
+                      <td className="p-3 text-left font-mono font-black">
+                        <span className={r.stockPriceDeviation === 0 ? 'text-slate-500' : r.stockPriceDeviation > 0 ? 'text-rose-600' : 'text-emerald-600'}>
+                          {r.stockPriceDeviation > 0 ? '+' : ''}{r.stockPriceDeviation.toFixed(2)} ج.م
+                        </span>
+                      </td>
+                      <td className="p-3 text-center font-mono text-slate-700">
+                        {r.issuedQty} / {r.plannedQty}
+                      </td>
+                      <td className="p-3 text-left font-mono font-bold">
+                        <span className={r.usageDeltaValue === 0 ? 'text-slate-500' : r.usageDeltaValue > 0 ? 'text-rose-600' : 'text-emerald-600'}>
+                          {r.usageDeltaValue > 0 ? '+' : ''}{r.usageDeltaValue.toFixed(2)} ج.م
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {rawMaterialRows.length > 0 && (
+                <tfoot className="bg-slate-100 font-black text-slate-900">
+                  <tr>
+                    <td colSpan={6} className="p-3">إجمالي الانحرافات</td>
+                    <td className="p-3 text-left font-mono">
+                      {rawMaterialRows.reduce((s, r) => s + r.stockPriceDeviation, 0).toFixed(2)} ج.م
+                    </td>
+                    <td className="p-3 text-center">—</td>
+                    <td className="p-3 text-left font-mono">
+                      {rawMaterialRows.reduce((s, r) => s + r.usageDeltaValue, 0).toFixed(2)} ج.م
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ITEM 10-11 — REAL production differences (no invented 50% / 10% values) */}
+      {selectedReport === 'material_differences' && (
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 bg-amber-50 border-b border-amber-200">
+            <h3 className="font-bold text-sm text-slate-900">تقرير فروق الإنتاج الحقيقية (Real Differences)</h3>
+            <p className="text-[11px] text-amber-800 mt-0.5 font-semibold">
+              قيود فعلية فقط: المعيب والهالك يظهران ككميات بلا قيمة مختلقة (لا 50% للمعيب ولا 10% تلقائي للهالك)، والاسترداد فقط يُقيَّم بتكلفة مستندية فعلية
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-100 text-slate-700 font-bold">
+                <tr>
+                  <th className="p-3">أمر الإنتاج</th>
+                  <th className="p-3">المنتج</th>
+                  <th className="p-3 text-center">مخطط</th>
+                  <th className="p-3 text-center">منتج فعلي</th>
+                  <th className="p-3 text-center">فرق الكمية</th>
+                  <th className="p-3 text-center">معيب (كمية)</th>
+                  <th className="p-3 text-center">هالك (كمية)</th>
+                  <th className="p-3 text-left">قيمة الهالك الدفترية</th>
+                  <th className="p-3 text-left">استرداد خامات (قيمة فعلية)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {productionOrderRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                      لا توجد أوامر إنتاج مسجلة بعد
+                    </td>
+                  </tr>
+                ) : (
+                  productionOrderRows.map(r => (
+                    <tr key={r.order.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-mono font-bold text-slate-900">{r.order.orderNumber}</td>
+                      <td className="p-3 font-bold text-slate-800">{r.product?.nameAr || r.order.productId}</td>
+                      <td className="p-3 text-center font-mono">{r.order.plannedQuantity}</td>
+                      <td className="p-3 text-center font-mono font-bold">{r.order.producedQuantity}</td>
+                      <td className="p-3 text-center font-mono font-bold">
+                        <span className={r.quantityGap === 0 ? 'text-slate-500' : r.quantityGap > 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                          {r.quantityGap > 0 ? `+${r.quantityGap}` : r.quantityGap}
+                        </span>
+                      </td>
+                      <td className="p-3 text-center font-mono text-amber-700">{r.order.defectiveQuantity}</td>
+                      <td className="p-3 text-center font-mono text-rose-700">{r.order.scrapQuantity}</td>
+                      <td className="p-3 text-left font-mono font-bold text-slate-500">0.00 ج.م</td>
+                      <td className="p-3 text-left font-mono font-bold text-emerald-700">
+                        {r.recoveryValue.toFixed(2)} ج.م
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {productionOrderRows.length > 0 && (
+                <tfoot className="bg-slate-100 font-black text-slate-900">
+                  <tr>
+                    <td colSpan={2} className="p-3">الإجمالي</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.order.plannedQuantity, 0)}</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.order.producedQuantity, 0)}</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.quantityGap, 0)}</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.order.defectiveQuantity, 0)}</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.order.scrapQuantity, 0)}</td>
+                    <td className="p-3 text-left font-mono">0.00 ج.م</td>
+                    <td className="p-3 text-left font-mono">{productionOrderRows.reduce((s, r) => s + r.recoveryValue, 0).toFixed(2)} ج.م</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ITEM 18 — Production orders report */}
+      {selectedReport === 'production_orders' && (
+        <div className="print-area bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900">تقرير أوامر الإنتاج (Production Orders Report)</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                شامل كل أوامر التشغيل: الكمية المخططة والمنتجة والهالك ونسبة الإنتاج وال حالة الإغلاق (كامل / جزئي بسجل سبب)
+              </p>
+            </div>
+            <button
+              onClick={() => onNavigateTab?.('manufacturing')}
+              className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-[11px]"
+            >
+              فتح شاشة التصنيع
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-100 text-slate-700 font-bold">
+                <tr>
+                  <th className="p-3">رقم الأمر</th>
+                  <th className="p-3">المنتج</th>
+                  <th className="p-3 text-center">مخطط</th>
+                  <th className="p-3 text-center">منتج</th>
+                  <th className="p-3 text-center">متبقٍ</th>
+                  <th className="p-3 text-center">معيب</th>
+                  <th className="p-3 text-center">هالك</th>
+                  <th className="p-3 text-center">نسبة الإنتاج</th>
+                  <th className="p-3 text-center">الحالة</th>
+                  <th className="p-3">البدء</th>
+                  <th className="p-3">الاستحقاق</th>
+                  <th className="p-3">الإغلاق</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {productionOrderRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} className="py-12 text-center text-slate-400">
+                      لا توجد أوامر إنتاج مسجلة بعد
+                    </td>
+                  </tr>
+                ) : (
+                  productionOrderRows.map(r => (
+                    <tr key={r.order.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-mono font-bold text-slate-900">{r.order.orderNumber}</td>
+                      <td className="p-3 font-bold text-slate-800">{r.product?.nameAr || r.order.productId}</td>
+                      <td className="p-3 text-center font-mono">{r.order.plannedQuantity}</td>
+                      <td className="p-3 text-center font-mono font-bold text-slate-900">{r.order.producedQuantity}</td>
+                      <td className="p-3 text-center font-mono text-slate-600">{r.order.remainingQuantity}</td>
+                      <td className="p-3 text-center font-mono text-amber-700">{r.order.defectiveQuantity}</td>
+                      <td className="p-3 text-center font-mono text-rose-700">{r.order.scrapQuantity}</td>
+                      <td className="p-3 text-center font-mono font-bold">
+                        <span className={r.yieldPct >= 100 ? 'text-emerald-600' : r.yieldPct >= 80 ? 'text-amber-600' : 'text-rose-600'}>
+                          {r.yieldPct.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="p-3 text-center">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                          r.order.status === 'completed'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : r.order.status === 'in_progress'
+                              ? 'bg-amber-100 text-amber-800'
+                              : r.order.status === 'cancelled'
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-slate-100 text-slate-700'
+                        }`}>
+                          {ORDER_STATUS_AR[r.order.status] || r.order.status}
+                          {r.order.closeMode === 'partial' ? ' — إغلاق جزئي' : ''}
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono text-slate-600">{r.order.startDate}</td>
+                      <td className="p-3 font-mono text-slate-600">{r.order.expectedCompletionDate}</td>
+                      <td className="p-3 font-mono text-slate-600">{r.order.actualCompletionDate || '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {productionOrderRows.length > 0 && (
+                <tfoot className="bg-slate-100 font-black text-slate-900">
+                  <tr>
+                    <td colSpan={2} className="p-3">الإجمالي</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.order.plannedQuantity, 0)}</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.order.producedQuantity, 0)}</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.order.remainingQuantity, 0)}</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.order.defectiveQuantity, 0)}</td>
+                    <td className="p-3 text-center font-mono">{productionOrderRows.reduce((s, r) => s + r.order.scrapQuantity, 0)}</td>
+                    <td colSpan={5} />
+                  </tr>
+                </tfoot>
+              )}
+            </table>
           </div>
         </div>
       )}

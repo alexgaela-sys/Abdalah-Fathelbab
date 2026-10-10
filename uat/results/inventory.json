@@ -1,0 +1,1429 @@
+[
+  {
+    "tabId": "dashboard",
+    "label": "لوحة القيادة",
+    "activeTabPersisted": "dashboard",
+    "rendered": 1627,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "+ توريد خامات",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "+ أمر تشغيل إنتاج",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "+ فاتورة مبيعات",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "1 الخامات 0",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "2 أمر الإنتاج 0",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 5,
+          "text": "3 صرف الخامات 0",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 6,
+          "text": "4 الإنتاج 0",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 7,
+          "text": "5 الجودة 0",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 8,
+          "text": "6 المنتجات التامة 0",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 9,
+          "text": "تقرير الصلاحية",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 10,
+          "text": "عرض سجل الأصناف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 11,
+          "text": "توريد خامات",
+          "disabled": false
+        }
+      ],
+      "inputs": [],
+      "links": [],
+      "tables": 0,
+      "dialogs": 0
+    },
+    "headings": [
+      "لوحة التحكم — SnakDip ERP",
+      "دورة الإنتاج والتشغيل",
+      "الإيرادات مقابل التكلفة",
+      "قيمة المخزون بالمستودعات",
+      "أصناف قاربت الصلاحية (خلال 10 أيام)",
+      "أعلى منتجات SnakDip مبيعاً (Top 5)",
+      "ابدأ التشغيل الفعلي"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "items",
+    "label": "الأصناف والمنتجات",
+    "activeTabPersisted": "items",
+    "rendered": 2298,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "كارت الصنف (Item Card)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "إضافة صنف / منتج جديد",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 5,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 6,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 7,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 8,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 9,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 10,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 11,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 12,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 13,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 14,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 15,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 16,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 17,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 18,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 19,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 20,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 21,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 22,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 23,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 24,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 25,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 26,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 27,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 28,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 29,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 30,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 31,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 32,
+          "text": "عرض تفاصيل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 33,
+          "text": "تعديل الصنف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 34,
+          "text": "تعطيل الصنف",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "input:text",
+          "i": 0,
+          "label": "بحث باسم الصنف (عربي/إنجليزي)، الكود، الباركود، أو النكهة...",
+          "required": false
+        },
+        {
+          "kind": "select:select-one",
+          "i": 1,
+          "label": "كل الأنواع المنتجات التامة فقط المواد الخام فقط مواد التعبئة والتغليف",
+          "required": false
+        },
+        {
+          "kind": "select:select-one",
+          "i": 2,
+          "label": "كل العائلات عائلة سِنجل (Single) عائلة ديو (Duo Box)",
+          "required": false
+        },
+        {
+          "kind": "select:select-one",
+          "i": 3,
+          "label": "كل الحالات الأصناف النشطة المعطلة / الموقوفة",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "سجل الأصناف والمنتجات التامة (Product Master)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "sales",
+    "label": "فواتير المبيعات",
+    "activeTabPersisted": "sales",
+    "rendered": 279,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "فاتورة بيع جديدة",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "input:text",
+          "i": 0,
+          "label": "بحث برقم الفاتورة أو اسم العميل...",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة المبيعات والفواتير"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "purchasing",
+    "label": "فواتير المشتريات",
+    "activeTabPersisted": "purchasing",
+    "rendered": 374,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "فاتورة استلام خامات جديدة",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "سجل فواتير استلام الخامات",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "مرتجع المشتريات",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "مقارنة وتاريخ أسعار الموردين",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "input:text",
+          "i": 0,
+          "label": "بحث برقم الفاتورة أو اسم المورد...",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة المشتريات واستلام الخامات"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "inventory",
+    "label": "المستودعات والمخزون",
+    "activeTabPersisted": "inventory",
+    "rendered": 706,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "تحويل مخزني داخلي",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "جرد فعلي وتسوية",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "أرصدة المستودعات الحالية",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "حركات المخزون المستمر (Inventory Ledger)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "كارت الصنف (Item Card)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 5,
+          "text": "مستند بيع السكراب (Scrap Sale)",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "select:select-one",
+          "i": 0,
+          "label": "كافة المستودعات الـ 5 مستودع المواد الخام ومواد التعبئة (WH-01) مستودع المنتج ال",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة المخزون المستمر (Perpetual Inventory)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "manufacturing",
+    "label": "الإنتاج",
+    "activeTabPersisted": "manufacturing",
+    "rendered": 731,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "أمر إنتاج جديد",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "أوامر الإنتاج",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "إدارة معادلات التصنيع (BOM)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "تسجيل",
+          "disabled": true
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "select:select-one",
+          "i": 0,
+          "label": "— اختر أمر الإنتاج —",
+          "required": false
+        },
+        {
+          "kind": "select:select-one",
+          "i": 1,
+          "label": "أجور عمالة مباشرة كهرباء غاز صيانة إشراف أخرى",
+          "required": false
+        },
+        {
+          "kind": "input:number",
+          "i": 2,
+          "label": "",
+          "required": false
+        },
+        {
+          "kind": "input:date",
+          "i": 3,
+          "label": "",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة الإنتاج والتصنيع (Manufacturing)",
+      "أوامر الإنتاج والتشغيل الجارية",
+      "التكلفة التحويلية: المعياري مقابل الفعلي"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "quality",
+    "label": "الجودة",
+    "activeTabPersisted": "quality",
+    "rendered": 339,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "تسجيل محضر فحص جودة",
+          "disabled": false
+        }
+      ],
+      "inputs": [],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة ومراقبة الجودة (Quality Inspection)",
+      "سجل محاضر فحص الجودة وتوجيهات المستودعات"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "costing",
+    "label": "التكاليف",
+    "activeTabPersisted": "costing",
+    "rendered": 869,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "تحديث معدل تكلفة معياري جديد",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "معدلات التكاليف المعيارية (الربع سنوية)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "انحرافات تكلفة أوامر الإنتاج (Variances)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "توزيع رواتب الإنتاج الشهرية",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "مقارنة التنبؤ بالمبيعات بالفعلي (Forecast vs Actual)",
+          "disabled": false
+        }
+      ],
+      "inputs": [],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة التكاليف المعيارية والفعلية (Costing)",
+      "معدلات تكاليف التحويل الصناعي المعيارية"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "customers",
+    "label": "العملاء",
+    "activeTabPersisted": "customers",
+    "rendered": 371,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "إضافة عميل جديد",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "دليل وسجل العملاء (0)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "كشف حساب عميل تفصيلي (Statement)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "مرتجعات المبيعات (0)",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "input:text",
+          "i": 0,
+          "label": "بحث باسم العميل أو الكود...",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة العملاء والحسابات المدينة (Receivables)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "suppliers",
+    "label": "الموردون",
+    "activeTabPersisted": "suppliers",
+    "rendered": 821,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "إضافة مورد جديد",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "قائمة الموردين (8)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "كشف حساب المورد (Statement)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "كشف الحساب",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "سند صرف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 5,
+          "text": "كشف الحساب",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 6,
+          "text": "سند صرف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 7,
+          "text": "كشف الحساب",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 8,
+          "text": "سند صرف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 9,
+          "text": "كشف الحساب",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 10,
+          "text": "سند صرف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 11,
+          "text": "كشف الحساب",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 12,
+          "text": "سند صرف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 13,
+          "text": "كشف الحساب",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 14,
+          "text": "سند صرف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 15,
+          "text": "كشف الحساب",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 16,
+          "text": "سند صرف",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 17,
+          "text": "كشف الحساب",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 18,
+          "text": "سند صرف",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "input:text",
+          "i": 0,
+          "label": "بحث باسم المورد أو الكود...",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة الموردين والحسابات الدائنة (Payables & Statements)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "representatives",
+    "label": "المندوبون والعهد",
+    "activeTabPersisted": "representatives",
+    "rendered": 532,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "مندوب جديد",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "فتح عهدة مندوب جديدة",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "بيانات المندوبين (Master Data)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "العهد المفتوحة وحركات التحميل والمرتجع",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "ربحية المناديب (صافي المساهمة)",
+          "disabled": false
+        }
+      ],
+      "inputs": [],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة مناديب المبيعات والعهد الميدانية",
+      "سجل عهد المناديب (Custody Reconciliation)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "export",
+    "label": "الشحنات والتحصيل",
+    "activeTabPersisted": "export",
+    "rendered": 552,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "تسجيل شحنة تصدير جديدة",
+          "disabled": false
+        }
+      ],
+      "inputs": [],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة التصدير والشحنات الخارجية (Export)",
+      "جدول شحنات التصدير وتحليل ربحية كل شحنة"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "treasury",
+    "label": "الخزينة",
+    "activeTabPersisted": "treasury",
+    "rendered": 1122,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "طباعة",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "تصدير Excel",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "حركة قبض / صرف خزينة",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "input:date",
+          "i": 0,
+          "label": "",
+          "required": false
+        },
+        {
+          "kind": "input:date",
+          "i": 1,
+          "label": "",
+          "required": false
+        },
+        {
+          "kind": "select:select-one",
+          "i": 2,
+          "label": "كافة الحركات النقدية سندات القبض الواردة (+ مدين) سندات الصرف الصادرة (- دائن) ا",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "دفتر أستاذ الخزينة النقدية (Treasury Ledger)",
+      "سجل حركات الخزينة النقدية (Running Balance)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "banks",
+    "label": "البنوك",
+    "activeTabPersisted": "banks",
+    "rendered": 1297,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "طباعة",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "تصدير Excel",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "إجراء حركة مصرفية",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "input:date",
+          "i": 0,
+          "label": "",
+          "required": false
+        },
+        {
+          "kind": "input:date",
+          "i": 1,
+          "label": "",
+          "required": false
+        },
+        {
+          "kind": "select:select-one",
+          "i": 2,
+          "label": "كافة العمليات المصرفية إيداعات نقدية وتحصيلات (مدين +) مسحوبات بنكية (دائن -) مص",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة الحسابات البنكية وكشوف الحساب (Bank Statements)",
+      "بنك مصر - فرع أكتوبر الصناعي",
+      "البنك التجاري الدولي CIB - حساب التصدير (USD)",
+      "كشف حساب البنك التفصيلي: بنك مصر - فرع أكتوبر الصناعي (1102)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "cheques",
+    "label": "الشيكات",
+    "activeTabPersisted": "cheques",
+    "rendered": 694,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "طباعة",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "تصدير Excel",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "تسجيل شيك جديد",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "أوراق القبض (الشيكات الواردة من العملاء) (0)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "أوراق الدفع (الشيكات الصادرة للموردين) (0)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 5,
+          "text": "كافة الشيكات (0)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 6,
+          "text": "معلق / لم يستحق (0)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 7,
+          "text": "مستحق الصرف (Due) (0)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 8,
+          "text": "محصل بالبنك (Collected) (0)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 9,
+          "text": "مرتد ومرفوض (Returned) (0)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 10,
+          "text": "عرض الشيكات",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "input:text",
+          "i": 0,
+          "label": "بحث برقم الشيك، اسم البنك، أو اسم الطرف...",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "سجل الشيكات وأوراق القبض والدفع (Cheque Register)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "expenses",
+    "label": "المصروفات",
+    "activeTabPersisted": "expenses",
+    "rendered": 304,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "تسجيل إذن صرف مصروف",
+          "disabled": false
+        }
+      ],
+      "inputs": [],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إدارة المصروفات ومراكز التكلفة (Expenses)",
+      "سجل المصروفات ومراكز التكلفة"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "accounting",
+    "label": "المحاسبة",
+    "activeTabPersisted": "accounting",
+    "rendered": 440,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "قيد يومية يدوي متزن",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "دفتر اليومية العامة (0)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "كشف حساب الأستاذ (General Ledger)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "دليل الحسابات الشجري (52)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "الفترات المالية والإقفال (3)",
+          "disabled": false
+        }
+      ],
+      "inputs": [],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "محرك المحاسبة ودفتر الأستاذ العام (General Ledger)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "reports",
+    "label": "التقارير",
+    "activeTabPersisted": "reports",
+    "rendered": 773,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "طباعة التقرير (Print / PDF)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "ميزان المراجعة (Trial Balance)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "قائمة الدخل والأرباح (P&L)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "الميزانية العمومية (Balance Sheet)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "أعمار ديون العملاء (Aging)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 5,
+          "text": "إقرار ضريبة القيمة المضافة (VAT)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 6,
+          "text": "الصلاحية (Expiry)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 7,
+          "text": "انحراف الخامات (Material Variance)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 8,
+          "text": "فروق الإنتاج الحقيقية (Real Differences)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 9,
+          "text": "أوامر الإنتاج (Production Orders)",
+          "disabled": false
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "input:checkbox",
+          "i": 0,
+          "label": "",
+          "required": false
+        },
+        {
+          "kind": "input:date",
+          "i": 1,
+          "label": "",
+          "required": false
+        },
+        {
+          "kind": "input:date",
+          "i": 2,
+          "label": "",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "التقارير المالية والتحليلية (Financial Reports)",
+      "ميزان المراجعة بالمجاميع والأرصدة"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "users",
+    "label": "المستخدمون والصلاحيات",
+    "activeTabPersisted": "users",
+    "rendered": 678,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "إضافة مستخدم جديد",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "حفظ",
+          "disabled": true
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "إلغاء التخصيص",
+          "disabled": true
+        }
+      ],
+      "inputs": [
+        {
+          "kind": "select:select-one",
+          "i": 0,
+          "label": "— اختر مستخدمًا —",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "المستخدمون والصلاحيات (Users & RBAC)",
+      "إدارة صلاحيات المستخدمين (Permissions Matrix)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "settings",
+    "label": "الإعدادات",
+    "activeTabPersisted": "settings",
+    "rendered": 1645,
+    "controls": {
+      "buttons": [
+        {
+          "kind": "button",
+          "i": 0,
+          "text": "تصدير نسخة احتياطية (JSON)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 1,
+          "text": "سجل المنتجات التامة الـ 11 (11)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 2,
+          "text": "بيانات الشركة والعملات",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 3,
+          "text": "المستودعات الخمسة المعتمدة",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 4,
+          "text": "ربط وتوجيه الحسابات (Account Mappings)",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 5,
+          "text": "إدارة بيانات الاختبار والنسخ الاحتياطي",
+          "disabled": false
+        },
+        {
+          "kind": "button",
+          "i": 6,
+          "text": "إضافة منتج تام جديد",
+          "disabled": false
+        }
+      ],
+      "inputs": [],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "إعدادات النظام والبيانات الأساسية (Master Data & Config)",
+      "سجل الأصناف التامة المصنعة (سناكس) - المسجل حالياً: 11 من أصل 11"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  },
+  {
+    "tabId": "audit",
+    "label": "سجل العمليات",
+    "activeTabPersisted": "audit",
+    "rendered": 418,
+    "controls": {
+      "buttons": [],
+      "inputs": [
+        {
+          "kind": "input:text",
+          "i": 0,
+          "label": "بحث بالوصف أو اسم المستخدم أو الوحدة...",
+          "required": false
+        },
+        {
+          "kind": "select:select-one",
+          "i": 1,
+          "label": "كافة الحركات ترحيل (Post) إنشاء (Create) تعديل (Edit) قيد عكسي (Reverse)",
+          "required": false
+        }
+      ],
+      "links": [],
+      "tables": 1,
+      "dialogs": 0
+    },
+    "headings": [
+      "سجل تدقيق العمليات (Audit Log)"
+    ],
+    "errorsDuringRender": 0,
+    "status": "PASS"
+  }
+]

@@ -25,7 +25,7 @@ import { BanksView } from './components/modules/BanksView';
 import { ChequesView } from './components/modules/ChequesView';
 import { ExpensesView } from './components/modules/ExpensesView';
 import { AccountingView } from './components/modules/AccountingView';
-import { ReportsView } from './components/modules/ReportsView';
+import { ReportsView, ReportType } from './components/modules/ReportsView';
 import { UsersView } from './components/modules/UsersView';
 import { SettingsView } from './components/modules/SettingsView';
 import { AuditLogView } from './components/modules/AuditLogView';
@@ -47,6 +47,8 @@ export function App() {
     localStorage.setItem('snakdip_erp_active_tab', activeTab);
   }, [activeTab]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // ITEM 18 — contextual sub-target (e.g. dashboard card → a specific report).
+  const [reportsSub, setReportsSub] = useState<ReportType | undefined>(undefined);
   const [isTestRunnerOpen, setIsTestRunnerOpen] = useState(false);
   const [currentRole, setCurrentRole] = useState<RoleName>(() => {
     const session = AuthService.getCurrentSession();
@@ -100,6 +102,12 @@ export function App() {
     }
   }, [currentUser, activeTab]);
 
+  // A deep-link sub-target only applies to the navigation that carried it;
+  // moving anywhere else resets the destination to its default entry point.
+  useEffect(() => {
+    if (activeTab !== 'reports') setReportsSub(undefined);
+  }, [activeTab]);
+
   // If not logged in, show Login Screen
   if (!currentUser) {
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
@@ -131,7 +139,10 @@ export function App() {
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto animate-fade-in">
           {activeTab === 'dashboard' && (
             <DashboardView
-              onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
+              onNavigateTab={(tab, sub) => {
+                setReportsSub(sub as ReportType | undefined);
+                setActiveTab(tab as NavTab);
+              }}
               openTestRunner={() => setIsTestRunnerOpen(true)}
             />
           )}
@@ -151,7 +162,12 @@ export function App() {
           {activeTab === 'cheques' && <ChequesView />}
           {activeTab === 'expenses' && <ExpensesView />}
           {activeTab === 'accounting' && <AccountingView />}
-          {activeTab === 'reports' && <ReportsView />}
+          {activeTab === 'reports' && (
+            <ReportsView
+              initialReport={reportsSub}
+              onNavigateTab={(tab) => setActiveTab(tab as NavTab)}
+            />
+          )}
           {activeTab === 'users' && <UsersView />}
           {activeTab === 'settings' && (
             <SettingsView openTestRunner={() => setIsTestRunnerOpen(true)} />

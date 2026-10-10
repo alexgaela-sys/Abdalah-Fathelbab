@@ -1,0 +1,2316 @@
+[
+  {
+    "tab": "items",
+    "buttonText": "إضافة صنف / منتج جديد",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "إضافة صنف / منتج جديد للكتالوج",
+      "labelTexts": [
+        "كود الصنف (Product Code) *",
+        "الباركود الدولي (Barcode)",
+        "نوع الصنف (Item Type)",
+        "اسم الصنف بالعربية *",
+        "الاسم بالإنجليزية (English Name)",
+        "عائلة المنتج (Family)",
+        "النكهة / الصوص (Flavor)",
+        "وحدة القياس الأساسية",
+        "التكلفة المعيارية (EGP)",
+        "التكلفة الفعلية (EGP)",
+        "سعر بيع التجزئة (EGP)",
+        "سعر بيع الجملة (EGP)",
+        "سعر التصدير (USD)",
+        "فئة ضريبة القيمة المضافة",
+        "حد الأمان للمخزون (Min Stock)",
+        "فترة الصلاحية بالأيام",
+        "حالة الصنف"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "FP-SNG-01",
+          "required": true,
+          "min": "",
+          "max": "",
+          "value": "FP-NEW-12"
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "6223000000000",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 2,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "finished_product",
+          "options": [
+            "منتج تام الصنع (Finished)",
+            "مادة خام أولية (Raw)",
+            "مادة تعبئة وتغليف (Packaging)"
+          ]
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "أصابع سوبر هيت + صوص سويت تشيلي",
+          "required": true,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "Superheat Fingers + Sweet Chili Dip",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 5,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "Single",
+          "options": [
+            "عائلة سِنجل (Single)",
+            "عائلة ديو (Duo Box)",
+            "أخرى / غير محدد"
+          ]
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "Sweet Chili Dip",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 7,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "unit-carton",
+          "options": [
+            "كرتونة",
+            "كيلوجرام",
+            "جرام",
+            "طن",
+            "قطعة",
+            "بكرة تغليف"
+          ]
+        },
+        {
+          "i": 8,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 9,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 10,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 11,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 12,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 13,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "standard",
+          "options": [
+            "خاضع للسعر العام 14%",
+            "معفى من الضريبة 0%",
+            "تصدير للخارج 0%"
+          ]
+        },
+        {
+          "i": 14,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 15,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "180",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "180"
+        },
+        {
+          "i": 16,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "active",
+          "options": [
+            "نشط ومفعل (Active)",
+            "معطل وموقوف (Inactive)"
+          ]
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "حفظ الصنف الجديد"
+      ],
+      "invalidNow": 2
+    }
+  },
+  {
+    "tab": "sales",
+    "buttonText": "فاتورة بيع جديدة",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "إصدار فاتورة مبيعات جديدة",
+      "labelTexts": [
+        "العميل",
+        "القناة البيعية",
+        "المعالجة الضريبية (VAT)",
+        "مصدر الصرف (Stock Source)",
+        "مستودع الصرف",
+        "طريقة الدفع",
+        "مندوب المبيعات",
+        "تاريخ الفاتورة",
+        "حفظ وترحيل الفاتورة بالدفاتر"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "",
+          "options": []
+        },
+        {
+          "i": 1,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "wholesale",
+          "options": [
+            "جملة (Wholesale)",
+            "تجزئة (Retail)",
+            "تصدير (Export - USD)"
+          ]
+        },
+        {
+          "i": 2,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "taxable",
+          "options": [
+            "خاضع للضريبة (Taxable - حسب الصنف)",
+            "معفى / صفر ضريبة (Exempt - 0%)"
+          ]
+        },
+        {
+          "i": 3,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "warehouse",
+          "options": [
+            "مستودع (Warehouse)",
+            "عهدة مندوب (Representative Custody)"
+          ]
+        },
+        {
+          "i": 4,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "wh-local",
+          "options": [
+            "مستودع المنتج التام المحلي",
+            "مستودع المنتج التام للتصدير"
+          ]
+        },
+        {
+          "i": 5,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "credit",
+          "options": [
+            "آجل على الحساب",
+            "نقدًا بالخزينة",
+            "تحويل بنكي",
+            "شيك مصرفي"
+          ]
+        },
+        {
+          "i": 6,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "",
+          "options": [
+            "بدون مندوب (مبيعات إدارة مباشرة)",
+            "حمزه حماد"
+          ]
+        },
+        {
+          "i": 7,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2026-10-09"
+        },
+        {
+          "i": 8,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "item-fp-s1",
+          "options": [
+            "سنجل فاير سويت [Single]",
+            "سنجل فاير سبايسي [Single]",
+            "سنجل ناتشوز باربكيو [Single]",
+            "سنجل ناتشوز سويت [Single]",
+            "سنجل ناتشوز برجر [Single]",
+            "سنجل كرينكل مستردة [Single]",
+            "ديو لحمة برجر باربكيو [Duo]",
+            "ديو لحمة برجر مستردة [Duo]",
+            "ديو فراخ سويت سبايسي [Duo]",
+            "ديو فراخ سويت باربكيو [Duo]",
+            "ديو قوقعة سويت باربكيو [Duo]"
+          ]
+        },
+        {
+          "i": 9,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "1",
+          "max": "",
+          "value": "10"
+        },
+        {
+          "i": 10,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 11,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 12,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "",
+          "value": "14"
+        }
+      ],
+      "buttons": [
+        "✕",
+        "+ إضافة صنف",
+        "عرض 10+1",
+        "✕",
+        "إلغاء",
+        "حفظ وترحيل الفاتورة بالدفاتر"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "purchasing",
+    "buttonText": "فاتورة استلام خامات جديدة",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "فاتورة استلام خامات ومواد تعبئة (Material Receipt)",
+      "labelTexts": [
+        "المورد",
+        "مستودع الاستلام",
+        "طريقة السداد",
+        "إذن الاستلام / المرجع",
+        "تاريخ الاستلام",
+        "عملة الفاتورة",
+        "سعر الصرف (ج.م / العملة)"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "sup-maraa",
+          "options": [
+            "المراعي الخضراء ()",
+            "مطبعه الشروق ()",
+            "الدمياطي ()",
+            "الخليجية ()",
+            "السلام ()",
+            "الهلال ()",
+            "بلانكو ()",
+            "رويال كرتون ()"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "wh-raw",
+          "options": [
+            "مستودع المواد الخام ومواد التعبئة"
+          ]
+        },
+        {
+          "i": 2,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "credit",
+          "options": [
+            "آجل على الحساب",
+            "نقدًا من الخزينة",
+            "تحويل بنكي",
+            "شيك مصرفي"
+          ]
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "مثال: إذن فحص مخزني 401",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2026-10-09"
+        },
+        {
+          "i": 5,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "EGP",
+          "options": [
+            "جنيه مصري (EGP)",
+            "دولار أمريكي (USD)"
+          ]
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "",
+          "value": "1"
+        },
+        {
+          "i": 7,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "item-raw-corn",
+          "options": [
+            "ذرة صفراء مجروشة [خام]",
+            "زيت نخيل أولين نقي [خام]",
+            "صوص سويت شيلي [خام]",
+            "صوص سبايسي مشوي [خام]",
+            "صوص مستردة [خام]",
+            "صوص برجر [خام]",
+            "صوص باربكيو [خام]",
+            "رول [تعبئة]",
+            "علبة سينجل [تعبئة]",
+            "علبة ديو [تعبئة]",
+            "طبق [تعبئة]",
+            "طبق صوصات [تعبئة]",
+            "جلافز [تعبئة]",
+            "ستيكر [تعبئة]",
+            "مناديل مبللة [تعبئة]"
+          ]
+        },
+        {
+          "i": 8,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "1",
+          "max": "",
+          "value": "100"
+        },
+        {
+          "i": 9,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 10,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 11,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2027-10-09"
+        },
+        {
+          "i": 12,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "1",
+          "value": "0"
+        }
+      ],
+      "buttons": [
+        "✕",
+        "+ إضافة مادة خام / تعبئة",
+        "✕",
+        "إلغاء",
+        "حفظ وترحيل الاستلام المخزني"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "inventory",
+    "buttonText": "تحويل مخزني داخلي",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تحويل مخزني داخلي بين المستودعات",
+      "labelTexts": [
+        "الصنف المراد تحويله",
+        "من مستودع",
+        "إلى مستودع",
+        "الكمية المحولة",
+        "ملاحظات التحويل"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "item-raw-corn",
+          "options": [
+            "ذرة صفراء مجروشة [RM-CORN-01]",
+            "زيت نخيل أولين نقي [RM-OIL-01]",
+            "صوص سويت شيلي [RM-FLV-01]",
+            "صوص سبايسي مشوي [RM-FLV-02]",
+            "صوص مستردة [RM-FLV-03]",
+            "صوص برجر [RM-FLV-04]",
+            "صوص باربكيو [RM-FLV-05]",
+            "رول [PKG-FLM-01]",
+            "علبة سينجل [PKG-BOX-SGL]",
+            "علبة ديو [PKG-BOX-DUO]",
+            "طبق [PKG-TRY-01]",
+            "طبق صوصات [PKG-TRY-02]",
+            "جلافز [PKG-LIN-01]",
+            "ستيكر [PKG-STK-01]",
+            "مناديل مبللة [PKG-NAP-01]"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "wh-local",
+          "options": [
+            "مستودع المواد الخام ومواد التعبئة",
+            "مستودع المنتج التام المحلي",
+            "مستودع المنتج التام للتصدير",
+            "مستودع التوالف والمعيب",
+            "مستودع الهالك / السكراب"
+          ]
+        },
+        {
+          "i": 2,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "wh-export",
+          "options": [
+            "مستودع المواد الخام ومواد التعبئة",
+            "مستودع المنتج التام المحلي",
+            "مستودع المنتج التام للتصدير",
+            "مستودع التوالف والمعيب",
+            "مستودع الهالك / السكراب"
+          ]
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "1",
+          "max": "",
+          "value": "10"
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "سبب التحويل أو إذن النقل",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "تنفيذ التحويل وتوثيق الحركات"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "inventory",
+    "buttonText": "جرد فعلي وتسوية",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "محضر جرد فعلي وتسوية الفروق المخزنية",
+      "labelTexts": [
+        "مستودع الجرد:"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "wh-local",
+          "options": [
+            "WH-01 — مستودع المواد الخام ومواد التعبئة",
+            "WH-02 — مستودع المنتج التام المحلي",
+            "WH-03 — مستودع المنتج التام للتصدير",
+            "WH-04 — مستودع التوالف والمعيب",
+            "WH-05 — مستودع الهالك / السكراب"
+          ]
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "اعتماد الجرد وتسوية الفروق بالدفاتر"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "manufacturing",
+    "buttonText": "أمر إنتاج جديد",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "إصدار أمر إنتاج وتشغيل جديد",
+      "labelTexts": [
+        "المنتج التام (أحد الـ 11 صنفاً)",
+        "الكمية المخططة (كرتونة)",
+        "السوق المستهدف",
+        "تاريخ الانتهاء المتوقع",
+        "ملاحظات التشغيل والوردية"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "item-fp-s1",
+          "options": [
+            "سنجل فاير سويت [Single - item-raw-flavor-sweet-chili]",
+            "سنجل فاير سبايسي [Single - item-raw-flavor-spicy-grilled]",
+            "سنجل ناتشوز باربكيو [Single - item-raw-flavor-honey-bbq]",
+            "سنجل ناتشوز سويت [Single - item-raw-flavor-sweet-chili]",
+            "سنجل ناتشوز برجر [Single - item-raw-flavor-smokey-burger]",
+            "سنجل كرينكل مستردة [Single - item-raw-flavor-honey-mustard]",
+            "ديو لحمة برجر باربكيو [Duo - item-raw-flavor-smokey-burger + item-raw-flavor-honey-bbq]",
+            "ديو لحمة برجر مستردة [Duo - item-raw-flavor-smokey-burger + item-raw-flavor-honey-mustard]",
+            "ديو فراخ سويت سبايسي [Duo - item-raw-flavor-sweet-chili + item-raw-flavor-spicy-grilled]",
+            "ديو فراخ سويت باربكيو [Duo - item-raw-flavor-sweet-chili + item-raw-flavor-honey-bbq]",
+            "ديو قوقعة سويت باربكيو [Duo - item-raw-flavor-sweet-chili + item-raw-flavor-honey-bbq]"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "1",
+          "max": "",
+          "value": "1000"
+        },
+        {
+          "i": 2,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "local",
+          "options": [
+            "سوق محلي (مستودع المنتج المحلي)",
+            "تصدير خارجي (مستودع التصدير)"
+          ]
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2026-10-09"
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "مثال: تشغيل بناءً على توقعات مبيعات الشهر",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "اعتماد وإطلاق أمر الإنتاج"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "quality",
+    "buttonText": "تسجيل محضر فحص جودة",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تسجيل محضر فحص جودة جديد",
+      "labelTexts": [
+        "نوع المستند المفحوص",
+        "رقم المستند / التشغيلة",
+        "الصنف المراد فحصه",
+        "الكمية المفحوصة",
+        "نتيجة الفحص",
+        "قرار التوجيه المخزني المعتمد",
+        "ملاحظات وتقرير الفحص الفني"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "production_output",
+          "options": [
+            "إنتاج خط التصنيع",
+            "استلام مشتريات خامات",
+            "مرتجع مبيعات من عميل"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "DOC-8770"
+        },
+        {
+          "i": 2,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "item-raw-corn",
+          "options": [
+            "ذرة صفراء مجروشة [RM-CORN-01]",
+            "زيت نخيل أولين نقي [RM-OIL-01]",
+            "صوص سويت شيلي [RM-FLV-01]",
+            "صوص سبايسي مشوي [RM-FLV-02]",
+            "صوص مستردة [RM-FLV-03]",
+            "صوص برجر [RM-FLV-04]",
+            "صوص باربكيو [RM-FLV-05]",
+            "رول [PKG-FLM-01]",
+            "علبة سينجل [PKG-BOX-SGL]",
+            "علبة ديو [PKG-BOX-DUO]",
+            "طبق [PKG-TRY-01]",
+            "طبق صوصات [PKG-TRY-02]",
+            "جلافز [PKG-LIN-01]",
+            "ستيكر [PKG-STK-01]",
+            "مناديل مبللة [PKG-NAP-01]"
+          ]
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "1",
+          "max": "",
+          "value": "100"
+        },
+        {
+          "i": 4,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "passed",
+          "options": [
+            "مطابق للمواصفات القياسية (قبول)",
+            "غير مطابق (رفض)",
+            "قبول مشروط بفرز"
+          ]
+        },
+        {
+          "i": 5,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "saleable",
+          "options": [
+            "مستودع المنتج التام الصالح للبيع (WH-02)",
+            "مستودع الخامات ومواد التعبئة (WH-01)",
+            "مستودع التوالف والمعيب للعزل (WH-04)",
+            "مستودع الهالك والسكراب للبيع المنفصل (WH-05)",
+            "إعادة تدوير وإرجاع للخامات (WH-01)"
+          ]
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "بيان أسباب الرفض أو التوجيه",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "اعتماد محضر الفحص وتوجيه البضاعة"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "costing",
+    "buttonText": "تحديث معدل تكلفة معياري جديد",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تحديث معدل تكلفة تحويل صناعية معيارية",
+      "labelTexts": [
+        "نوع عنصر التكلفة",
+        "المعدل (ج.م)",
+        "الكمية الأساسية (كرتونة)",
+        "سارٍ من تاريخ",
+        "سارٍ إلى تاريخ"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "direct_labor",
+          "options": [
+            "أجور مباشرة وتصنيع",
+            "كهرباء صناعية",
+            "غاز طبيعي",
+            "صيانة دورية وقطع غيار",
+            "إشراف ومراقبة إنتاج",
+            "تكاليف صناعية إضافية"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "250"
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "1000"
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2026-10-01"
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2026-12-31"
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "حفظ المعدل المعياري"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "customers",
+    "buttonText": "إضافة عميل جديد",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "إضافة عميل جديد للنظام",
+      "labelTexts": [
+        "كود العميل",
+        "عملة التعامل",
+        "اسم العميل / الشركة *",
+        "نوع العميل والقناة",
+        "الحد الائتماني المسموح (EGP)",
+        "رقم الهاتف",
+        "الرقم الضريبي",
+        "الرصيد الافتتاحي (Opening Balance)"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "CUST-001"
+        },
+        {
+          "i": 1,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "EGP",
+          "options": [
+            "جنيه مصري (EGP)",
+            "دولار أمريكي (USD)"
+          ]
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "مثال: سوبر ماركت البركة",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 3,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "wholesale",
+          "options": [
+            "تاجر جملة",
+            "تجزئة وسوبرماركت",
+            "عميل تصدير خارجي"
+          ]
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "100000"
+        },
+        {
+          "i": 5,
+          "tag": "input",
+          "type": "tel",
+          "placeholder": "01000000000",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "000-000-000",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 7,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "0.00",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "حفظ العميل"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "suppliers",
+    "buttonText": "إضافة مورد جديد",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تسجيل مورد خامات ومواد تعبئة جديد",
+      "labelTexts": [
+        "كود المورد",
+        "عملة التعامل",
+        "اسم المورد / الشركة",
+        "مسؤول الاتصال",
+        "رقم الهاتف",
+        "الرقم الضريبي",
+        "الرصيد الافتتاحي",
+        "شروط السداد المعتمدة",
+        "العنوان / المصنع"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "SUP-009"
+        },
+        {
+          "i": 1,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "EGP",
+          "options": [
+            "جنيه مصري (EGP)",
+            "دولار أمريكي (USD)"
+          ]
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "اسم شركة توريد الخامات أو الكرتون",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 5,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 7,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "آجل 30 يوم"
+        },
+        {
+          "i": 8,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "حفظ المورد"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "representatives",
+    "buttonText": "مندوب جديد",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تسجيل مندوب مبيعات جديد",
+      "labelTexts": [
+        "كود المندوب",
+        "رقم الهاتف",
+        "اسم المندوب",
+        "المستهدف الشهري (ج.م)"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "REP-01",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "",
+          "value": "0"
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "تسجيل المندوب"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "representatives",
+    "buttonText": "فتح عهدة مندوب جديدة",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "فتح عهدة مندوب مبيعات جديدة",
+      "labelTexts": [
+        "المندوب",
+        "ملاحظات وخط السير"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "rep-hamza-hamad",
+          "options": [
+            "حمزه حماد (REP-HAMZA-01)"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "عهدة توزيع يومية"
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "فتح العهدة"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "export",
+    "buttonText": "تسجيل شحنة تصدير جديدة",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تسجيل شحنة تصدير وتكاليف لوجستية",
+      "labelTexts": [
+        "عميل التصدير",
+        "رقم الحاوية (Container)",
+        "ميناء الشحن (مصر)",
+        "ميناء الوصول الخارجي",
+        "قيمة المبيعات بالدولار ($)",
+        "سعر الصرف اليدوي (ج.م / $)",
+        "تكلفة المنتج التام",
+        "نولون الشحن البحري",
+        "رسوم موانئ وأرضيات",
+        "تخليص جمركي",
+        "تكاليف أخرى"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "",
+          "options": [
+            "— بدون ربط (إدخال يدوي) —"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "",
+          "options": []
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "مثال: MSCU-19283-0",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "ميناء الإسكندرية الدولي"
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "ميناء جبل علي - دبي"
+        },
+        {
+          "i": 5,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "15000"
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "48.5"
+        },
+        {
+          "i": 7,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "420000"
+        },
+        {
+          "i": 8,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "45000"
+        },
+        {
+          "i": 9,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "15000"
+        },
+        {
+          "i": 10,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "10000"
+        },
+        {
+          "i": 11,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "حفظ الشحنة واحتساب الربحية"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "treasury",
+    "buttonText": "حركة قبض / صرف خزينة",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تسجيل حركة نقدية بالخزينة",
+      "labelTexts": [
+        "نوع العملية",
+        "تاريخ الحركة",
+        "المبلغ (ج.م)",
+        "الطرف المستلم / المودع",
+        "الحساب المقابل بدليل الحسابات",
+        "البيان والشرح"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "cash_receipt",
+          "options": [
+            "سند قبض نقدي (مدين الخزينة +)",
+            "سند صرف نقدي (دائن الخزينة -)",
+            "عهدة مؤقتة / سلفة موظف (-)"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2026-10-09"
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "1",
+          "max": "",
+          "value": "1000"
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "اسم الشخص أو الموظف أو الجهة",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 4,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "acc-6101",
+          "options": [
+            "1102 - بنك مصر - حساب جاري بالجنيه",
+            "1103 - البنك التجاري الدولي CIB - دولار",
+            "1104 - أوراق قبض (شيكات تحت التحصيل)",
+            "1105 - عملاء تجاريون - محلي",
+            "1106 - عملاء تجاريون - تصدير (USD)",
+            "1107 - عهد مناديب المبيعات (بضائع ونقدية)",
+            "1108 - مخزون المواد الخام ومواد التعبئة",
+            "1109 - مخزون الإنتاج التام - محلي",
+            "1110 - مخزون الإنتاج التام - تصدير",
+            "1111 - مخزون التوالف والمعيب",
+            "1112 - مخزون الهالك والسكراب",
+            "1113 - ضريبة القيمة المضافة - مدخلات ومشتريات",
+            "2101 - موردو الخامات والتعبئة - محلي",
+            "2102 - أوراق دفع (شيكات صادرة للدفع)",
+            "2103 - ضريبة القيمة المضافة - مخرجات ومبيعات"
+          ]
+        },
+        {
+          "i": 5,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "بيان سبب الصرف أو التوريد",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "حفظ وترحيل القيد المحاسبي"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "banks",
+    "buttonText": "إجراء حركة مصرفية",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تسجيل حركة مصرفية جديدة",
+      "labelTexts": [
+        "نوع المعاملة المصرفية",
+        "تاريخ المعاملة",
+        "المبلغ (EGP)",
+        "الحساب المقابل",
+        "رقم المرجع / رقم التحويل",
+        "البيان والشرح"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "deposit",
+          "options": [
+            "إيداع بنكي (+ زيادة الرصيد)",
+            "سحب بنكي (- نقص الرصيد)",
+            "مصاريف وعمولات بنكية (-)",
+            "تحويل إلى حساب بنكي آخر"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2026-10-09"
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "1",
+          "max": "",
+          "value": "5000"
+        },
+        {
+          "i": 3,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "acc-1101",
+          "options": [
+            "1101 - الخزينة الرئيسية النقدية",
+            "1103 - البنك التجاري الدولي CIB - دولار",
+            "1104 - أوراق قبض (شيكات تحت التحصيل)",
+            "1105 - عملاء تجاريون - محلي",
+            "1106 - عملاء تجاريون - تصدير (USD)",
+            "1107 - عهد مناديب المبيعات (بضائع ونقدية)",
+            "1108 - مخزون المواد الخام ومواد التعبئة",
+            "1109 - مخزون الإنتاج التام - محلي",
+            "1110 - مخزون الإنتاج التام - تصدير",
+            "1111 - مخزون التوالف والمعيب",
+            "1112 - مخزون الهالك والسكراب",
+            "1113 - ضريبة القيمة المضافة - مدخلات ومشتريات",
+            "2101 - موردو الخامات والتعبئة - محلي",
+            "2102 - أوراق دفع (شيكات صادرة للدفع)",
+            "2103 - ضريبة القيمة المضافة - مخرجات ومبيعات"
+          ]
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "مثال: REF-TRF-001",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 5,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "شرح سبب المعاملة المصرفية",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "ترحيل الحركة بالدفاتر"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "cheques",
+    "buttonText": "تسجيل شيك جديد",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تسجيل شيك وارد من عميل (ورقة قبض)",
+      "labelTexts": [
+        "العميل",
+        "رقم الشيك",
+        "البنك المسحوب عليه",
+        "المبلغ",
+        "العملة",
+        "تاريخ الإصدار",
+        "تاريخ الاستحقاق",
+        "ملاحظات وبيان"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": true,
+          "value": "",
+          "options": [
+            "-- اختر --"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "CHQ-...",
+          "required": true,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "اسم البنك",
+          "required": true,
+          "min": "",
+          "max": "",
+          "value": "بنك مصر"
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": true,
+          "min": "1",
+          "max": "",
+          "value": "10000"
+        },
+        {
+          "i": 4,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "EGP",
+          "options": [
+            "جنيه مصري (EGP)",
+            "دولار أمريكي (USD)"
+          ]
+        },
+        {
+          "i": 5,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": true,
+          "min": "",
+          "max": "",
+          "value": "2026-10-09"
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": true,
+          "min": "",
+          "max": "",
+          "value": "2026-11-08"
+        },
+        {
+          "i": 7,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "ملاحظات الشيك...",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "حفظ الشيك بالسجل"
+      ],
+      "invalidNow": 3
+    }
+  },
+  {
+    "tab": "expenses",
+    "buttonText": "تسجيل إذن صرف مصروف",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تسجيل مصروف ومصادقة على الصرف",
+      "labelTexts": [
+        "بند المصروف بدليل الحسابات",
+        "مركز التكلفة",
+        "تنسيب لمندوب مبيعات (إن وجد)",
+        "المبلغ قبل الضريبة (ج.م)",
+        "ضريبة القيمة المضافة (ج.م)",
+        "طريقة الصرف",
+        "تاريخ المصروف",
+        "شرح وبيان المصروف"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "acc-6101",
+          "options": [
+            "5101 - تكلفة البضاعة المباعة - محلي",
+            "5102 - تكلفة البضاعة المباعة - تصدير",
+            "5103 - فروق أسعار شراء المواد (Price Variance)",
+            "5104 - فروق كميات استهلاك المواد (Quantity Variance)",
+            "5105 - فروق تكلفة العمالة المباشرة",
+            "5106 - فروق تكلفة استهلاك الكهرباء",
+            "5107 - فروق تكلفة استهلاك الغاز الطبيعي",
+            "5108 - فروق تكاليف الصيانة وقطع الغيار",
+            "5109 - فروق التكاليف الصناعية الإضافية",
+            "6101 - مصروفات الرواتب والأجور",
+            "6102 - مصروفات كهرباء ومياه المرافق العامة",
+            "6103 - مصروفات النقل والشحن والتوزيع الداخلي",
+            "6104 - مصروفات نولون وتخليص وموانئ التصدير",
+            "6105 - مصروفات الدعاية والإعلان والترويج",
+            "6106 - عمولات ومصروفات مناديب المبيعات الميدانية"
+          ]
+        },
+        {
+          "i": 1,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "cc-admin",
+          "options": [
+            "مركز تكلفة الإنتاج والتصنيع",
+            "مركز تكلفة المبيعات والتسويق",
+            "مركز تكلفة التوزيع والنقل",
+            "مركز تكلفة الإدارة العامة",
+            "مركز تكلفة التصدير والعمليات الخارجية"
+          ]
+        },
+        {
+          "i": 2,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "",
+          "options": [
+            "بدون مندوب (مصروف إداري/عام)",
+            "حمزه حماد"
+          ]
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "1",
+          "max": "",
+          "value": "1500"
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 5,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "cash",
+          "options": [
+            "نقدًا من الخزينة الرئيسية",
+            "تحويل / خصم بنكي"
+          ]
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2026-10-09"
+        },
+        {
+          "i": 7,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "بيان سبب الصرف والجهة",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "تأكيد الصرف وترحيل القيد"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "accounting",
+    "buttonText": "قيد يومية يدوي متزن",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "إنشاء قيد يومية عامة يدوي متزن (Double-Entry Journal)",
+      "labelTexts": [
+        "تاريخ القيد",
+        "المرجع / رقم الإشعار",
+        "شرح القيد العام"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "input",
+          "type": "date",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "2026-10-09"
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "مثال: JV-MANUAL-001",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "بيان القيد المحاسبي",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 3,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "acc-1101",
+          "options": [
+            "1101 - الخزينة الرئيسية النقدية",
+            "1102 - بنك مصر - حساب جاري بالجنيه",
+            "1103 - البنك التجاري الدولي CIB - دولار",
+            "1104 - أوراق قبض (شيكات تحت التحصيل)",
+            "1105 - عملاء تجاريون - محلي",
+            "1106 - عملاء تجاريون - تصدير (USD)",
+            "1107 - عهد مناديب المبيعات (بضائع ونقدية)",
+            "1108 - مخزون المواد الخام ومواد التعبئة",
+            "1109 - مخزون الإنتاج التام - محلي",
+            "1110 - مخزون الإنتاج التام - تصدير",
+            "1111 - مخزون التوالف والمعيب",
+            "1112 - مخزون الهالك والسكراب",
+            "1113 - ضريبة القيمة المضافة - مدخلات ومشتريات",
+            "2101 - موردو الخامات والتعبئة - محلي",
+            "2102 - أوراق دفع (شيكات صادرة للدفع)"
+          ]
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "",
+          "value": "1000"
+        },
+        {
+          "i": 5,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "شرح الطرف...",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 7,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "acc-4101",
+          "options": [
+            "1101 - الخزينة الرئيسية النقدية",
+            "1102 - بنك مصر - حساب جاري بالجنيه",
+            "1103 - البنك التجاري الدولي CIB - دولار",
+            "1104 - أوراق قبض (شيكات تحت التحصيل)",
+            "1105 - عملاء تجاريون - محلي",
+            "1106 - عملاء تجاريون - تصدير (USD)",
+            "1107 - عهد مناديب المبيعات (بضائع ونقدية)",
+            "1108 - مخزون المواد الخام ومواد التعبئة",
+            "1109 - مخزون الإنتاج التام - محلي",
+            "1110 - مخزون الإنتاج التام - تصدير",
+            "1111 - مخزون التوالف والمعيب",
+            "1112 - مخزون الهالك والسكراب",
+            "1113 - ضريبة القيمة المضافة - مدخلات ومشتريات",
+            "2101 - موردو الخامات والتعبئة - محلي",
+            "2102 - أوراق دفع (شيكات صادرة للدفع)"
+          ]
+        },
+        {
+          "i": 8,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 9,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "0",
+          "max": "",
+          "value": "1000"
+        },
+        {
+          "i": 10,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "شرح الطرف...",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        }
+      ],
+      "buttons": [
+        "✕",
+        "+ إضافة طرف",
+        "إلغاء",
+        "ترحيل القيد بالدفاتر"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "users",
+    "buttonText": "إضافة مستخدم جديد",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "إضافة مستخدم جديد للنظام",
+      "labelTexts": [
+        "اسم الموظف الثلاثي",
+        "اسم الدخول (Username)",
+        "كلمة المرور (Password) — إجبارية، 6 أحرف فأكثر",
+        "البريد الإلكتروني",
+        "الدور الوظيفي والصلاحيات"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "مثال: أحمد عبد الرحمن",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 1,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "ahmed",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "password",
+          "placeholder": "••••••",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "email",
+          "placeholder": "ahmed@abdullah-erp.com",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 4,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "Chief Accountant",
+          "options": [
+            "Super Admin",
+            "General Manager",
+            "Chief Accountant",
+            "Accountant",
+            "Cost Accountant",
+            "Warehouse Manager",
+            "Warehouse Employee",
+            "Sales Manager",
+            "Sales Representative",
+            "Purchasing Manager",
+            "Production Manager",
+            "Treasury Accountant",
+            "Viewer"
+          ]
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "إنشاء المستخدم"
+      ],
+      "invalidNow": 0
+    }
+  },
+  {
+    "tab": "settings",
+    "buttonText": "إضافة منتج تام جديد",
+    "opened": true,
+    "buttonVisible": true,
+    "form": {
+      "title": "تعريف منتج تام سناكس جديد",
+      "labelTexts": [
+        "كود المنتج",
+        "عائلة المنتج",
+        "الاسم العربي للمنتج",
+        "النكهة / المتغير",
+        "التكلفة المعيارية (ج.م / كرتونة)",
+        "سعر التجزئة (ج.م)",
+        "سعر الجملة (ج.م)",
+        "سعر التصدير ($)"
+      ],
+      "fields": [
+        {
+          "i": 0,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "SNK-0012"
+        },
+        {
+          "i": 1,
+          "tag": "select",
+          "type": "select-one",
+          "placeholder": "",
+          "required": false,
+          "value": "Single",
+          "options": [
+            "عائلة سِنجل (Single)",
+            "عائلة ديو (Duo)"
+          ]
+        },
+        {
+          "i": 2,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "اسم المنتج بالعربية...",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": ""
+        },
+        {
+          "i": 3,
+          "tag": "input",
+          "type": "text",
+          "placeholder": "النكهة والصوص...",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "جبنة متبلة"
+        },
+        {
+          "i": 4,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 5,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 6,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        },
+        {
+          "i": 7,
+          "tag": "input",
+          "type": "number",
+          "placeholder": "",
+          "required": false,
+          "min": "",
+          "max": "",
+          "value": "0"
+        }
+      ],
+      "buttons": [
+        "✕",
+        "إلغاء",
+        "حفظ المنتج وإنشاء معادلة BOM"
+      ],
+      "invalidNow": 0
+    }
+  }
+]

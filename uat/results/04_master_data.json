@@ -1,0 +1,43 @@
+{
+  "suite": "04_master_data",
+  "generatedAt": "2026-10-09T16:44:31.563Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "04_master_data",
+      "id": "MD-CUST-04",
+      "name": "Negative credit limit is rejected",
+      "status": "PASS",
+      "detail": "count stays unchanged; dialog shows الحد الائتماني لا يمكن أن يكون سالباً",
+      "ts": "2026-10-09T16:44:31.563Z"
+    },
+    {
+      "suite": "04_master_data",
+      "id": "MD-CUST-06",
+      "name": "Customer edit persists",
+      "status": "PASS",
+      "detail": "row now exposes تعديل; edited name persists; service updateCustomer used",
+      "ts": "2026-10-09T16:44:31.563Z"
+    },
+    {
+      "suite": "04_master_data",
+      "id": "MD-ITEM-05",
+      "name": "Deactivate item asks for confirmation (no silent destructive action)",
+      "status": "PASS",
+      "detail": "disable button has title تعطيل الصنف; confirm() offered; cancel keeps item active",
+      "ts": "2026-10-09T16:44:31.563Z"
+    },
+    {
+      "suite": "04_master_data",
+      "id": "MD-ITEM-06",
+      "name": "Confirming deactivate flips the item to inactive",
+      "status": "PASS",
+      "detail": "accepting confirm flips active to false; re-activating flips back to true",
+      "ts": "2026-10-09T16:44:31.563Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

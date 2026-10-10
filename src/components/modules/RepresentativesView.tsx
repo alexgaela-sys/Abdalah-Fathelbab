@@ -9,6 +9,39 @@ import { AuthService } from '../../services/auth';
 import { PermissionService } from '../../services/permissions';
 import { SalesRepresentative, RepresentativeCustody } from '../../types/erp';
 
+/** Resolve the configured base-unit (display) name for an item, e.g. كرتونة / كجم. */
+function displayUnitName(db: ReturnType<typeof erpDb.getSnapshot>, itemId: string): string {
+  const item = db.items.find((i) => i.id === itemId);
+  if (item?.baseUnitId) {
+    const u = db.units.find((u) => u.id === item.baseUnitId);
+    if (u?.nameAr) return u.nameAr;
+  }
+  return 'قطعة';
+}
+
+/**
+ * Display unit for the aggregate quantities of ONE custody: the base unit(s) of
+ * the items actually held in it. Never a global/first-product fallback — that
+ * is what made a PCS-counted custody print "كرتونة".
+ * Quantities are NEVER converted here; this is a label only.
+ */
+export function custodyUnitLabel(
+  db: ReturnType<typeof erpDb.getSnapshot>,
+  custodyId: string,
+): string {
+  const itemIds = [...new Set(
+    db.custodyMovements.filter((m) => m.custodyId === custodyId).map((m) => m.itemId),
+  )];
+  const names = [...new Set(
+    itemIds
+      .map((id) => db.items.find((i) => i.id === id)?.baseUnitId)
+      .filter((uid): uid is string => Boolean(uid))
+      .map((uid) => db.units.find((u) => u.id === uid)?.nameAr)
+      .filter((n): n is string => Boolean(n)),
+  )];
+  return names.length > 0 ? names.join(' / ') : 'قطعة';
+}
+
 export const RepresentativesView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [activeTab, setActiveTab] = useState<'custody' | 'profitability' | 'reps'>('custody');
@@ -143,9 +176,9 @@ export const RepresentativesView: React.FC = () => {
   };
 
   const handleSettleCustody = (custodyId: string) => {
-    const cashInput = prompt('المبلغ النقدي المُحصل والمسلَّم مع تسوية العهدة (اتركه فارغاً أو صفراً إن لم يوجد):', '0');
+    const cashInput = prompt('المبلغ النقدي المُسلَّم من المندوب عند التسوية — لا يمكن أن يتجاوز النقد الفعلي الذي جمعه من هذه العهدة (اتركه فارغاً أو صفراً إن لم يوجد):', '0');
     if (cashInput === null) return;
-    const refundInput = prompt('مبلغ نقدي يُرد للشركة من العهدة إن وجد (صفر أو فارغ = لا رد):', '0');
+    const refundInput = prompt('مبلغ نقدي يُصرف من الخزينة للمندوب عند التسوية (رد/استرداد) — لا يمكن أن يتجاوز النقد المُسلَّم في نفس التسوية (صفر أو فارغ = لا يوجد):', '0');
     if (refundInput === null) return;
 
     const submit = (acknowledgeRemainingGoods: boolean) => WorkflowService.settleRepCustody({
@@ -168,6 +201,7 @@ export const RepresentativesView: React.FC = () => {
       const choice = confirm(
         `${res.error}\n\n${detail}\n\n` +
         `هل تريد تسوية العهدة الآن مع الإقرار بهذه البضاعة غير المباعة؟\n` +
+        `ملاحظة محاسبية: الإقرار سيُرحّل قيمة البضاعة المتبقية من حساب العهد (1107) إلى مصروف/عجز العهدة — فلا يبقى رصيد محتجز بعد الإغلاق.\n` +
         `اضغط "موافق" للإقرار، أو "إلغاء" للرجوع وإرجاع البضاعة للمخزون أولاً.`
       );
       if (!choice) return;
@@ -179,12 +213,21 @@ export const RepresentativesView: React.FC = () => {
       return;
     }
 
-    // F21: show the real treasury effect of the settlement.
+    // F21/T-02: show what the settlement ACTUALLY did to the treasury.
     const remaining = (res.reconciliation || []).filter(r => Math.abs(r.remaining) > 0.0001);
+    const collected = res.cashCollected || 0;
+    const refunded = res.cashRefunded || 0;
     alert(
-      `تمت تسوية العهدة وترحيل القيد المحاسبي.\n` +
-      `حركة الخزينة النقدية: ${(res.treasuryDelta || 0).toFixed(2)} ج.م ` +
-      `(${res.treasuryDelta === 0 ? 'تسوية غير نقدية — لا حركة نقدية' : (res.treasuryDelta || 0) > 0 ? 'قبض' : 'صرف'}).\n` +
+      `تمت تسوية العهدة${res.warning ? ' مع تنبيه' : ''}.\n` +
+      `نقد سلّمه المندوب: ${collected.toFixed(2)} ج.م` +
+      (collected > 0
+        ? ` — مُسجَّل في الخزينة منذ لحظة البيع النقدي من العهدة، فلا يُعاد ترحيله (بلا قيد مكرر وبلا رصيد سالب في 1107).\n`
+        : '\n') +
+      `نقد صُصرف للمندوب: ${refunded.toFixed(2)} ج.م — حركة الخزينة الناتجة عن التسوية: ${(res.treasuryDelta || 0).toFixed(2)} ج.م.\n` +
+      (res.shortageWriteOff
+        ? `إقرار بضاعة متبقية: تُرحّل قيمتها ${res.shortageWriteOff.amount.toFixed(2)} ج.م من 1107 إلى مصروف عجز العهدة (قيد CUST-SHORTAGE).\n`
+        : '') +
+      (res.warning ? `تنبيه: ${res.warning}\n` : '') +
       (remaining.length
         ? `تنبيه: توجد كميات غير مُسددة في ${remaining.length} صنف — راجع كشف التسوية.`
         : 'لا توجد كميات غير مُسددة — التسوية متوازنة.')
@@ -493,15 +536,19 @@ export const RepresentativesView: React.FC = () => {
                     const returnedQty = moves.filter(m => m.movementType === 'returned').reduce((s, m) => s + m.quantity, 0);
                     const soldQty = moves.filter(m => m.movementType === 'sold').reduce((s, m) => s + m.quantity, 0);
                     const remainingQty = loadedQty - returnedQty - soldQty;
+                    // Unit label for the custody quantities: the base unit of the
+                    // items ACTUALLY held in this custody (never a global
+                    // first-product fallback). Quantities are never converted.
+                    const custodyUnit = custodyUnitLabel(db, cust.id);
 
                     return (
                       <tr key={cust.id} className="hover:bg-slate-50">
                         <td className="p-3.5 font-mono font-bold text-slate-900">{cust.custodyNumber}</td>
                         <td className="p-3.5 font-bold text-slate-800">{rep?.name}</td>
                         <td className="p-3.5 text-slate-600">{cust.openDate}</td>
-                        <td className="p-3.5 text-center font-mono font-bold text-slate-900">{loadedQty} كرتونة</td>
-                        <td className="p-3.5 text-center font-mono text-emerald-700 font-bold">{returnedQty} كرتونة</td>
-                        <td className="p-3.5 text-center font-mono font-black text-amber-700">{remainingQty} كرتونة</td>
+                        <td className="p-3.5 text-center font-mono font-bold text-slate-900">{loadedQty} {custodyUnit}</td>
+                        <td className="p-3.5 text-center font-mono text-emerald-700 font-bold">{returnedQty} {custodyUnit}</td>
+                        <td className="p-3.5 text-center font-mono font-black text-amber-700">{remainingQty} {custodyUnit}</td>
                         <td className="p-3.5 text-center">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                             cust.status === 'open' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700'
@@ -671,7 +718,7 @@ export const RepresentativesView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">الكمية المحملة (كرتونة)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">الكمية المحملة ({displayUnitName(db, loadItemId)})</label>
                 <input
                   type="number"
                   min="1"
@@ -737,7 +784,7 @@ export const RepresentativesView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">الكمية المرتجعة (كرتونة)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">الكمية المرتجعة ({displayUnitName(db, returnItemId)})</label>
                 <input
                   type="number"
                   min="1"

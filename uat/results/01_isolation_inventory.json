@@ -1,0 +1,257 @@
+{
+  "suite": "01_isolation_inventory",
+  "generatedAt": "2026-10-10T17:11:16.515Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "01_isolation_inventory",
+      "id": "ISO-00",
+      "name": "Fresh Playwright context carries zero cookies and zero pre-seeded storage",
+      "status": "PASS",
+      "detail": "{\"cookies\":0,\"origins\":[]}",
+      "ts": "2026-10-10T17:10:53.123Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "ISO-01",
+      "name": "Isolated profile holds only app bootstrap keys after first load",
+      "status": "PASS",
+      "detail": "{\"localStorage\":{\"abdullah_erp_db_v1\":51365,\"snakdip_erp_active_tab\":9},\"sessionStorage\":{},\"indexedDB\":[],\"origin\":\"http://localhost:3000\"}",
+      "ts": "2026-10-10T17:10:55.150Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "ISO-01B",
+      "name": "Test profile database holds zero pre-existing business documents",
+      "status": "PASS",
+      "detail": "{\"salesInvoices\":0,\"purchaseInvoices\":0,\"journalEntries\":0,\"inventoryTransactions\":0,\"payments\":0,\"expenses\":0,\"custodyMovements\":0,\"customers\":0,\"suppliersSeeded\":8,\"itemsSeeded\":30,\"productionOrders\":0,\"auditLogs\":0}",
+      "ts": "2026-10-10T17:10:55.153Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "ISO-02",
+      "name": "Login screen renders in isolated profile",
+      "status": "PASS",
+      "ts": "2026-10-10T17:10:55.187Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "ISO-03",
+      "name": "Fresh DB created only inside isolated profile (localStorage key abdullah_erp_db_v1)",
+      "status": "PASS",
+      "detail": "keys=abdullah_erp_db_v1,snakdip_erp_active_tab",
+      "ts": "2026-10-10T17:10:55.391Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "AUTH-01",
+      "name": "Login with admin/12345 succeeds",
+      "status": "PASS",
+      "ts": "2026-10-10T17:10:55.879Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "AUTH-02",
+      "name": "Session persisted to localStorage after login",
+      "status": "PASS",
+      "detail": "{\"session\":true,\"activeTab\":\"dashboard\"}",
+      "ts": "2026-10-10T17:10:56.009Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-DASHBOARD",
+      "name": "Screen opens & renders: لوحة القيادة (dashboard)",
+      "status": "PASS",
+      "detail": "1627 chars, 12 buttons, 0 inputs, 0 tables, errs=0",
+      "ts": "2026-10-10T17:10:56.974Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-ITEMS",
+      "name": "Screen opens & renders: الأصناف والمنتجات (items)",
+      "status": "PASS",
+      "detail": "2298 chars, 35 buttons, 4 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:10:57.994Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-SALES",
+      "name": "Screen opens & renders: فواتير المبيعات (sales)",
+      "status": "PASS",
+      "detail": "279 chars, 1 buttons, 1 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:10:58.974Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-PURCHASING",
+      "name": "Screen opens & renders: فواتير المشتريات (purchasing)",
+      "status": "PASS",
+      "detail": "374 chars, 4 buttons, 1 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:10:59.946Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-INVENTORY",
+      "name": "Screen opens & renders: المستودعات والمخزون (inventory)",
+      "status": "PASS",
+      "detail": "706 chars, 6 buttons, 1 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:00.916Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-MANUFACTURING",
+      "name": "Screen opens & renders: الإنتاج (manufacturing)",
+      "status": "PASS",
+      "detail": "731 chars, 4 buttons, 4 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:01.924Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-QUALITY",
+      "name": "Screen opens & renders: الجودة (quality)",
+      "status": "PASS",
+      "detail": "339 chars, 1 buttons, 0 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:02.896Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-COSTING",
+      "name": "Screen opens & renders: التكاليف (costing)",
+      "status": "PASS",
+      "detail": "869 chars, 5 buttons, 0 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:03.851Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-CUSTOMERS",
+      "name": "Screen opens & renders: العملاء (customers)",
+      "status": "PASS",
+      "detail": "371 chars, 4 buttons, 1 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:04.813Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-SUPPLIERS",
+      "name": "Screen opens & renders: الموردون (suppliers)",
+      "status": "PASS",
+      "detail": "821 chars, 19 buttons, 1 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:05.803Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-REPRESENTATIVES",
+      "name": "Screen opens & renders: المندوبون والعهد (representatives)",
+      "status": "PASS",
+      "detail": "532 chars, 5 buttons, 0 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:06.760Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-EXPORT",
+      "name": "Screen opens & renders: الشحنات والتحصيل (export)",
+      "status": "PASS",
+      "detail": "552 chars, 1 buttons, 0 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:07.723Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-TREASURY",
+      "name": "Screen opens & renders: الخزينة (treasury)",
+      "status": "PASS",
+      "detail": "1122 chars, 3 buttons, 3 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:08.683Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-BANKS",
+      "name": "Screen opens & renders: البنوك (banks)",
+      "status": "PASS",
+      "detail": "1297 chars, 3 buttons, 3 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:09.657Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-CHEQUES",
+      "name": "Screen opens & renders: الشيكات (cheques)",
+      "status": "PASS",
+      "detail": "694 chars, 11 buttons, 1 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:10.692Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-EXPENSES",
+      "name": "Screen opens & renders: المصروفات (expenses)",
+      "status": "PASS",
+      "detail": "304 chars, 1 buttons, 0 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:11.643Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-ACCOUNTING",
+      "name": "Screen opens & renders: المحاسبة (accounting)",
+      "status": "PASS",
+      "detail": "440 chars, 5 buttons, 0 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:12.575Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-REPORTS",
+      "name": "Screen opens & renders: التقارير (reports)",
+      "status": "PASS",
+      "detail": "773 chars, 10 buttons, 3 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:13.552Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-USERS",
+      "name": "Screen opens & renders: المستخدمون والصلاحيات (users)",
+      "status": "PASS",
+      "detail": "678 chars, 3 buttons, 1 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:14.535Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-SETTINGS",
+      "name": "Screen opens & renders: الإعدادات (settings)",
+      "status": "PASS",
+      "detail": "1645 chars, 7 buttons, 0 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:15.536Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-AUDIT",
+      "name": "Screen opens & renders: سجل العمليات (audit)",
+      "status": "PASS",
+      "detail": "418 chars, 0 buttons, 2 inputs, 1 tables, errs=0",
+      "ts": "2026-10-10T17:11:16.507Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "NAV-SIDEBAR",
+      "name": "Sidebar exposes all 21 navigation items for Super Admin",
+      "status": "PASS",
+      "detail": "count=21; missing=none",
+      "ts": "2026-10-10T17:11:16.513Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "INV-UNLABELED",
+      "name": "Buttons without accessible text/title (flag for inert-control review)",
+      "status": "PASS",
+      "detail": "none",
+      "ts": "2026-10-10T17:11:16.514Z"
+    },
+    {
+      "suite": "01_isolation_inventory",
+      "id": "ENV-CONSOLE",
+      "name": "No console/page errors during full navigation sweep",
+      "status": "PASS",
+      "detail": "{\"console\":[],\"page\":[],\"failedRequests\":[]}",
+      "ts": "2026-10-10T17:11:16.514Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

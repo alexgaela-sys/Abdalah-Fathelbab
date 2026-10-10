@@ -337,6 +337,10 @@ section('F21 — custody settlement moves treasury only when cash really moves')
   check('non-cash settlement reports a zero treasury delta', near(nonCash.treasuryDelta || 0, 0, 0.001));
   check('non-cash settlement posts no settlement journal',
     !snap().journalEntries.some(j => j.sourceDocumentType === 'rep_custody_settlement' && j.sourceDocumentId === open.custody!.id));
+  check('D6: the acknowledged goods value is written off 1107 (CUST-SHORTAGE journal) — nothing stranded',
+    !!nonCash.shortageWriteOff && nonCash.shortageWriteOff.amount > 0 &&
+    snap().journalEntries.some(j => j.sourceDocumentType === 'rep_custody_shortage' && j.sourceDocumentId === open.custody!.id),
+    JSON.stringify(nonCash.shortageWriteOff));
   check('settlement reconciliation is returned to the caller', Array.isArray(nonCash.reconciliation) && nonCash.reconciliation.length > 0);
 
   // --- cash settlement: the ONLY cash a rep can hand over is a CASH SALE made
@@ -370,8 +374,9 @@ section('F21 — custody settlement moves treasury only when cash really moves')
   check('cashCollected is echoed back', near(settled.cashCollected || 0, 400, 0.01), `${settled.cashCollected}`);
   check('treasury 1101 unchanged — the cash was already recognised by its cash sale',
     near(gl('1101') - cash2, 0, 0.01), `1101 ${cash2} -> ${gl('1101')}`);
-  check('custody 1107 unchanged — never credited with cash it never held (T-02 fixed)',
-    near(gl('1107') - custody2, 0, 0.01), `1107 ${custody2} -> ${gl('1107')}`);
+  check('custody 1107 moved ONLY by the acknowledged-goods write-off — never by cash (T-02 + D6)',
+    near((gl('1107') - custody2) + (settled.shortageWriteOff ? settled.shortageWriteOff.amount : 0), 0, 0.01),
+    `1107 ${custody2} -> ${gl('1107')}, write-off=${settled.shortageWriteOff ? settled.shortageWriteOff.amount : 'none'}`);
   check('settlement reports the treasury delta as zero (nothing moved AT the settlement)',
     near(settled.treasuryDelta || 0, 0, 0.001), `${settled.treasuryDelta}`);
 

@@ -79,7 +79,11 @@ const DOC_LABELS: Record<CustomerDocType, string> = {
 
 function classify(entry: JournalEntry): CustomerDocType {
   switch (entry.sourceDocumentType) {
-    case 'sales_invoice': return 'sales_invoice';
+    case 'sales_invoice':
+    // F20: a van sale posts its own source type but IS a sales invoice for the
+    // customer — without this case it fell into `other` and was silently dropped
+    // by the "فواتير المبيعات فقط" statement filter.
+    case 'rep_custody_sale': return 'sales_invoice';
     case 'sales_return':
     case 'sales_return_cogs': return 'sales_return';
     case 'customer_payment': return 'customer_payment';
@@ -96,7 +100,8 @@ function describe(entry: JournalEntry): { documentNumber: string; description: s
   const db = erpDb.getSnapshot();
   const id = entry.sourceDocumentId;
   switch (entry.sourceDocumentType) {
-    case 'sales_invoice': {
+    case 'sales_invoice':
+    case 'rep_custody_sale': {
       const inv = db.salesInvoices.find(i => i.id === id);
       const cust = inv ? db.customers.find(c => c.id === inv.customerId) : undefined;
       return {
@@ -283,13 +288,50 @@ export class LedgerService {
         return (a.entryNumber || '').localeCompare(b.entryNumber || '', 'en', { numeric: true });
       });
 
+    const cashRows = db.salesInvoices
+      .filter(inv =>
+        inv.customerId === customer.id &&
+        inv.status === 'posted' &&
+        inv.paymentMethod === 'cash' &&
+        inv.stockSource === 'rep_custody' &&
+        // Never show the same invoice twice (a cash sale has no receivable line,
+        // but be defensive in case one ever gains one).
+        !items.some(it => it.documentNumber === inv.invoiceNumber)
+      )
+      .map(inv => {
+        const amount = this.toCustomerCurrency(Number(inv.totalAmountEGP) || 0, 'EGP', 0, 0, customer);
+        return {
+          id: `cash-custody-${inv.id}`,
+          date: inv.date,
+          documentNumber: inv.invoiceNumber,
+          documentType: 'sales_invoice' as CustomerDocType,
+          documentTypeLabelAr: DOC_LABELS.sales_invoice,
+          description: `فاتورة مبيعات نقدي من عهدة المندوب — محصّلة لحظيًا` +
+            (inv.custodyId ? ` (عهدة ${db.representativeCustodies.find(c => c.id === inv.custodyId)?.custodyNumber || ''})` : ''),
+          reference: inv.invoiceNumber,
+          link: { tab: 'sales', recordId: inv.id } as { tab: string; recordId: string },
+          // Display-only row: the invoice debit AND its immediate cash
+          // settlement, so the customer's balance is untouched (net 0) and no
+          // journal entry / extra AR movement is created for the display.
+          debit: Number(amount.toFixed(2)),
+          credit: Number(amount.toFixed(2)),
+          entryNumber: undefined as string | undefined,
+        };
+      });
+
+    const all = [...items, ...cashRows].sort((a, b) => {
+      const byDate = (a.date || '').localeCompare(b.date || '');
+      if (byDate !== 0) return byDate;
+      return (a.entryNumber || '').localeCompare(b.entryNumber || '', 'en', { numeric: true });
+    });
+
     let opening = Number(customer.openingBalance) || 0;
-    for (const it of items) {
+    for (const it of all) {
       if (it.date < fromDate) opening += it.debit - it.credit;
     }
     opening = Number(opening.toFixed(2));
 
-    const visible = items.filter(it =>
+    const visible = all.filter(it =>
       it.date >= fromDate && it.date <= toDate && (docType === 'all' || it.documentType === docType)
     );
 

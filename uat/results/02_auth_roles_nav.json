@@ -1,0 +1,270 @@
+{
+  "suite": "02_auth_roles_nav",
+  "generatedAt": "2026-10-09T13:16:19.292Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-03",
+      "name": "Blank username/password cannot submit the form",
+      "status": "PASS",
+      "detail": "stillOnLogin=true; invalidFields=2; sessionCreated=false (HTML5 required validation; the Arabic empty-input message is never shown because AuthService is not reached)",
+      "ts": "2026-10-09T13:15:19.555Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-04",
+      "name": "Unknown username rejected",
+      "status": "PASS",
+      "ts": "2026-10-09T13:15:20.326Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-05",
+      "name": "Wrong password rejected",
+      "status": "PASS",
+      "ts": "2026-10-09T13:15:21.054Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-06",
+      "name": "Correct credentials sign in",
+      "status": "PASS",
+      "ts": "2026-10-09T13:15:21.541Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-07",
+      "name": "Session persists across browser refresh",
+      "status": "PASS",
+      "ts": "2026-10-09T13:15:23.113Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-08",
+      "name": "Session persists across navigation to app root",
+      "status": "PASS",
+      "ts": "2026-10-09T13:15:24.502Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-09",
+      "name": "Logout returns to login screen and clears session",
+      "status": "PASS",
+      "detail": "{\"loggedOut\":true,\"sessionGone\":true}",
+      "ts": "2026-10-09T13:15:25.218Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-10",
+      "name": "Session expiry / idle timeout",
+      "status": "NOT TESTED",
+      "detail": "GAP: AuthService stores loginAt but never validates expiry; sessions live until logout or storage clear.",
+      "ts": "2026-10-09T13:15:25.218Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-11",
+      "name": "Password reset / forgot-password flow",
+      "status": "NOT APPLICABLE",
+      "detail": "GAP: no recovery flow in LoginView (only in-app change password).",
+      "ts": "2026-10-09T13:15:25.218Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "AUTH-12",
+      "name": "Login is recorded in the audit log",
+      "status": "PASS",
+      "detail": "سجل تدقيق العمليات (Audit Log)  توثيق كامل لكل عملية إنشاء أو ترحيل أو تعديل أو اعتماد أو إلغاء عكسي بالوقت واسم المستخدم  نوع الحركة: كافة الحركات ترحيل (Post) إنشاء (Create) تعديل (Edit) قيد عكسي (R",
+      "ts": "2026-10-09T13:15:26.648Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-01",
+      "name": "Super Admin sees all 21 sidebar entries",
+      "status": "PASS",
+      "detail": "count=21",
+      "ts": "2026-10-09T13:15:29.000Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-General_Manager",
+      "name": "Role \"General Manager\" grants exactly the permitted modules",
+      "status": "PASS",
+      "detail": "headerShowsRole=true; sidebarAfterReload=19/19; missing=none; extra=none",
+      "ts": "2026-10-09T13:15:32.492Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-Chief_Accountant",
+      "name": "Role \"Chief Accountant\" grants exactly the permitted modules",
+      "status": "PASS",
+      "detail": "headerShowsRole=true; sidebarAfterReload=19/19; missing=none; extra=none",
+      "ts": "2026-10-09T13:15:36.185Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-Cost_Accountant",
+      "name": "Role \"Cost Accountant\" grants exactly the permitted modules",
+      "status": "PASS",
+      "detail": "headerShowsRole=true; sidebarAfterReload=10/10; missing=none; extra=none",
+      "ts": "2026-10-09T13:15:39.690Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-Warehouse_Manager",
+      "name": "Role \"Warehouse Manager\" grants exactly the permitted modules",
+      "status": "PASS",
+      "detail": "headerShowsRole=true; sidebarAfterReload=6/6; missing=none; extra=none",
+      "ts": "2026-10-09T13:15:43.134Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-Production_Manager",
+      "name": "Role \"Production Manager\" grants exactly the permitted modules",
+      "status": "PASS",
+      "detail": "headerShowsRole=true; sidebarAfterReload=7/7; missing=none; extra=none",
+      "ts": "2026-10-09T13:15:46.623Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-Sales_Manager",
+      "name": "Role \"Sales Manager\" grants exactly the permitted modules",
+      "status": "PASS",
+      "detail": "headerShowsRole=true; sidebarAfterReload=8/8; missing=none; extra=none",
+      "ts": "2026-10-09T13:15:50.156Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-SIDEBAR-STALE",
+      "name": "Sidebar re-filters immediately when the role is switched",
+      "status": "PASS",
+      "detail": "sidebar updated without reload",
+      "ts": "2026-10-09T13:15:50.156Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-DIRECT-ROUTE",
+      "name": "Forced tab outside the role (users) is bounced back to dashboard",
+      "status": "PASS",
+      "detail": "sidebarHasUsers=false; dashboardVisible=true; usersScreenRendered=false",
+      "ts": "2026-10-09T13:15:55.469Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-HIDDEN-CONTROLS",
+      "name": "Warehouse Manager cannot see a sales-create control",
+      "status": "PASS",
+      "detail": "salesModuleHidden=true; createLikeButtons=-1",
+      "ts": "2026-10-09T13:15:55.469Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-ROLE-MENU",
+      "name": "Role menu is still offered to a non-admin session",
+      "status": "WARN",
+      "detail": "GAP: the RBAC dropdown lists switchable roles to every session; the switch is only rejected afterwards by AuthService.updateSessionRole.",
+      "ts": "2026-10-09T13:15:57.887Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "PERM-ELEVATION",
+      "name": "Non-admin cannot elevate role through the UI",
+      "status": "PASS",
+      "detail": "elevated=false",
+      "ts": "2026-10-09T13:15:58.607Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "DASH-01",
+      "name": "Dashboard renders KPI cards / sections",
+      "status": "PASS",
+      "detail": "1612 chars",
+      "ts": "2026-10-09T13:16:01.111Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "DASH-02",
+      "name": "Dashboard exposes actionable shortcuts",
+      "status": "PASS",
+      "detail": "+ توريد خامات | + أمر تشغيل إنتاج | + فاتورة مبيعات | 1 الخامات 0 | 2 أمر الإنتاج 0 | 3 صرف الخامات 0 | 4 الإنتاج 0 | 5 الجودة 0 | 6 المنتجات التامة 0 | عرض سجل الأصناف | توريد خامات",
+      "ts": "2026-10-09T13:16:01.122Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "NAV-PERSIST",
+      "name": "Navigation between modules preserves content (no stale/blank view)",
+      "status": "PASS",
+      "detail": "reports=645 dashboard=1612",
+      "ts": "2026-10-09T13:16:02.085Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "NAV-REFRESH",
+      "name": "Refresh on a nested module keeps the same module open",
+      "status": "PASS",
+      "detail": "persistedTab=inventory; chars=675",
+      "ts": "2026-10-09T13:16:03.994Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "NAV-BACK",
+      "name": "Browser Back moves between modules",
+      "status": "NOT TESTED",
+      "detail": "GAP: Back left the application (url=about:blank); module navigation is not part of browser history.",
+      "ts": "2026-10-09T13:16:05.240Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "NAV-BREADCRUMBS",
+      "name": "Breadcrumbs",
+      "status": "NOT APPLICABLE",
+      "detail": "GAP: no breadcrumb component; module title comes from the sidebar active state + PageHeader.",
+      "ts": "2026-10-09T13:16:05.240Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "NAV-CONSOLE",
+      "name": "No console/page errors during auth+role+dashboard flow",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-09T13:16:05.240Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "RESP-360x800",
+      "name": "Responsive 360x800: RTL + no horizontal overflow + sidebar reachable",
+      "status": "PASS",
+      "detail": "{\"loginOk\":true,\"scrollW\":360,\"innerW\":360,\"dir\":\"rtl\",\"horizontalScroll\":false,\"hamburger\":true,\"sidebarOpens\":true}",
+      "ts": "2026-10-09T13:16:08.670Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "RESP-390x844",
+      "name": "Responsive 390x844: RTL + no horizontal overflow + sidebar reachable",
+      "status": "PASS",
+      "detail": "{\"loginOk\":true,\"scrollW\":390,\"innerW\":390,\"dir\":\"rtl\",\"horizontalScroll\":false,\"hamburger\":true,\"sidebarOpens\":true}",
+      "ts": "2026-10-09T13:16:12.152Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "RESP-412x915",
+      "name": "Responsive 412x915: RTL + no horizontal overflow + sidebar reachable",
+      "status": "PASS",
+      "detail": "{\"loginOk\":true,\"scrollW\":412,\"innerW\":412,\"dir\":\"rtl\",\"horizontalScroll\":false,\"hamburger\":true,\"sidebarOpens\":true}",
+      "ts": "2026-10-09T13:16:15.606Z"
+    },
+    {
+      "suite": "02_auth_roles_nav",
+      "id": "RESP-768x1024",
+      "name": "Responsive 768x1024: RTL + no horizontal overflow + sidebar reachable",
+      "status": "PASS",
+      "detail": "{\"loginOk\":true,\"scrollW\":768,\"innerW\":768,\"dir\":\"rtl\",\"horizontalScroll\":false,\"hamburger\":true,\"sidebarOpens\":true}",
+      "ts": "2026-10-09T13:16:19.111Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

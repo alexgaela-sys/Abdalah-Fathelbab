@@ -28,7 +28,7 @@ export const ExportView: React.FC = () => {
   const [shippingCost, setShippingCost] = useState(45000);
   const [portCosts, setPortCosts] = useState(15000);
   const [customsCost, setCustomsCost] = useState(10000);
-  const [otherCosts, setOtherCosts] = useState(5000);
+  const [otherCosts, setOtherCosts] = useState(0);
   const [shipmentDate, setShipmentDate] = useState(new Date().toISOString().split('T')[0]);
 
   // Collection modal state
@@ -431,6 +431,15 @@ export const ExportView: React.FC = () => {
                     type="number"
                     value={customsCost}
                     onChange={(e) => setCustomsCost(Number(e.target.value))}
+                    className="w-full p-1.5 rounded-lg border border-slate-300 text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">تكاليف أخرى</label>
+                  <input
+                    type="number"
+                    value={otherCosts}
+                    onChange={(e) => setOtherCosts(Number(e.target.value))}
                     className="w-full p-1.5 rounded-lg border border-slate-300 text-xs font-mono"
                   />
                 </div>

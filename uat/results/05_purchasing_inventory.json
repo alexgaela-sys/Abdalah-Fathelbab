@@ -1,0 +1,187 @@
+{
+  "suite": "05_purchasing_inventory",
+  "generatedAt": "2026-10-09T12:20:05.794Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-01",
+      "name": "Multi-line material receipt posts stock, invoice and journals",
+      "status": "PASS",
+      "detail": "invoices 0→1; line1(item-raw-corn) WH-01 0→1000; line2(item-pkg-film)=500; newJournals=1; supplierBalance=65000; dialogs=",
+      "ts": "2026-10-09T12:19:01.714Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-02",
+      "name": "Received stock value equals the posted invoice line values (1000×60 + 500×10 = 65,000)",
+      "status": "PASS",
+      "detail": "ΔbatchValue=65000.00; invoiceLines=65000.00; allBatches=65000.00",
+      "ts": "2026-10-09T12:19:01.714Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-03",
+      "name": "All journals balanced after the receipt",
+      "status": "PASS",
+      "detail": "{\"total\":1,\"unbalanced\":[]}",
+      "ts": "2026-10-09T12:19:01.779Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-04",
+      "name": "Zero quantity receipt is rejected",
+      "status": "PASS",
+      "detail": "invoices 1→1; dialog=",
+      "ts": "2026-10-09T12:19:04.747Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-05",
+      "name": "Negative quantity receipt is rejected",
+      "status": "PASS",
+      "detail": "invoices 1→1; negBatch=false; dialog=; minAttr=n/a",
+      "ts": "2026-10-09T12:19:38.151Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-06",
+      "name": "Rapid repeated save submits exactly one receipt",
+      "status": "PASS",
+      "detail": "docs=1; invoices 1→2; journals 1→2",
+      "ts": "2026-10-09T12:19:42.142Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-07",
+      "name": "Refresh after save does not duplicate the document",
+      "status": "PASS",
+      "detail": "docs=1",
+      "ts": "2026-10-09T12:19:44.030Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-08",
+      "name": "Supplier balance is displayed in the supplier list",
+      "status": "WARN",
+      "detail": "supplierBalance=65620; shownInUI=false",
+      "ts": "2026-10-09T12:19:45.094Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-09",
+      "name": "Inventory ledger lists posted movements with document references",
+      "status": "WARN",
+      "detail": "rows=3; mentionsReceiptRef=false; firstRow=2026-10-09 فاتورة مشتريات PINV-2026-00002 ذرة صفراء مجروشة مستودع المواد الخام ومواد التعبئة BATCH-DBL +10 - 1010",
+      "ts": "2026-10-09T12:19:46.886Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-01",
+      "name": "Transfer of more than available stock is rejected with no partial movement",
+      "status": "PASS",
+      "detail": "source 1010→1010; destWH-02=0; tx 3→3; dialog=",
+      "ts": "2026-10-09T12:19:49.712Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-02",
+      "name": "Transfer with identical source and destination is rejected",
+      "status": "PASS",
+      "detail": "transactionsForTest=0; dialog=",
+      "ts": "2026-10-09T12:19:52.843Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-03",
+      "name": "Zero quantity transfer is rejected",
+      "status": "PASS",
+      "detail": "tx=0; dialog=",
+      "ts": "2026-10-09T12:19:55.921Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-04",
+      "name": "Valid transfer moves 100 units WH-01 → WH-02 exactly once",
+      "status": "PASS",
+      "detail": "source 1010→910; dest 0→100; newJournals=0",
+      "ts": "2026-10-09T12:19:59.264Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-05",
+      "name": "Warehouse balance view renders stock rows with quantities",
+      "status": "PASS",
+      "detail": "rows=3; allFiveWarehousesSelectable=true; sample=إدارة المخزون المستمر (Perpetual Inventory) متابعة أرصدة الـ 5 مستودعات، حركات الصرف والإضافة الموثقة، التحويل الداخلي، والجرد الدوري تحويل مخزني داخلي جرد فعلي وتسوية أرصدة المستودعات الحالية حركات المخزون المستمر (Inventory Ledger) كارت الصنف (Item Card) تصفية حسب المستودع: كافة المستودعات الـ 5 م — NOTE: only warehouses/items holding stock appear as rows; empty warehouses are not listed as zero-balance rows.",
+      "ts": "2026-10-09T12:20:00.597Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-06",
+      "name": "Physical count with a −5 variance adjusts stock and posts an entry",
+      "status": "PASS",
+      "detail": "counts 0→1; stock 910→905; newJournals=1; dialog=",
+      "ts": "2026-10-09T12:20:03.734Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-07",
+      "name": "Journals balanced after transfer + count",
+      "status": "PASS",
+      "detail": "{\"total\":3,\"unbalanced\":[]}",
+      "ts": "2026-10-09T12:20:03.769Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-08",
+      "name": "Warehouse filter applies to the balances view",
+      "status": "PASS",
+      "detail": "options=6; text=إدارة المخزون المستمر (Perpetual Inventory) متابعة أرصدة الـ 5 مستودعات، حركات الصرف والإضافة الموثقة، التحويل الداخلي، والجرد الدوري تحويل مخزني داخلي جرد فعلي وتسوية أرصدة المستودعات الحالية حركات المخزون المستمر (Inve",
+      "ts": "2026-10-09T12:20:05.606Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-09",
+      "name": "Cost layers are retained per batch for FIFO costing",
+      "status": "WARN",
+      "detail": "layers=BATCH-UAT-ROLL:500@10",
+      "ts": "2026-10-09T12:20:05.644Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-GL-01",
+      "name": "Trial-balance identity: every posted journal is balanced",
+      "status": "PASS",
+      "detail": "journals=3; unbalanced=none",
+      "ts": "2026-10-09T12:20:05.713Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "INV-GL-02",
+      "name": "Inventory subledger quantity × cost vs GL inventory accounts",
+      "status": "PASS",
+      "detail": "batchValue=65320.00; note: full tie-out is asserted in the accounting suite.",
+      "ts": "2026-10-09T12:20:05.713Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-CONSOLE",
+      "name": "No console/page errors during purchasing+inventory",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-09T12:20:05.714Z"
+    },
+    {
+      "suite": "05_purchasing_inventory",
+      "id": "PUR-DIALOGS",
+      "name": "Validation dialogs observed",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-09T12:20:05.714Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

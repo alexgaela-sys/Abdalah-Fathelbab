@@ -761,14 +761,21 @@ section('SCENARIO AD/AE — MASTER DATA + BOM INTEGRITY');
   const fps = db.items.filter(i => i.itemType === 'finished_product' && !i.code.includes('TEST-QA'));
   const boms = db.boms.filter(b => b.active);
   check('AD 11 finished products exist', fps.length === 11, `found ${fps.length}`);
-  // BATCH P: the seeded UAT BOMs were deliberately deleted, so the product
-  // correctly ships with NO BOM. Suites that need one build it via
-  // ensureTestBom(). Assert the new invariant plus that those fixtures work.
-  check('AE no seeded UAT BOM shipped (Batch P)',
-    ['bom-item-fp-s1', 'bom-item-fp-s2', 'bom-item-fp-s3', 'bom-item-fp-s4', 'bom-item-fp-s5', 'bom-item-fp-s6',
-      'bom-item-fp-d1', 'bom-item-fp-d2', 'bom-item-fp-d3', 'bom-item-fp-d4', 'bom-item-fp-d5']
-      .every(id => !boms.some(b => b.id === id)),
-    `${boms.length} active BOM(s) present (test fixtures only)`);
+  // BATCH P's premise ("the seeded UAT BOMs were deliberately deleted") does
+  // not hold: the product's seed intentionally ships ONE real recipe per
+  // finished product (buildInitialBoms → 11 active BOMs) and the checks RIGHT
+  // BELOW depend on those seeded recipes (chip line in KG, one sauce line).
+  // Harmonised to the real design (docs/UAT_REPORT.md §7): exactly the 11
+  // seeded BOMs are active, no unexpected ids; test fixtures (bom-test-*) are
+  // allowed because suites build them via ensureTestBom().
+  const SEEDED_BOM_IDS = [
+    'bom-item-fp-s1', 'bom-item-fp-s2', 'bom-item-fp-s3', 'bom-item-fp-s4', 'bom-item-fp-s5', 'bom-item-fp-s6',
+    'bom-item-fp-d1', 'bom-item-fp-d2', 'bom-item-fp-d3', 'bom-item-fp-d4', 'bom-item-fp-d5',
+  ];
+  check('AE the seed ships exactly the 11 expected active BOMs (no unexpected ids)',
+    boms.filter(b => !b.id.startsWith('bom-test-')).length === 11 &&
+      boms.every(b => SEEDED_BOM_IDS.includes(b.id) || b.id.startsWith('bom-test-')),
+    `${boms.length} active BOM(s) present`);
   check('AE every active BOM has lines for a real finished product',
     boms.every(b => db.bomLines.some(l => l.bomId === b.id) && fps.some(f => f.id === b.finishedItemId)),
     `${boms.filter(b => !db.bomLines.some(l => l.bomId === b.id)).length} empty`);

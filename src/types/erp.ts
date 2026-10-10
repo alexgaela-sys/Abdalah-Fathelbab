@@ -207,6 +207,34 @@ export interface ProductionOrder {
   }>;
   destinationWarehouseId: string; // Local or Export
   targetMarket: 'local' | 'export';
+  /**
+   * ITEM 7 — BOM reference frozen at order creation so later BOM edits never
+   * rewrite the history of an old order. `expected`/variance calculations use
+   * this snapshot when present, falling back to the live BOM only for legacy
+   * orders created before the snapshot existed.
+   */
+  bomSnapshot?: {
+    bomId: string;
+    bomNumber?: string;
+    version?: number;
+    baseQuantity: number;
+    unitId: string;
+    lines: Array<{ materialItemId: string; quantityRequired: number; unitId: string; wastePercentage?: number }>;
+  };
+  /**
+   * ITEM 1 — audit trail of planned-quantity edits. An edit is only legal while
+   * NO material issue has been recorded for the order (enforced in the service
+   * layer, not here). Historical production/issue movements are never touched.
+   */
+  quantityEditHistory?: Array<{
+    id: string;
+    editedAt: string;
+    userId: string;
+    userName: string;
+    fromQuantity: number;
+    toQuantity: number;
+    reason: string;
+  }>;
   notes?: string;
   createdUserId: string;
   createdAt: string;
@@ -236,6 +264,18 @@ export interface ProductionConsumption {
   returnedQuantity?: number;
   approvedVarianceQuantity?: number;
   approvedVarianceReason?: string;
+  /**
+   * ITEM 8 — classification of the issue line. 'bom' = normal BOM material,
+   * 'substitute' = replaces a named BOM material (linked via
+   * substituteForMaterialItemId, never added to the original material's
+   * expected), 'additional' = extra material outside the BOM. Non-BOM kinds
+   * require an approval-grade permission plus a persisted reason.
+   */
+  issueKind?: 'bom' | 'substitute' | 'additional';
+  substituteForMaterialItemId?: string;
+  issueReason?: string;
+  issuedByUserId?: string;
+  issuedByName?: string;
 }
 
 export interface ProductionWaste {
@@ -465,6 +505,24 @@ export interface PurchaseInvoiceLine {
   netTotal: number;
 }
 
+export interface PurchaseReturnLine {
+  id: string;
+  returnId: string;
+  itemId: string;
+  quantity: number;
+  unitId: string;
+  /** Unit price of the ORIGINAL purchase invoice line (price basis of the return). */
+  unitPrice: number;
+  /** VAT rate inherited from the original purchase invoice line. */
+  vatRate: number;
+  vatAmount: number;
+  netTotal: number;
+  batchNumber?: string;
+  /** FIFO cost actually credited out of inventory for this line. */
+  issuedUnitCost?: number;
+  issuedCostTotal?: number;
+}
+
 export interface PurchaseReturn {
   id: string;
   returnNumber: string;
@@ -477,6 +535,8 @@ export interface PurchaseReturn {
   totalVat: number;
   status: 'posted' | 'cancelled';
   journalEntryId?: string;
+  /** ITEM 4 — itemized lines (additive; legacy returns without lines stay valid). */
+  lines?: PurchaseReturnLine[];
   isTest?: boolean;
 }
 
@@ -792,6 +852,87 @@ export interface SalesForecast {
   actualQuantity: number;
   varianceQuantity: number;
   accuracyPercentage: number;
+  /** ITEM 5 — unit the forecast was entered in (defaults to the item base unit). */
+  unitId?: string;
+  /** ITEM 5 — who entered/last edited the forecast and when. */
+  updatedByUserId?: string;
+  updatedByName?: string;
+  updatedAt?: string;
+  notes?: string;
+  isTest?: boolean;
+}
+
+/**
+ * ITEM 3 — one posted monthly payroll/cost distribution over production orders.
+ * The distributable amount is split proportionally to each order's produced
+ * quantity in the period; the sum of allocations equals the amount EXACTLY.
+ * One record per (period, costType) — re-posting the same period+type is blocked
+ * so the expense is never recognized twice.
+ */
+export interface ProductionPayrollDistribution {
+  id: string;
+  distributionNumber: string;
+  /** "YYYY-MM" month the cost belongs to. */
+  period: string;
+  costType: 'direct_labor' | 'supervision';
+  costTypeNameAr: string;
+  totalAmount: number;
+  /** Free text describing where the amount came from (payroll sheet no., etc.). */
+  sourceDescription: string;
+  allocations: Array<{
+    productionOrderId: string;
+    productionOrderNumber: string;
+    /** Produced quantity used as the allocation basis (item base unit). */
+    basisQuantity: number;
+    ratio: number;
+    allocatedAmount: number;
+    /** Journal posted for this order's share (feeds calculateCostBreakdown). */
+    journalEntryId: string;
+  }>;
+  status: 'posted' | 'reversed';
+  reversedAt?: string;
+  postedAt: string;
+  userId: string;
+  userName: string;
+  isTest?: boolean;
+}
+
+/**
+ * ITEM 12 — internal scrap-sale document (NOT a normal sales invoice).
+ * VAT-exempt by explicit user decision; revenue goes to 4104; stock leaves
+ * wh-scrap through the FIFO engine; cancellation is a reversal, never a delete.
+ */
+export interface ScrapSaleDocument {
+  id: string;
+  docNumber: string; // SCRAP-SALE-YYYY-00001
+  date: string;
+  itemId: string;
+  quantity: number;
+  unitId: string;
+  unitPrice: number;
+  unitCost: number; // book value credited out of 1112 (0 when the scrap carries none)
+  totalValue: number; // quantity * unitPrice (VAT exempt)
+  bookValue: number; // quantity * unitCost
+  buyerName: string;
+  paymentMethod: 'cash' | 'credit';
+  warehouseId: string; // always wh-scrap
+  status: 'posted' | 'cancelled';
+  /** Revenue entry: Dr cash/receivable | Cr 4104. */
+  journalEntryId?: string;
+  /** Cost entry (only when bookValue > 0): Dr variance | Cr 1112. */
+  costJournalEntryId?: string;
+  reversalJournalEntryIds?: string[];
+  notes?: string;
+  createdByUserId: string;
+  createdByName: string;
+  createdAt: string;
+  isTest?: boolean;
+}
+
+/** ITEM 13 — application settings stored in the database schema. */
+export interface AppSettings {
+  /** Days-before-expiry threshold for the "near expiry" bucket (default 10). */
+  expiryWarningDays: number;
 }
 
 export interface AccountMapping {

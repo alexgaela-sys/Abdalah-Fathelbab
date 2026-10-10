@@ -1,0 +1,211 @@
+{
+  "suite": "11_accounting_reports",
+  "generatedAt": "2026-10-10T17:10:48.532Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "11_accounting_reports",
+      "id": "SETUP-DATA",
+      "name": "Setup: isolated profile holds non-zero transactions for reporting",
+      "status": "PASS",
+      "detail": "nonZeroAccounts=4; journals=2",
+      "ts": "2026-10-10T17:10:17.200Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "ACC-01",
+      "name": "Balanced manual journal posts exactly once and moves both accounts",
+      "status": "PASS",
+      "detail": "journals 2→3; 1101 5000→6200; dialogs=",
+      "ts": "2026-10-10T17:10:21.511Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "ACC-02",
+      "name": "Unbalanced manual journal is rejected (submit disabled or posting refused)",
+      "status": "PASS",
+      "detail": "submitDisabled=true; journals 3→3; dialog=; modalStillOpen=true",
+      "ts": "2026-10-10T17:10:25.229Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "ACC-03",
+      "name": "Rapid repeated save posts one journal",
+      "status": "PASS",
+      "detail": "journals 3→4; matching=1",
+      "ts": "2026-10-10T17:10:29.695Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "ACC-04",
+      "name": "Every posted journal is balanced",
+      "status": "PASS",
+      "detail": "journals=4; unbalanced=none",
+      "ts": "2026-10-10T17:10:29.729Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "ACC-05",
+      "name": "Chart of accounts renders the tree with codes and balances",
+      "status": "PASS",
+      "detail": "rows=52; accounts=52; hasCodes=true",
+      "ts": "2026-10-10T17:10:31.311Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "ACC-06",
+      "name": "General ledger opens and responds to the account filter",
+      "status": "PASS",
+      "detail": "rowsBefore=3; rowsAfterFilter=3",
+      "ts": "2026-10-10T17:10:32.723Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "ACC-07",
+      "name": "Accounting periods screen renders (open/closed periods)",
+      "status": "PASS",
+      "detail": "محرك المحاسبة ودفتر الأستاذ العام (General Ledger) القيد المزدوج الإلزامي دفتر اليومية، كشف حساب الأستاذ بالرصيد التراكمي المستمر، دليل الحسابات الشجري، وإقفال الفترات المالية قيد يومية يدوي متزن دفتر اليومية العامة (4) ",
+      "ts": "2026-10-10T17:10:33.360Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-TB-01",
+      "name": "Trial balance totals row balances (Σdebit = Σcredit, moves and closing)",
+      "status": "PASS",
+      "detail": "rows=5; parsed=5; totals=[18500,18500,18500,18500,0]; footText=\"الإجمالي العام لميزان المراجعة\\t١٨٬٥٠٠\\t١٨٬٥٠٠\\t١٨٬٥٠٠\\t١٨٬٥٠٠\\t٠\"; independent: Σdebit=13500 Σcredit=13500; excerpt=التقارير المالية والتحليلية (Financial Reports) ميزان المراجعة، قائمة الدخل، الميزانية العمومية، أعمار الديون، تقرير ضريبة القيمة المضافة ومطابقة الأرصدة طباعة التقرير (Print / PDF) كل الفترات (تراكمي",
+      "ts": "2026-10-10T17:10:35.281Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-TB-02",
+      "name": "Trial balance spot-checks match the general ledger balances",
+      "status": "PASS",
+      "detail": "[{\"code\":\"1101\",\"gl\":6500,\"shown\":true},{\"code\":\"4101\",\"gl\":1500,\"shown\":true}]",
+      "ts": "2026-10-10T17:10:35.282Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-TB-03",
+      "name": "Credit-balance account (2101) presents under رصيد دائن, not رصيد مدين",
+      "status": "PASS",
+      "detail": "cells=[\"2101\",\"موردو الخامات والتعبئة - محلي\",\"-\",\"١٢٬٠٠٠\",\"-\",\"١٢٬٠٠٠\",\"١٢٬٠٠٠ دائن\"]; closingDebit=-; closingCredit=١٢٬٠٠٠",
+      "ts": "2026-10-10T17:10:35.282Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-PL",
+      "name": "قائمة الدخل report renders with its sections/totals",
+      "status": "PASS",
+      "detail": "rows=0; chars=1875; hasSection=true",
+      "ts": "2026-10-10T17:10:36.157Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-BS",
+      "name": "الميزانية العمومية report renders with its sections/totals",
+      "status": "PASS",
+      "detail": "rows=0; chars=1701; hasSection=true",
+      "ts": "2026-10-10T17:10:37.041Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-AGE",
+      "name": "أعمار ديون report renders with its sections/totals",
+      "status": "PASS",
+      "detail": "rows=1; chars=1012; hasSection=true",
+      "ts": "2026-10-10T17:10:37.897Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-VAT",
+      "name": "ضريبة القيمة report renders with its sections/totals",
+      "status": "PASS",
+      "detail": "rows=0; chars=1198; hasSection=true",
+      "ts": "2026-10-10T17:10:38.751Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-FILTER-01",
+      "name": "A future date range zeroes the period-based report (filter actually applies)",
+      "status": "PASS",
+      "detail": "rows=0; excerpt=ويج ٠ عمولات ومصروفات مناديب المبيعات الميدانية ٠ مصروفات الصيانة العامة للمقرات والمعدات ٠ إيجار المقرات والمستودعات ٠ مصاريف وعمولات بنكية ٠ خسائر فروق تقييم العملة الأجنبية ٠ صافي ربح / (خسارة) الفترة التشغيلية: ٠ ج.م",
+      "ts": "2026-10-10T17:10:41.249Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-PRINT-01",
+      "name": "Report print action invokes the browser print dialog",
+      "status": "PASS",
+      "detail": "window.print calls=1",
+      "ts": "2026-10-10T17:10:43.139Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "DASH-REC-01",
+      "name": "Dashboard inventory value equals the stock ledger (batches × cost)",
+      "status": "PASS",
+      "detail": "batchValue=12000; shownOnDashboard=true; dashboardExcerpt=SD لوحة التحكم — SnakDip ERP بيانات فعلية دقيقة مؤشرات فورية مباشرة من قيود اليومية والمستودعات والعملاء والموردين — بدون أي أرقام وهمية + توريد خامات + أمر تشغيل إنتاج + فاتورة مبيعات مبيعات الشهر 0 ج.م الفواتير المرحلة خلال الشهر الحالي إجمالي المبيعات 0 ج.م كل الفواتير المرحلة المبيعات آجلة 0 ج.م",
+      "ts": "2026-10-10T17:10:44.464Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "DASH-REC-02",
+      "name": "Dashboard revenue equals the sum of posted invoices",
+      "status": "PASS",
+      "detail": "revenue=0; shown=true",
+      "ts": "2026-10-10T17:10:44.465Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "DASH-REC-03",
+      "name": "Dashboard shortcut navigates to its module",
+      "status": "PASS",
+      "detail": "dashboard → purchasing",
+      "ts": "2026-10-10T17:10:45.348Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "AUD-01",
+      "name": "Audit log lists recorded operations with user and time",
+      "status": "PASS",
+      "detail": "rows=8; hasLogin=true; hasPost=true",
+      "ts": "2026-10-10T17:10:46.537Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "AUD-02",
+      "name": "Audit log search filters rows and clears back",
+      "status": "PASS",
+      "detail": "rows 8→1→8",
+      "ts": "2026-10-10T17:10:47.778Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "AUD-03",
+      "name": "Audit log action filter applies",
+      "status": "PASS",
+      "detail": "options=5; rows=4 (unfiltered 8)",
+      "ts": "2026-10-10T17:10:48.398Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "FINAL-GL",
+      "name": "Final GL state of the isolated test profile",
+      "status": "PASS",
+      "detail": "journals=4; unbalanced=0; accounts=52; invoices=0; purchases=1; treasury=1; expenses=0",
+      "ts": "2026-10-10T17:10:48.437Z"
+    },
+    {
+      "suite": "11_accounting_reports",
+      "id": "RPT-CONSOLE",
+      "name": "No console/page errors during accounting + reporting",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-10T17:10:48.438Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

@@ -8,7 +8,7 @@ import {
   InventoryCountLine, Payment, PaymentAllocation, Cheque, BankAccount, BankTransaction, 
   TreasuryTransaction, Expense, CostCenter, Account, JournalEntry, AccountingPeriod, 
   StandardCostRate, SalesForecast, AccountMapping, AuditLog, User, ExportShipment,
-  ProductFamily,
+  ProductFamily, ProductionPayrollDistribution, ScrapSaleDocument, AppSettings,
   isDebitNatureCategory
 } from '../types/erp';
 
@@ -102,7 +102,18 @@ export interface ERPDatabaseSchema {
   users: User[];
   auditLogs: AuditLog[];
   exportShipments: ExportShipment[];
+  /** ITEM 3 — posted payroll/cost distributions over production orders. */
+  payrollDistributions: ProductionPayrollDistribution[];
+  /** ITEM 12 — internal scrap-sale documents. */
+  scrapSales: ScrapSaleDocument[];
+  /** ITEM 13 — application settings (expiry warning threshold, …). */
+  settings: AppSettings;
 }
+
+/** ITEM 13 — default settings; the expiry threshold is adjustable and must stay positive. */
+export const INITIAL_SETTINGS: AppSettings = {
+  expiryWarningDays: 10,
+};
 
 const STORAGE_KEY = 'abdullah_erp_db_v1';
 
@@ -1226,10 +1237,13 @@ export function createEmptyDatabase(): ERPDatabaseSchema {
     standardCostRates: INITIAL_STANDARD_COST_RATES,
     forecasts: [],
     accountMappings: INITIAL_ACCOUNT_MAPPINGS,
-    users: INITIAL_USERS,
-    auditLogs: [],
-    exportShipments: [],
-  };
+  users: INITIAL_USERS,
+  auditLogs: [],
+  exportShipments: [],
+  payrollDistributions: [],
+  scrapSales: [],
+  settings: { ...INITIAL_SETTINGS },
+};
 
   // ISSUE 1 FIX — a FRESH install must produce the CURRENT master data
   // directly. Previously the migrations ran only when localStorage already
@@ -1527,6 +1541,13 @@ class ERPDatabaseService {
         const merged: ERPDatabaseSchema = {
           ...createEmptyDatabase(),
           ...parsed,
+          // New collections/settings stay backward compatible with older saves.
+          payrollDistributions: Array.isArray(parsed.payrollDistributions) ? parsed.payrollDistributions : [],
+          scrapSales: Array.isArray(parsed.scrapSales) ? parsed.scrapSales : [],
+          settings: {
+            ...INITIAL_SETTINGS,
+            ...(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}),
+          },
           company: parsed.company || INITIAL_COMPANY,
           warehouses: parsed.warehouses?.length ? parsed.warehouses : INITIAL_WAREHOUSES,
           items: loadedItems,
@@ -1631,6 +1652,8 @@ class ERPDatabaseService {
       draft.batches = draft.batches.filter(b => !(b as any).isTest);
       draft.exportShipments = draft.exportShipments.filter(e => !(e as any).isTest);
       draft.auditLogs = draft.auditLogs.filter(a => !(a as any).isTest);
+      draft.payrollDistributions = draft.payrollDistributions.filter(d => !(d as any).isTest);
+      draft.scrapSales = draft.scrapSales.filter(s => !(s as any).isTest);
 
       // Recalculate account balances based on remaining posted journal entries
       draft.accounts.forEach(acc => {

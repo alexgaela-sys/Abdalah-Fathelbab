@@ -101,6 +101,26 @@ export class ManufacturingEngine {
     }
 
     // ---- expected consumption from the order's own BOM (per material, base unit) ----
+    // ITEM 7 — the BOM reference is FROZEN on the order (bomSnapshot). Later BOM
+    // edits must never rewrite an old order's expectation; the live BOM is only
+    // a fallback for legacy orders created before snapshots existed.
+    const snapshot = order.bomSnapshot;
+    if (snapshot) {
+      const scale = totalUnits / (snapshot.baseQuantity || 1);
+      for (const line of snapshot.lines) {
+        const target = byMaterial.get(line.materialItemId);
+        if (!target) continue;
+        const item = db.items.find(i => i.id === line.materialItemId);
+        let factor = 1;
+        try {
+          factor = getUnitConversion(db, line.unitId, item?.baseUnitId || line.unitId);
+        } catch {
+          continue;
+        }
+        const wasteFactor = 1 + ((line.wastePercentage || 0) / 100);
+        target.expected = Number((line.quantityRequired * scale * wasteFactor * factor).toFixed(6));
+      }
+    } else {
     const bom = db.boms.find(b => b.id === order.bomId);
     if (bom) {
       const scale = totalUnits / (bom.baseQuantity || 1);
@@ -120,6 +140,7 @@ export class ManufacturingEngine {
         }
         target.expected = Number((line.quantityRequired * scale * wasteFactor * factor).toFixed(6));
       }
+    }
     }
 
     const out: Array<{
@@ -262,6 +283,18 @@ export class ManufacturingEngine {
       startDate: new Date().toISOString().split('T')[0],
       expectedCompletionDate: params.expectedCompletionDate,
       status: 'released',
+      // ITEM 7 — freeze the BOM reference AT ORDER CREATION so later BOM edits
+      // never rewrite this order's expected/variance figures.
+      bomSnapshot: {
+        bomId: bom.id,
+        bomNumber: bom.bomNumber,
+        version: bom.version,
+        baseQuantity: bom.baseQuantity,
+        unitId: bom.unitId,
+        lines: db.bomLines
+          .filter(l => l.bomId === bom.id)
+          .map(l => ({ materialItemId: l.materialItemId, quantityRequired: l.quantityRequired, unitId: l.unitId, wastePercentage: l.wastePercentage })),
+      },
       destinationWarehouseId: params.destinationWarehouseId,
       targetMarket: params.targetMarket,
       notes: params.notes,
@@ -627,10 +660,19 @@ export class ManufacturingEngine {
    */
   public static issueMaterialsToOrder(params: {
     orderId: string;
-    lines?: Array<{ materialItemId: string; quantity: number }>; // optional override; defaults to BOM requirement
+    lines?: Array<{
+      materialItemId: string;
+      quantity: number;
+      /** ITEM 8 — 'bom' (default) | 'substitute' | 'additional' (both need reason + approve). */
+      issueKind?: 'bom' | 'substitute' | 'additional';
+      substituteForMaterialItemId?: string;
+      reason?: string;
+    }>;
     date: string;
     userId: string;
     userName: string;
+    /** ITEM 8 — shared reason for non-BOM lines of this issue batch. */
+    reason?: string;
   }): { success: boolean; error?: string; totalActualCost?: number } {
     const db = erpDb.getSnapshot();
     const order = db.productionOrders.find(o => o.id === params.orderId);
@@ -646,12 +688,32 @@ export class ManufacturingEngine {
     const guard = AuthorizationService.enforce('manufacturing', 'post', { userId: params.userId, userName: params.userName, isTest: (order as { isTest?: boolean }).isTest });
     if (!guard.allowed) return { success: false, error: guard.error };
 
-    const scale = order.plannedQuantity / (bom.baseQuantity || 1);
-    const bomLines = db.bomLines.filter(l => l.bomId === order.bomId);
+    const snapshot = order.bomSnapshot;
+    const scale = order.plannedQuantity / (snapshot?.baseQuantity || bom.baseQuantity || 1);
+    const bomLines: BomLine[] = snapshot
+      ? snapshot.lines.map((l, idx) => ({
+          id: `snap-${idx + 1}`, bomId: order.bomId,
+          materialItemId: l.materialItemId, quantityRequired: l.quantityRequired,
+          unitId: l.unitId, wastePercentage: l.wastePercentage,
+        }))
+      : db.bomLines.filter(l => l.bomId === order.bomId);
 
     // Determine required lines (explicit override or BOM-driven)
-    const requirements = (params.lines && params.lines.length > 0)
-      ? params.lines.map(l => ({ materialItemId: l.materialItemId, quantity: Number(l.quantity) || 0 }))
+    const isOverrideIssue = !!(params.lines && params.lines.length > 0);
+    const bomMaterialIds = new Set(bomLines.map(l => l.materialItemId));
+    type ReqLine = {
+      materialItemId: string; quantity: number; unitId?: string;
+      issueKind?: 'bom' | 'substitute' | 'additional';
+      substituteForMaterialItemId?: string; reason?: string;
+    };
+    const requirements: ReqLine[] = isOverrideIssue
+      ? (params.lines as NonNullable<typeof params.lines>).map(l => ({
+          materialItemId: l.materialItemId,
+          quantity: Number(l.quantity) || 0,
+          issueKind: l.issueKind,
+          substituteForMaterialItemId: l.substituteForMaterialItemId,
+          reason: l.reason,
+        }))
       : bomLines.map(bl => {
           const item = db.items.find(i => i.id === bl.materialItemId);
           const wasteFactor = 1 + ((bl.wastePercentage || 0) / 100);
@@ -664,6 +726,45 @@ export class ManufacturingEngine {
 
     if (requirements.length === 0) {
       return { success: false, error: 'لا توجد بنود مواد في معادلة التصنيع' };
+    }
+
+    // ---- ITEM 8 — classify every line. Anything outside the BOM (substitute /
+    // additional) requires a persisted reason AND approval-grade permission,
+    // and a substitute must name the BOM material it replaces.
+    const resolved: Array<ReqLine & { kind: 'bom' | 'substitute' | 'additional'; lineReason: string }> =
+      requirements.map(req => {
+        const kind: 'bom' | 'substitute' | 'additional' = req.issueKind
+          || (bomMaterialIds.has(req.materialItemId) ? 'bom' : 'additional');
+        const lineReason = (req.reason || params.reason || '').trim();
+        return { ...req, kind, lineReason };
+      });
+    const nonBomLines = resolved.filter(r => r.kind !== 'bom');
+    if (nonBomLines.length > 0) {
+      for (const r of nonBomLines) {
+        const name = db.items.find(i => i.id === r.materialItemId)?.nameAr || r.materialItemId;
+        if (!r.lineReason) {
+          return {
+            success: false,
+            error: `خامة ${r.kind === 'substitute' ? 'بديلة' : 'إضافية'} خارج معادلة التصنيع (${name}) تتطلب سببًا صريحًا يُسجَّل في التدقيق.`,
+          };
+        }
+        if (r.kind === 'substitute') {
+          if (!r.substituteForMaterialItemId) {
+            return { success: false, error: `الخامة البديلة (${name}) يجب ربطها بالخامة التي تحل محلها من معادلة التصنيع` };
+          }
+          if (!bomMaterialIds.has(r.substituteForMaterialItemId)) {
+            const orig = db.items.find(i => i.id === r.substituteForMaterialItemId)?.nameAr || r.substituteForMaterialItemId;
+            return { success: false, error: `الخامة البديلة (${name}) مربوطة بمادة (${orig}) غير موجودة في معادلة التصنيع` };
+          }
+        }
+      }
+      const approveGuard = AuthorizationService.enforce('manufacturing', 'approve', {
+        userId: params.userId, userName: params.userName,
+        isTest: (order as { isTest?: boolean }).isTest,
+      });
+      if (!approveGuard.allowed) {
+        return { success: false, error: `صرف خامات بديلة/إضافية يتطلب صلاحية اعتماد: ${approveGuard.error}` };
+      }
     }
 
     // ---- FIX 1 — convert EVERY requirement into the ITEM'S BASE INVENTORY
@@ -684,10 +785,17 @@ export class ManufacturingEngine {
     // already in the item's base unit (factor 1, no unnecessary conversion).
     type IssueLine = {
       materialItemId: string; lineQuantity: number; lineUnitId: string;
-      baseUnitId: string; issueQty: number; plannedBaseQty: number;
+      baseUnitId: string; issueQty: number; plannedBaseQty: number; tol: number;
+      kind: 'bom' | 'substitute' | 'additional';
+      lineReason?: string;
+      substituteForMaterialItemId?: string;
     };
     const issues: IssueLine[] = [];
-    for (const req of requirements) {
+    // PROD-05 — plan-vs-issued tolerance: staged issues round line quantities to
+    // 3 decimals, and a line unit may differ from the stocked base unit (70 GRAM
+    // vs KG), so the permitted slack scales with the conversion factor.
+    const PROD_EPS = 0.01;
+    for (const req of resolved) {
       const item = db.items.find(i => i.id === req.materialItemId);
       if (!item) return { success: false, error: `مادة في معادلة التصنيع غير معرفة بالنظام (${req.materialItemId})` };
       if (req.quantity <= 0) return { success: false, error: `كمية الصرف يجب أن تكون أكبر من صفر للمادة (${item.nameAr})` };
@@ -724,9 +832,53 @@ export class ManufacturingEngine {
       }
       const plannedLineQty = plannedByLineUnit.get(req.materialItemId) ?? req.quantity;
       const plannedBaseQty = Number((plannedLineQty * toBaseUnit).toFixed(6));
-      issues.push({ materialItemId: req.materialItemId, lineQuantity: req.quantity, lineUnitId, baseUnitId, issueQty, plannedBaseQty });
+      issues.push({ materialItemId: req.materialItemId, lineQuantity: req.quantity, lineUnitId, baseUnitId, issueQty, plannedBaseQty,
+        tol: Number((PROD_EPS + 0.002 * Math.abs(toBaseUnit)).toFixed(6)),
+        kind: req.kind, lineReason: req.lineReason || undefined,
+        substituteForMaterialItemId: req.substituteForMaterialItemId });
     }
 
+    // ---- PROD-05 — refuse duplicate / over-plan material issues (pre-mutation) ----
+    // Net material this order still holds per material = actual issued − returned −
+    // approved variance (consumption rows are immutable after issue; returns and
+    // approved variance accumulate on them). Rules:
+    //   • BOM material: the cumulative issue may never exceed the planned
+    //     requirement (small EPS absorbs 3-decimal rounding of staged 40%+60%
+    //     issues) — this blocks BOTH a second default issue of an already-issued
+    //     plan and any partial issue that would over-consume the plan.
+    //   • Exception: an EXPLICIT override issued on a VIRGIN order may exceed the
+    //     plan (deliberate extra material, accounted as variance at close — used
+    //     by the partial-close test where 140 units are issued against a plan of 110).
+    //   • Non-BOM material (no plan): issuing the same quantity again on the same
+    //     order is treated as a duplicate.
+    // Repeating the operation would double-consume WH-01 and inflate material cost.
+    const netByMaterial = new Map<string, number>();
+    for (const c of db.productionConsumptions) {
+      if (c.productionOrderId !== order.id) continue;
+      const net = (Number(c.actualQuantity) || 0)
+        - (Number(c.returnedQuantity) || 0)
+        - (Number(c.approvedVarianceQuantity) || 0);
+      netByMaterial.set(c.materialItemId, (netByMaterial.get(c.materialItemId) || 0) + net);
+    }
+    for (const iss of issues) {
+      const netIssued = netByMaterial.get(iss.materialItemId) || 0;
+      const materialName = db.items.find(i => i.id === iss.materialItemId)?.nameAr || iss.materialItemId;
+      if (plannedByLineUnit.has(iss.materialItemId)) {
+        const virginOverride = isOverrideIssue && netIssued <= PROD_EPS;
+        if (!virginOverride && netIssued + iss.issueQty > iss.plannedBaseQty + iss.tol) {
+          return {
+            success: false,
+            error: `صرف مكرر على أمر الإنتاج ${order.orderNumber}: المادة (${materialName}) منصرفة سابقاً ${netIssued} ${iss.baseUnitId}، ومعادلة التصنيع تتطلب ${iss.plannedBaseQty} ${iss.baseUnitId} فقط — لا يُسمح بصرف يتجاوز الخطة أو بإعادة صرف نفس الصرف.`,
+          };
+        }
+      } else if (netIssued > PROD_EPS && netIssued >= iss.issueQty - PROD_EPS) {
+        return {
+          success: false,
+          error: `صرف مكرر على أمر الإنتاج ${order.orderNumber}: المادة (${materialName}) منصرفة مسبقاً بالكمية نفسها (${iss.issueQty} ${iss.baseUnitId}).`,
+        };
+      }
+      netByMaterial.set(iss.materialItemId, netIssued + iss.issueQty);
+    }
 
     let totalActualCost = 0;
     const issueResults: Array<ReturnType<typeof InventoryEngine.recordMovement>> = [];
@@ -789,6 +941,12 @@ export class ManufacturingEngine {
           })),
           returnedQuantity: 0,
           approvedVarianceQuantity: 0,
+          // ITEM 8 — classification + audit of every issue line.
+          issueKind: iss.kind,
+          substituteForMaterialItemId: iss.substituteForMaterialItemId,
+          issueReason: iss.lineReason,
+          issuedByUserId: params.userId,
+          issuedByName: params.userName,
         });
       }
 
@@ -800,7 +958,16 @@ export class ManufacturingEngine {
         module: 'إدارة الإنتاج والتكاليف',
         action: 'post',
         recordId: params.orderId,
-        description: `صرف مواد خام لأمر الإنتاج ${order.orderNumber} بتكلفة فعلية ${totalActualCost.toLocaleString('ar-EG')} ج.م (FIFO متعدد التشغيلات)`,
+        description: `صرف مواد خام لأمر الإنتاج ${order.orderNumber} بتكلفة فعلية ${totalActualCost.toLocaleString('ar-EG')} ج.م (FIFO متعدد التشغيلات)`
+          + (() => {
+              const extras = issues.filter(i => i.kind !== 'bom');
+              if (extras.length === 0) return '';
+              return ' — ' + extras.map(i =>
+                `${i.kind === 'substitute' ? 'خامة بديلة عن ' : 'خامة إضافية: '}`
+                + `${db.items.find(x => x.id === i.materialItemId)?.nameAr || i.materialItemId} (${i.issueQty} ${i.baseUnitId})`
+                + `${i.lineReason ? ` — السبب: ${i.lineReason}` : ''}`
+              ).join('؛ ');
+            })(),
       });
     });
 
@@ -890,11 +1057,14 @@ export class ManufacturingEngine {
       ? Math.max(0, stageCost) / totalUnits
       : (product.standardCost || 0);
 
-    // QA-12: values of the waste/damaged/recycled stock booked below, captured
-    // so the GL can be reconciled against the physical movement exactly.
-    let scrapValue = 0;
-    let defectiveValue = 0;
-    let recycleValue = 0;
+    // ITEM 11 — the automatic 10% scrap valuation is REMOVED, and ITEM 10 removes
+    // the 50% defective valuation plus the injection of finished goods into the
+    // raw-materials warehouse. QC-failed output is recorded as QUANTITY only
+    // (zero book value): the transfer itself never creates inventory value. The
+    // cost of QC-failed units is written off ONCE at closure through qcLossCost
+    // → 5104, so GL, batch ledger and totals stay consistent.
+    let scrapMoved = 0;
+    let defectiveMoved = 0;
 
     erpDb.mutate(draft => {
       const ord = draft.productionOrders.find(o => o.id === params.orderId);
@@ -952,7 +1122,7 @@ export class ManufacturingEngine {
         };
         draft.productionWastes.push(waste);
 
-        const scrapUnitCost = actualUnitCost * 0.1; // Scrap valued at 10% of production cost
+        const scrapUnitCost = 0; // ITEM 11 — no automatic valuation on transfer
         InventoryEngine.recordMovement({
           itemId: ord.productId,
           warehouseId: 'wh-scrap',
@@ -966,16 +1136,19 @@ export class ManufacturingEngine {
           batchNumber,
           notes: params.wasteReason || 'هالك خط تعبئة وتغليف',
         });
-        // The inbound movement books no FIFO consumption, so the value the stock
-        // is carried at is computed from the SAME rate used above — this is what
-        // the GL must mirror (QA-12).
-        scrapValue = scrapQty * scrapUnitCost;
+        scrapMoved = scrapQty;
       }
 
-      // Record Defective Output if any
+      // Record Defective Output if any.
+      // ITEM 10 — a FINISHED-product item is NEVER pushed into WH-01 as if it
+      // were recovered raw material (that invented inventory value at 50%).
+      // Defective output always lands in WH-04 (damaged) as QUANTITY at zero
+      // value; real raw-material recovery is recorded separately through
+      // ManufacturingEngine.recordRawMaterialRecovery with the actual items,
+      // units and quantities recovered.
       if (defectiveQty > 0) {
         const isRecycle = params.defectiveAction === 'to_recycling';
-        const targetWh = isRecycle ? 'wh-raw' : 'wh-damaged';
+        const targetWh = 'wh-damaged';
         const waste: ProductionWaste = {
           id: generateErpId('wst'),
           productionOrderId: ord.id,
@@ -984,30 +1157,32 @@ export class ManufacturingEngine {
           quantity: defectiveQty,
           wasteType: isRecycle ? 'recyclable' : 'damaged',
           destinationWarehouseId: targetWh,
-          reason: params.wasteReason || 'معيب تصنيع قابل لإعادة التدوير',
+          reason: params.wasteReason || (isRecycle
+            ? 'معيب مُعلَّن لإعادة التدوير — تُسجَّل استرادة الخامات الفعلية عبر مستند استرداد منفصل'
+            : 'معيب تصنيع'),
           actionTaken: params.defectiveAction,
           date: dateStr,
           userId: params.userId,
         };
         draft.productionWastes.push(waste);
 
-        const defUnitCost = actualUnitCost * 0.5;
+        const defUnitCost = 0; // ITEM 10 — no invented 50% value on transfer
         InventoryEngine.recordMovement({
           itemId: ord.productId,
           warehouseId: targetWh,
-          movementType: isRecycle ? 'recycling' : 'scrap',
+          movementType: 'scrap',
           date: params.date,
           quantityIn: defectiveQty,
           quantityOut: 0,
           unitCost: defUnitCost,
-          documentType: isRecycle ? 'إعادة تدوير إنتاج معيب' : 'توالف إنتاج',
+          documentType: 'توالف إنتاج',
           documentNumber: ord.orderNumber,
           batchNumber,
-          notes: isRecycle ? 'مسترجع إلى مستودع الخامات لإعادة التدوير' : 'محول لمستودع التوالف',
+          notes: isRecycle
+            ? 'معيب قابل لإعادة التدوير — بانتظار استرداد الخامات الفعلية بمستند منفصل'
+            : 'محول لمستودع التوالف',
         });
-        const defValue = defectiveQty * defUnitCost;
-        if (isRecycle) recycleValue = defValue;
-        else defectiveValue = defValue;
+        defectiveMoved = defectiveQty;
       }
 
       // Audit Log
@@ -1023,57 +1198,13 @@ export class ManufacturingEngine {
       });
     });
 
-    // QA-12 — reconcile scrap / damaged / recycled production stock with the GL.
-    // The physical movement above creates inventory in WH-05 (scrap), WH-04
-    // (damaged) and WH-01 (recycled back to raw) — the corresponding asset
-    // accounts 1112 / 1111 / 1108 must move by the SAME value, otherwise
-    // physical inventory and inventory valuation silently disagree with the
-    // GL. The offset is the existing production-variance account (this is the
-    // write-off of production waste), so the journal balances on its own and
-    // cannot disturb the order-closure journal below.
-    const wasteLines: JournalLine[] = [];
-    const pushWasteDebit = (accountId: string, amount: number, desc: string) => {
-      if (amount <= 0.01) return;
-      const acc = db.accounts.find(a => a.id === accountId);
-      wasteLines.push({
-        id: '', journalEntryId: '',
-        accountId, accountCode: acc?.code || '', accountNameAr: acc?.nameAr || '',
-        debit: Number(amount.toFixed(2)), credit: 0, currency: 'EGP' as const,
-        originalAmount: Number(amount.toFixed(2)), exchangeRate: 1, costCenterId: 'cc-prod',
-        description: desc,
-      });
-    };
-    pushWasteDebit(
-      AccountingEngine.getMappedAccountId('inventory_scrap', 'acc-1112'), scrapValue,
-      `مخزون هالك إنتاج — مستودع الهالك والسكراب (أمر ${order.orderNumber})`);
-    pushWasteDebit(
-      AccountingEngine.getMappedAccountId('inventory_damaged', 'acc-1111'), defectiveValue,
-      `مخزون توالف إنتاج — مستودع التوالف (أمر ${order.orderNumber})`);
-    pushWasteDebit(
-      AccountingEngine.getMappedAccountId('purchase_raw_inventory', 'acc-1108'), recycleValue,
-      `مخزون معيب مُسترجع لإعادة التدوير في مستودع الخامات (أمر ${order.orderNumber})`);
-
-    if (wasteLines.length > 0) {
-      const wasteTotal = Number(wasteLines.reduce((s, l) => s + l.debit, 0).toFixed(2));
-      const varAccId = AccountingEngine.getMappedAccountId('variance_material_quantity', 'acc-5104');
-      const varAcc = db.accounts.find(a => a.id === varAccId);
-      const creditLine: JournalLine = {
-        id: '', journalEntryId: '',
-        accountId: varAccId, accountCode: varAcc?.code || varAccId, accountNameAr: varAcc?.nameAr || 'فروق كميات استهلاك المواد',
-        debit: 0, credit: wasteTotal, currency: 'EGP' as const,
-        originalAmount: wasteTotal, exchangeRate: 1, costCenterId: 'cc-prod',
-        description: `إثبات هالك/توالف الإنتاج كفروق كمية — أمر ${order.orderNumber}`,
-      };
-      const jv = AccountingEngine.postJournal({
-        date: params.date,
-        reference: `PROD-WASTE-${order.orderNumber}`,
-        description: `مطابقة هالك وتوالف الإنتاج مع المخزون والدفاتر — أمر ${order.orderNumber}`,
-        sourceDocumentType: 'production_waste',
-        sourceDocumentId: order.id,
-        lines: [...wasteLines, creditLine],
-      }, params.userId, params.userName, params.isTest);
-      if (!jv.success) return { success: false, error: `تعذر إثبات هالك الإنتاج في الدفاتر: ${jv.error}` };
-    }
+    // ITEM 11 — the PROD-WASTE journal that capitalized 10%/50% of production
+    // cost into 1112/1111/1108 on transfer is REMOVED: it created inventory
+    // value out of nothing. The QC-failed cost share is written off exactly once
+    // by the order-closure entry (qcLossCost → 5104), and the transfers above
+    // move QUANTITY at zero value, so batch ledger and GL agree by construction.
+    void scrapMoved;
+    void defectiveMoved;
 
     return { success: true };
   }
@@ -1707,5 +1838,534 @@ export class ManufacturingEngine {
     });
 
     return { success: true };
+  }
+
+  // ===================== REMEDIATION — ITEMS 1 / 2 / 3 / 10 =====================
+
+  /**
+   * ITEM 1 — edit the PLANNED quantity of an open production order.
+   *
+   * Allowed ONLY before the first material issue: once a single
+   * productionConsumptions row exists, the quantity is frozen for BOTH the UI
+   * and this API — a direct API call is rejected here with the same reason.
+   * Historical production/issue movements are never touched.
+   */
+  public static updateProductionOrderQuantity(params: {
+    orderId: string;
+    newPlannedQuantity: number;
+    reason: string;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; error?: string; order?: ProductionOrder } {
+    const db = erpDb.getSnapshot();
+    const order = db.productionOrders.find(o => o.id === params.orderId);
+    if (!order) return { success: false, error: 'أمر الإنتاج غير موجود' };
+    if (order.status === 'completed' || order.status === 'cancelled') {
+      return { success: false, error: 'لا يمكن تعديل كمية أمر إنتاج مغلق أو ملغى' };
+    }
+    const guard = AuthorizationService.enforce('manufacturing', 'edit', {
+      userId: params.userId, userName: params.userName,
+      isTest: params.isTest ?? ((order as { isTest?: boolean }).isTest),
+    });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    const newQty = Number(params.newPlannedQuantity);
+    if (!Number.isFinite(newQty) || newQty <= 0) {
+      return { success: false, error: 'الكمية المخططة يجب أن تكون رقمًا أكبر من صفر' };
+    }
+    if (newQty === order.plannedQuantity) {
+      return { success: false, error: 'الكمية الجديدة مساوية للكمية الحالية — لا يوجد ما يُعدّل' };
+    }
+    const reason = (params.reason || '').trim();
+    if (!reason) {
+      return { success: false, error: 'تعديل الكمية المخططة يتطلب سببًا صريحًا يُسجَّل في سجل التدقيق' };
+    }
+    const hasIssue = db.productionConsumptions.some(c => c.productionOrderId === order.id);
+    if (hasIssue) {
+      return {
+        success: false,
+        error: `لا يمكن تعديل الكمية المخططة لأمر ${order.orderNumber}: تم تسجيل أول صرف خامات لهذا الأمر. `
+          + 'الكمية المخططة تُجمَّد بعد أول صرف حمايةً لتاريخ الإنتاج — راجع مسؤول الإنتاج لتصحيح الصرف أو أنشئ أمرًا جديدًا.',
+      };
+    }
+
+    const from = order.plannedQuantity;
+    let updated: ProductionOrder | undefined;
+    erpDb.mutate(draft => {
+      const ord = draft.productionOrders.find(o => o.id === params.orderId);
+      if (!ord) return;
+      ord.plannedQuantity = newQty;
+      ord.remainingQuantity = Math.max(0, newQty - (ord.producedQuantity || 0));
+      ord.quantityEditHistory = [
+        ...(ord.quantityEditHistory || []),
+        {
+          id: generateErpId('qedit'),
+          editedAt: new Date().toISOString(),
+          userId: guard.userId,
+          userName: guard.userName,
+          fromQuantity: from,
+          toQuantity: newQty,
+          reason,
+        },
+      ];
+      updated = ord;
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'إدارة الإنتاج والتكاليف',
+        action: 'edit',
+        recordId: ord.id,
+        description: `تعديل الكمية المخططة لأمر إنتاج ${ord.orderNumber} من ${from} إلى ${newQty} — السبب: ${reason}`,
+      });
+    });
+    return updated ? { success: true, order: updated } : { success: false, error: 'تعذّر تعديل أمر الإنتاج' };
+  }
+
+  /**
+   * ITEM 2 — read-only per-material issue status for the material-issue screen:
+   * the full-plan BOM requirement, net already issued, what remains, and the
+   * current WH-01 balance — plus substitute/additional lines issued outside BOM.
+   * All quantities are in the item's BASE inventory unit.
+   */
+  public static getMaterialIssueStatus(orderId: string): Array<{
+    materialItemId: string;
+    itemNameAr: string;
+    unitId: string;
+    unitNameAr: string;
+    requiredQuantity: number;
+    issuedQuantity: number;
+    remainingQuantity: number;
+    stockBalance: number;
+    fromBom: boolean;
+    issueKind: 'bom' | 'substitute' | 'additional';
+    substituteForMaterialItemId?: string;
+  }> {
+    const db = erpDb.getSnapshot();
+    const order = db.productionOrders.find(o => o.id === orderId);
+    if (!order) return [];
+    const unitsMap = new Map(db.units.map(u => [u.id, u.nameAr]));
+    const rows = db.productionConsumptions.filter(c => c.productionOrderId === orderId);
+
+    const netByMaterial = new Map<string, number>();
+    const metaByMaterial = new Map<string, { kind?: 'bom' | 'substitute' | 'additional'; substituteFor?: string }>();
+    for (const c of rows) {
+      const net = (Number(c.actualQuantity) || 0)
+        - (Number(c.returnedQuantity) || 0)
+        - (Number(c.approvedVarianceQuantity) || 0);
+      netByMaterial.set(c.materialItemId, (netByMaterial.get(c.materialItemId) || 0) + net);
+      if (c.issueKind && c.issueKind !== 'bom') {
+        metaByMaterial.set(c.materialItemId, { kind: c.issueKind, substituteFor: c.substituteForMaterialItemId });
+      }
+    }
+
+    const snapshot = order.bomSnapshot;
+    const liveBom = db.boms.find(b => b.id === order.bomId);
+    const bomLines = snapshot
+      ? snapshot.lines
+      : db.bomLines.filter(l => l.bomId === order.bomId).map(l => ({
+          materialItemId: l.materialItemId, quantityRequired: l.quantityRequired, unitId: l.unitId, wastePercentage: l.wastePercentage,
+        }));
+    const baseQty = snapshot?.baseQuantity || liveBom?.baseQuantity || 1;
+    const scale = order.plannedQuantity / baseQty;
+
+    const out: ReturnType<typeof ManufacturingEngine.getMaterialIssueStatus> = [];
+    for (const bl of bomLines) {
+      const item = db.items.find(i => i.id === bl.materialItemId);
+      const wasteFactor = 1 + ((bl.wastePercentage || 0) / 100);
+      let reqBase = bl.quantityRequired * scale * wasteFactor;
+      try {
+        reqBase *= getUnitConversion(db, bl.unitId, item?.baseUnitId || bl.unitId);
+      } catch {
+        // no conversion — report the raw requirement, issue path will block anyway
+      }
+      const issued = netByMaterial.get(bl.materialItemId) || 0;
+      const baseUnitId = item?.baseUnitId || bl.unitId;
+      out.push({
+        materialItemId: bl.materialItemId,
+        itemNameAr: item?.nameAr || bl.materialItemId,
+        unitId: baseUnitId,
+        unitNameAr: unitsMap.get(baseUnitId) || baseUnitId,
+        requiredQuantity: Number(reqBase.toFixed(6)),
+        issuedQuantity: Number(issued.toFixed(6)),
+        remainingQuantity: Number(Math.max(0, reqBase - issued).toFixed(6)),
+        stockBalance: InventoryEngine.getItemBalance(bl.materialItemId, 'wh-raw'),
+        fromBom: true,
+        issueKind: 'bom',
+      });
+    }
+    for (const [mid, meta] of metaByMaterial) {
+      if (bomLines.some(b => b.materialItemId === mid)) continue;
+      const item = db.items.find(i => i.id === mid);
+      const issued = netByMaterial.get(mid) || 0;
+      out.push({
+        materialItemId: mid,
+        itemNameAr: item?.nameAr || mid,
+        unitId: item?.baseUnitId || 'unit-kg',
+        unitNameAr: unitsMap.get(item?.baseUnitId || 'unit-kg') || '',
+        requiredQuantity: 0,
+        issuedQuantity: Number(issued.toFixed(6)),
+        remainingQuantity: 0,
+        stockBalance: InventoryEngine.getItemBalance(mid, 'wh-raw'),
+        fromBom: false,
+        issueKind: meta.kind || 'additional',
+        substituteForMaterialItemId: meta.substituteFor,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * ITEM 3 — distribute a monthly payroll / supervision cost over the production
+   * orders that actually produced in the period.
+   *
+   * Accounting (per order share, so each order carries ONLY its share):
+   *   Dr 5105/5109 (mapped variance account of the cost type)
+   *   Cr 2104 accrued (or 6101 when the salary was ALREADY recognized as an
+   *     expense — `alreadyRecognized`, a reclassification, never a second
+   *     recognition).
+   * Each share is posted with sourceDocumentType 'production_conversion_cost'
+   * + sourceDocumentId = orderId, which is exactly how calculateCostBreakdown
+   * and closeProductionOrder read conversion costs — so standard vs actual vs
+   * variance keep working with no second costing engine.
+   *
+   * Allocation basis: produced quantity per order from production_output
+   * transactions in the period, in a single common unit. Mixed units that have
+   * no configured conversion BLOCK the distribution (never summed silently).
+   * One distribution per (period, costType) — re-posting is rejected.
+   */
+  public static distributeProductionPayroll(params: {
+    period: string; // YYYY-MM
+    costType: 'direct_labor' | 'supervision';
+    totalAmount: number;
+    sourceDescription: string;
+    date?: string; // posting date (defaults to today)
+    /** true when the payroll was already recognized on 6101 → reclassify instead of accruing. */
+    alreadyRecognized?: boolean;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; error?: string; distribution?: import('../types/erp').ProductionPayrollDistribution } {
+    const guard = AuthorizationService.enforce('manufacturing', 'post', {
+      userId: params.userId, userName: params.userName, isTest: params.isTest,
+    });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    if (!/^\d{4}-\d{2}$/.test(params.period || '')) {
+      return { success: false, error: 'الفترة يجب أن تكون بصيغة YYYY-MM (مثال: 2026-10)' };
+    }
+    const amount = Number(params.totalAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { success: false, error: 'مبلغ التوزيع يجب أن يكون رقمًا أكبر من صفر' };
+    }
+    const source = (params.sourceDescription || '').trim();
+    if (!source) {
+      return { success: false, error: 'يجب توثيق مصدر المبلغ (مرتبات رقم / مستند) قبل التوزيع' };
+    }
+
+    const db = erpDb.getSnapshot();
+    const existing = (db.payrollDistributions || []).find(
+      d => d.period === params.period && d.costType === params.costType && d.status === 'posted'
+    );
+    if (existing) {
+      return {
+        success: false,
+        error: `تم تحميل تكاليف ${params.costType === 'direct_labor' ? 'العمالة المباشرة' : 'الإشراف'} للفترة ${params.period} مسبقًا `
+          + `(${existing.distributionNumber} بمبلغ ${existing.totalAmount} ج.م). لا يُسمح بتكرار تحميل الفترة والنوع — عدّل أو اعكس التوزيع السابق أولًا.`,
+      };
+    }
+
+    // ---- produced quantity per order in the period (single pass) ----
+    const qtyByOrder = new Map<string, number>();
+    for (const t of db.inventoryTransactions) {
+      if (t.movementType !== 'production_output') continue;
+      if (!String(t.date || '').startsWith(params.period)) continue;
+      if (t.isTest && !params.isTest) continue;
+      const order = db.productionOrders.find(o => o.orderNumber === t.documentNumber);
+      if (!order) continue;
+      if (order.status === 'cancelled') continue;
+      qtyByOrder.set(order.id, (qtyByOrder.get(order.id) || 0) + (Number(t.quantityIn) || 0));
+    }
+    const participating = [...qtyByOrder.entries()]
+      .map(([id, qty]) => ({ order: db.productionOrders.find(o => o.id === id)!, qty }))
+      .filter(x => !!x.order && x.qty > 0);
+    if (participating.length === 0) {
+      return {
+        success: false,
+        error: `لا توجد كمية إنتاج صالحة للتوزيع في الفترة ${params.period}: مبلغ ${amount} ج.م `
+          + 'لم يُوزَّع على أي أمر إنتاج (لم يُسجَّل إنتاج فعلي هذا الشهر). لم يُرحّل أي قيد.',
+      };
+    }
+
+    // ---- heterogeneous units: convert to one common unit or BLOCK ----
+    const unitOf = (productId: string) => db.items.find(i => i.id === productId)?.baseUnitId || '';
+    const commonUnit = unitOf(participating[0].order.productId);
+    const converted: Array<{ order: ProductionOrder; qty: number }> = [];
+    for (const p of participating) {
+      const u = unitOf(p.order.productId);
+      let qty = p.qty;
+      if (u !== commonUnit) {
+        try {
+          qty = p.qty * getUnitConversion(db, u, commonUnit);
+        } catch {
+          return {
+            success: false,
+            error: `لا يمكن توزيع رواتب الإنتاج للفترة ${params.period}: أصناف بوحدات قياس مختلفة لا يوجد بينها معامل تحويل `
+              + `(${u} ← ${commonUnit}) للمعدّل ${p.order.orderNumber}. لا تُجمع كميات غير متجانسة دون تحويل موثوق — أدخل تحويل وحدات أو وزّع يدويًا بأمر لكل أمر.`,
+          };
+        }
+      }
+      converted.push({ order: p.order, qty });
+    }
+    const totalBasis = converted.reduce((s, c) => s + c.qty, 0);
+    if (!(totalBasis > 0)) {
+      return { success: false, error: 'كمية الإنتاج أساس التوزيع تساوي صفر — ممنوع التوزيع الصامت' };
+    }
+
+    // ---- allocation with exact 2-decimal rounding (largest remainder) ----
+    const costTypeLabel = params.costType === 'direct_labor' ? 'عمالة مباشرة' : 'إشراف إنتاج';
+    const expenseKey = params.costType === 'direct_labor' ? 'variance_direct_labor' : 'variance_overhead';
+    const expenseFallback = params.costType === 'direct_labor' ? 'acc-5105' : 'acc-5109';
+    const creditKey = params.alreadyRecognized ? 'expenses_default' : 'conversion_cost_payable';
+    const creditFallback = params.alreadyRecognized ? 'acc-6101' : 'acc-2104';
+    const expenseAccId = AccountingEngine.getMappedAccountId(expenseKey, expenseFallback);
+    const creditAccId = AccountingEngine.getMappedAccountId(creditKey, creditFallback);
+    const expenseAcc = db.accounts.find(a => a.id === expenseAccId);
+    const creditAcc = db.accounts.find(a => a.id === creditAccId);
+    if (!expenseAcc || expenseAcc.isHeader) return { success: false, error: 'حساب تكلفة التوزيع غير صالح بدليل الحسابات' };
+    if (!creditAcc || creditAcc.isHeader) return { success: false, error: 'حساب الجانب الدائن للتوزيع غير صالح بدليل الحسابات' };
+
+    const raw = converted.map(c => ({ ...c, ratio: c.qty / totalBasis, amount: (amount * c.qty) / totalBasis }));
+    const floors = raw.map(r => Math.floor(r.amount * 100) / 100);
+    let remainderCents = Math.round(amount * 100) - Math.round(floors.reduce((s, f) => s + f, 0) * 100);
+    const orderOfRemainder = raw
+      .map((r, i) => ({ i, frac: r.amount - floors[i] }))
+      .sort((a, b) => b.frac - a.frac);
+    const allocated = [...floors];
+    for (let k = 0; remainderCents > 0 && k < orderOfRemainder.length; k++) {
+      const idx = orderOfRemainder[k].i;
+      allocated[idx] = Number((allocated[idx] + 0.01).toFixed(2));
+      remainderCents -= 1;
+    }
+    const sumAllocated = Number(allocated.reduce((s, a) => s + a, 0).toFixed(2));
+    if (Math.abs(sumAllocated - amount) > 0.005) {
+      return { success: false, error: 'تعذّر تحقيق مطابقة توزيع رواتب الإنتاج: مجموع النسب لا يساوي المبلغ القابل للتوزيع' };
+    }
+
+    const postingDate = params.date || new Date().toISOString().split('T')[0];
+    const distNumber = nextDocNumber(
+      db as unknown as { [k: string]: unknown }, 'payrollDistributions', 'PAYDIST', 5, 'distributionNumber'
+    );
+    const allocations: import('../types/erp').ProductionPayrollDistribution['allocations'] = [];
+    const journalIds: string[] = [];
+
+    for (let i = 0; i < raw.length; i++) {
+      const share = allocated[i];
+      if (share <= 0) continue;
+      const ord = raw[i].order;
+      const desc = `${costTypeLabel} — حصة أمر إنتاج ${ord.orderNumber} من رواتب الفترة ${params.period}`;
+      const lines: JournalLine[] = [
+        {
+          id: '', journalEntryId: '',
+          accountId: expenseAcc.id, accountCode: expenseAcc.code, accountNameAr: expenseAcc.nameAr,
+          debit: share, credit: 0, currency: 'EGP' as const,
+          originalAmount: share, exchangeRate: 1, costCenterId: 'cc-prod',
+          description: desc,
+        },
+        {
+          id: '', journalEntryId: '',
+          accountId: creditAcc.id, accountCode: creditAcc.code, accountNameAr: creditAcc.nameAr,
+          debit: 0, credit: share, currency: 'EGP' as const,
+          originalAmount: share, exchangeRate: 1, costCenterId: 'cc-prod',
+          description: desc,
+        },
+      ];
+      const jv = AccountingEngine.postJournal({
+        date: postingDate,
+        reference: `PAYROLL-${params.period}-${params.costType}-${ord.orderNumber}`,
+        description: `${desc} — المصدر: ${source}`,
+        sourceDocumentType: 'production_conversion_cost',
+        sourceDocumentId: ord.id,
+        lines,
+      }, guard.userId, guard.userName, params.isTest);
+      if (!jv.success || !jv.entry) {
+        return { success: false, error: `تعذر ترحيل حصة أمر ${ord.orderNumber}: ${jv.error}` };
+      }
+      journalIds.push(jv.entry.id);
+      allocations.push({
+        productionOrderId: ord.id,
+        productionOrderNumber: ord.orderNumber,
+        basisQuantity: Number(raw[i].qty.toFixed(6)),
+        ratio: Number((raw[i].ratio).toFixed(6)),
+        allocatedAmount: share,
+        journalEntryId: jv.entry.id,
+      });
+    }
+
+    const distribution: import('../types/erp').ProductionPayrollDistribution = {
+      id: generateErpId('payd'),
+      distributionNumber: distNumber,
+      period: params.period,
+      costType: params.costType,
+      costTypeNameAr: costTypeLabel,
+      totalAmount: amount,
+      sourceDescription: source,
+      allocations,
+      status: 'posted',
+      postedAt: new Date().toISOString(),
+      userId: guard.userId,
+      userName: guard.userName,
+      isTest: params.isTest,
+    };
+    erpDb.mutate(draft => {
+      draft.payrollDistributions.push(distribution);
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'إدارة الإنتاج والتكاليف',
+        action: 'post',
+        recordId: distribution.id,
+        description: `توزيع ${costTypeLabel} للفترة ${params.period} بمبلغ ${amount} ج.م على ${allocations.length} أمر إنتاج — المصدر: ${source}`,
+      });
+    });
+
+    return { success: true, distribution };
+  }
+
+  /**
+   * ITEM 10 — documented recovery of REAL raw materials back into WH-01
+   * (e.g. material actually reclaimed from a defective run).
+   *
+   * The user states the actual items/quantities recovered — nothing is
+   * invented, no percentage applies, and a finished-product item can never be
+   * pushed into the raw warehouse. Journal when the recovered material carries
+   * book value: Dr 1108 | Cr 5104 (recovery of material previously written
+   * off), so the inventory increase is always supported by an entry.
+   */
+  public static recordRawMaterialRecovery(params: {
+    orderId: string;
+    lines: Array<{ materialItemId: string; quantity: number; unitId?: string }>;
+    reason: string;
+    date: string;
+    userId: string;
+    userName: string;
+    isTest?: boolean;
+  }): { success: boolean; error?: string; journalEntryId?: string; totalRecoveredCost?: number } {
+    const db = erpDb.getSnapshot();
+    const order = db.productionOrders.find(o => o.id === params.orderId);
+    if (!order) return { success: false, error: 'أمر الإنتاج غير موجود' };
+    if (order.status === 'completed' || order.status === 'cancelled') {
+      return { success: false, error: 'لا يمكن تسجيل استرداد خامات على أمر إنتاج مغلق أو ملغى' };
+    }
+    const guard = AuthorizationService.enforce('manufacturing', 'approve', {
+      userId: params.userId, userName: params.userName,
+      isTest: params.isTest ?? ((order as { isTest?: boolean }).isTest),
+    });
+    if (!guard.allowed) return { success: false, error: guard.error };
+    const reason = (params.reason || '').trim();
+    if (!reason) return { success: false, error: 'استرداد الخامات يتطلب سببًا موثقًا صريحًا' };
+    if (!params.lines || params.lines.length === 0) {
+      return { success: false, error: 'يجب إدخال الأصناف والوحدات والكميات الحقيقية المستردة' };
+    }
+
+    type Prepared = { item: Item; qtyBase: number; unitCost: number };
+    const prepared: Prepared[] = [];
+    for (const l of params.lines) {
+      const item = db.items.find(i => i.id === l.materialItemId);
+      if (!item) return { success: false, error: `مادة مستردة غير مسجلة (${l.materialItemId})` };
+      if (item.itemType === 'finished_product') {
+        return { success: false, error: `لا يمكن استرادة منتج تام (${item.nameAr}) كمادة خام — سجّل الإنتاج المعيب في مستودع التوالف بدلًا من ذلك` };
+      }
+      const qty = Number(l.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return { success: false, error: `كمية الاسترادة يجب أن تكون أكبر من صفر (${item.nameAr})` };
+      }
+      let qtyBase = qty;
+      if (l.unitId && l.unitId !== item.baseUnitId) {
+        try {
+          qtyBase = qty * getUnitConversion(db, l.unitId, item.baseUnitId);
+        } catch (e) {
+          return { success: false, error: `لا يوجد معامل تحويل وحدة للاسترداد (${item.nameAr}): ${(e as Error).message}` };
+        }
+      }
+      // Book value of the recovered material: documented/standard cost only.
+      const unitCost = Number((item.actualCost || item.standardCost || 0));
+      prepared.push({ item, qtyBase: Number(qtyBase.toFixed(6)), unitCost });
+    }
+    const totalRecoveredCost = prepared.reduce((s, p) => s + p.qtyBase * p.unitCost, 0);
+    const dateStr = params.date || new Date().toISOString().split('T')[0];
+
+    // Physical recovery into WH-01 at the documented cost (0 when none exists —
+    // a zero-cost movement is legal; a value is NEVER invented).
+    for (const p of prepared) {
+      const move = InventoryEngine.recordMovement({
+        itemId: p.item.id,
+        warehouseId: 'wh-raw',
+        movementType: 'production_return',
+        date: dateStr,
+        quantityIn: p.qtyBase,
+        quantityOut: 0,
+        unitCost: p.unitCost,
+        documentType: 'استرداد خامات من إنتاج معيب',
+        documentNumber: order.orderNumber,
+        notes: `استرداد ${p.qtyBase} ${p.item.baseUnitId} من (${p.item.nameAr}) لأمر ${order.orderNumber} — ${reason}`,
+        isTest: params.isTest ?? ((order as { isTest?: boolean }).isTest),
+      } as never);
+      if (!move.success) return { success: false, error: move.error };
+    }
+
+    let journalEntryId: string | undefined;
+    if (totalRecoveredCost > 0.01) {
+      const rawAccId = AccountingEngine.getMappedAccountId('purchase_raw_inventory', 'acc-1108');
+      const varAccId = AccountingEngine.getMappedAccountId('variance_material_quantity', 'acc-5104');
+      const rawAcc = db.accounts.find(a => a.id === rawAccId);
+      const varAcc = db.accounts.find(a => a.id === varAccId);
+      if (!rawAcc || rawAcc.isHeader || !varAcc || varAcc.isHeader) {
+        return { success: false, error: 'حسابات المخزون أو الفروق غير صالحة بدليل الحسابات — تعذر إثبات الاسترداد' };
+      }
+      const cost = Number(totalRecoveredCost.toFixed(2));
+      const desc = `استرداد خامات فعلية لأمر إنتاج ${order.orderNumber} — ${reason}`;
+      const jv = AccountingEngine.postJournal({
+        date: dateStr,
+        reference: `RECOVER-${order.orderNumber}`,
+        description: desc,
+        sourceDocumentType: 'production_material_recovery',
+        sourceDocumentId: order.id,
+        lines: [
+          {
+            id: '', journalEntryId: '', accountId: rawAcc.id, accountCode: rawAcc.code, accountNameAr: rawAcc.nameAr,
+            debit: cost, credit: 0, currency: 'EGP' as const, originalAmount: cost, exchangeRate: 1,
+            costCenterId: 'cc-prod', description: desc,
+          },
+          {
+            id: '', journalEntryId: '', accountId: varAcc.id, accountCode: varAcc.code, accountNameAr: varAcc.nameAr,
+            debit: 0, credit: cost, currency: 'EGP' as const, originalAmount: cost, exchangeRate: 1,
+            costCenterId: 'cc-prod', description: `تخفيض فروق الكميات باسترداد مواد فعلية — ${reason}`,
+          },
+        ],
+      }, params.userId, params.userName, params.isTest);
+      if (!jv.success || !jv.entry) return { success: false, error: jv.error };
+      journalEntryId = jv.entry.id;
+    }
+
+    erpDb.mutate(draft => {
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: params.userId,
+        userName: params.userName,
+        module: 'إدارة الإنتاج والتكاليف',
+        action: 'post',
+        recordId: order.id,
+        description: `استرداد خامات لأمر إنتاج ${order.orderNumber}: `
+          + prepared.map(p => `${p.item.nameAr} ${p.qtyBase} ${p.item.baseUnitId}`).join('، ')
+          + ` — السبب: ${reason} — القيمة ${totalRecoveredCost.toFixed(2)} ج.م`,
+      } as never);
+    });
+    return { success: true, journalEntryId, totalRecoveredCost };
   }
 }

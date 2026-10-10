@@ -31,6 +31,33 @@ export const ManufacturingView: React.FC = () => {
   const [showDailyOutputModal, setShowDailyOutputModal] = useState<ProductionOrder | null>(null);
   const [selectedOrderDetails, setSelectedOrderDetails] = useState<ProductionOrder | null>(null);
   const [activeSection, setActiveSection] = useState<'orders' | 'bom'>('orders');
+  const sessionUser = AuthService.getCurrentSession()?.user;
+  const actorId = sessionUser?.id || 'usr-admin';
+  const actorName = sessionUser?.name || 'مدير الإنتاج';
+
+  // ---------- ITEM 1 — edit planned quantity (before the first issue) ----------
+  const [editQtyOrder, setEditQtyOrder] = useState<ProductionOrder | null>(null);
+  const [editQtyValue, setEditQtyValue] = useState(0);
+  const [editQtyReason, setEditQtyReason] = useState('');
+  const [editQtyError, setEditQtyError] = useState<string | null>(null);
+
+  // ---------- ITEM 2 + 8 — staged material issue (requirement / issued / remaining) ----------
+  const [issueOrder, setIssueOrder] = useState<ProductionOrder | null>(null);
+  const [issueQtyByMaterial, setIssueQtyByMaterial] = useState<Record<string, number>>({});
+  const [issueExtras, setIssueExtras] = useState<Array<{
+    materialItemId: string; quantity: number;
+    issueKind: 'substitute' | 'additional';
+    substituteForMaterialItemId: string;
+    reason: string;
+  }>>([]);
+  const [issueReason, setIssueReason] = useState('');
+  const [issueError, setIssueError] = useState<string | null>(null);
+
+  // ---------- ITEM 10 — documented raw-material recovery ----------
+  const [recoverOrder, setRecoverOrder] = useState<ProductionOrder | null>(null);
+  const [recoverLines, setRecoverLines] = useState<Array<{ materialItemId: string; quantity: number }>>([]);
+  const [recoverReason, setRecoverReason] = useState('');
+  const [recoverError, setRecoverError] = useState<string | null>(null);
 
   // ---------- BOM management (F1) ----------
   const sessionRole = AuthService.getCurrentSession()?.user.role;
@@ -316,23 +343,8 @@ export const ManufacturingView: React.FC = () => {
     setShowDailyOutputModal(null);
   };
 
-  // Issue BOM raw/packaging materials from WH-01 to the production order (FIFO, actual cost)
-  const handleIssueMaterials = (order: ProductionOrder) => {
-    if (!confirm(`صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج ${order.orderNumber} وفق معادلة التصنيع؟`)) {
-      return;
-    }
-    const res = ManufacturingEngine.issueMaterialsToOrder({
-      orderId: order.id,
-      date: new Date().toISOString().split('T')[0],
-      userId: 'usr-admin',
-      userName: 'مدير الإنتاج',
-    });
-    if (!res.success) {
-      alert(res.error || 'خطأ في صرف خامات أمر الإنتاج');
-      return;
-    }
-    alert(`تم صرف المواد بنجاح بتكلفة فعلية ${res.totalActualCost?.toLocaleString('ar-EG') || '0'} ج.م`);
-  };
+  // Issue BOM raw/packaging materials: replaced by the staged issue dialog
+  // (ITEMS 2 + 8) which shows requirement / issued / remaining per material.
 
   const handleCloseOrder = (orderId: string) => {
     // FIX 2 — try a FULL close first. An order produced below its plan is
@@ -373,6 +385,112 @@ export const ManufacturingView: React.FC = () => {
     }
     alert('تم الإغلاق الجزئي وإرجاع الخامات غير المستهلكة إلى تشغيلاتها الأصلية.');
   };
+
+  // ---------- ITEM 1 — planned-quantity edit (service refuses after the first issue) ----------
+  const hasAnyIssue = (orderId: string) =>
+    db.productionConsumptions.some(c => c.productionOrderId === orderId);
+
+  const openEditQtyModal = (order: ProductionOrder) => {
+    setEditQtyOrder(order);
+    setEditQtyValue(order.plannedQuantity);
+    setEditQtyReason('');
+    setEditQtyError(null);
+  };
+
+  const handleSubmitEditQty = () => {
+    if (!editQtyOrder) return;
+    const res = ManufacturingEngine.updateProductionOrderQuantity({
+      orderId: editQtyOrder.id,
+      newPlannedQuantity: Number(editQtyValue),
+      reason: editQtyReason,
+      userId: actorId,
+      userName: actorName,
+    });
+    if (!res.success) { setEditQtyError(res.error || 'تعذر تعديل الكمية المخططة'); return; }
+    setEditQtyOrder(null);
+  };
+
+  // ---------- ITEM 2 + 8 — open the staged issue dialog ----------
+  const openIssueModal = (order: ProductionOrder) => {
+    const rows = ManufacturingEngine.getMaterialIssueStatus(order.id);
+    const initial: Record<string, number> = {};
+    rows.filter(r => r.fromBom && r.remainingQuantity > 0).forEach(r => {
+      initial[r.materialItemId] = r.remainingQuantity;
+    });
+    setIssueQtyByMaterial(initial);
+    setIssueExtras([]);
+    setIssueReason('');
+    setIssueError(null);
+    setIssueOrder(order);
+  };
+
+  const handleSubmitIssue = () => {
+    if (!issueOrder) return;
+    const rows = ManufacturingEngine.getMaterialIssueStatus(issueOrder.id);
+    const bomLinesPayload = rows
+      .filter(r => r.fromBom && (Number(issueQtyByMaterial[r.materialItemId]) || 0) > 0)
+      .map(r => ({ materialItemId: r.materialItemId, quantity: Number(issueQtyByMaterial[r.materialItemId]) }));
+    const filledExtras = issueExtras.filter(x => x.materialItemId && Number(x.quantity) > 0);
+    for (const x of filledExtras) {
+      if (!x.reason.trim()) {
+        setIssueError('كل خامة بديلة أو إضافية خارج BOM تتطلب سببًا صريحًا يُسجَّل في التدقيق.');
+        return;
+      }
+      if (x.issueKind === 'substitute' && !x.substituteForMaterialItemId) {
+        setIssueError('اختر الخامة التي يحل محلها البديل من معادلة التصنيع.');
+        return;
+      }
+    }
+    if (bomLinesPayload.length === 0 && filledExtras.length === 0) {
+      setIssueError('أدخل كمية الصرف لبند واحد على الأقل في هذه الدفعة.');
+      return;
+    }
+    const extrasPayload = filledExtras.map(x => ({
+      materialItemId: x.materialItemId,
+      quantity: Number(x.quantity),
+      issueKind: x.issueKind,
+      substituteForMaterialItemId: x.issueKind === 'substitute' ? x.substituteForMaterialItemId : undefined,
+      reason: x.reason.trim(),
+    }));
+    const res = ManufacturingEngine.issueMaterialsToOrder({
+      orderId: issueOrder.id,
+      lines: [...bomLinesPayload, ...extrasPayload],
+      date: new Date().toISOString().split('T')[0],
+      userId: actorId,
+      userName: actorName,
+      reason: issueReason.trim() || undefined,
+    });
+    if (!res.success) { setIssueError(res.error || 'خطأ في صرف خامات أمر الإنتاج'); return; }
+    alert(`تم صرف دفعة الخامات بنجاح بتكلفة فعلية ${(res.totalActualCost || 0).toLocaleString('ar-EG')} ج.م`);
+    setIssueOrder(null);
+  };
+
+  // ---------- ITEM 10 — documented raw-material recovery ----------
+  const openRecoverModal = (order: ProductionOrder) => {
+    setRecoverLines([{ materialItemId: materialItems[0]?.id || '', quantity: 0 }]);
+    setRecoverReason('');
+    setRecoverError(null);
+    setRecoverOrder(order);
+  };
+
+  const handleSubmitRecovery = () => {
+    if (!recoverOrder) return;
+    const res = ManufacturingEngine.recordRawMaterialRecovery({
+      orderId: recoverOrder.id,
+      lines: recoverLines
+        .filter(l => l.materialItemId && Number(l.quantity) > 0)
+        .map(l => ({ materialItemId: l.materialItemId, quantity: Number(l.quantity) })),
+      reason: recoverReason,
+      date: new Date().toISOString().split('T')[0],
+      userId: actorId,
+      userName: actorName,
+    });
+    if (!res.success) { setRecoverError(res.error || 'تعذر تسجيل استرداد الخامات'); return; }
+    alert(`تم استرداد الخامات الفعلية إلى مستودع الخامات بتكلفة ${(res.totalRecoveredCost || 0).toFixed(2)} ج.م`);
+    setRecoverOrder(null);
+  };
+
+  const issueStatusRows = issueOrder ? ManufacturingEngine.getMaterialIssueStatus(issueOrder.id) : [];
 
   return (
     <div className="space-y-6">
@@ -733,6 +851,8 @@ export const ManufacturingView: React.FC = () => {
             ) : (
               db.productionOrders.map(ord => {
                 const prod = db.items.find(i => i.id === ord.productId);
+                const orderHasIssue = hasAnyIssue(ord.id);
+                const canEditQty = ord.status !== 'completed' && ord.status !== 'cancelled' && !orderHasIssue;
                 return (
                   <tr key={ord.id} className="hover:bg-slate-50/80 transition">
                     <td className="p-3.5 font-mono font-bold text-slate-900">{ord.orderNumber}</td>
@@ -787,12 +907,32 @@ export const ManufacturingView: React.FC = () => {
                         )}
                         {(ord.status === 'released' || ord.status === 'in_progress' || ord.status === 'draft') && (
                           <button
-                            onClick={() => handleIssueMaterials(ord)}
+                            onClick={() => openIssueModal(ord)}
                             className="px-2 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-semibold rounded-lg text-xs flex items-center gap-1"
-                            title="صرف الخامات والتعبئة من مستودع الخامات وفق BOM"
+                            title="صرف الخامات والتعبئة من مستودع الخامات وفق BOM — دفعات جزئية متعددة"
                           >
                             <PackageOpen className="w-3 h-3" />
                             صرف خامات
+                          </button>
+                        )}
+                        {canEditQty && (
+                          <button
+                            onClick={() => openEditQtyModal(ord)}
+                            className="px-2 py-1 bg-sky-50 hover:bg-sky-100 text-sky-800 font-semibold rounded-lg text-xs flex items-center gap-1"
+                            title="تعديل الكمية المخططة — مسموح فقط قبل أول صرف خامات"
+                          >
+                            <Pencil className="w-3 h-3" />
+                            تعديل الكمية
+                          </button>
+                        )}
+                        {(ord.status === 'in_progress' || ord.status === 'released') && (
+                          <button
+                            onClick={() => openRecoverModal(ord)}
+                            className="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-800 font-semibold rounded-lg text-xs flex items-center gap-1"
+                            title="تسجيل استرداد خامات فعلية إلى مستودع الخامات بمستند موثق"
+                          >
+                            <Recycle className="w-3 h-3" />
+                            استرداد خامات
                           </button>
                         )}
                         <button
@@ -1199,6 +1339,316 @@ export const ManufacturingView: React.FC = () => {
                 className="px-4 py-2 rounded-xl bg-slate-800 text-white font-bold text-xs"
               >
                 إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ITEM 1 — Edit planned quantity (blocked after the first issue by the service) */}
+      {editQtyOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 text-right space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <h3 className="font-bold text-base text-slate-900">تعديل الكمية المخططة — {editQtyOrder.orderNumber}</h3>
+              <button onClick={() => setEditQtyOrder(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+            <div className="p-3 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-[11px] font-semibold leading-relaxed">
+              يُسمح بتعديل الكمية المخططة فقط <b>قبل تسجيل أول صرف خامات</b> لأمر الإنتاج. بعد أول صرف تُجمَّد الكمية
+              حمايةً لتاريخ الإنتاج، ويُسجَّل كل تعديل في سجل تدقيق (من/إلى/السبب/المستخدم/التاريخ).
+            </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الكمية الحالية</label>
+                  <input
+                    type="number"
+                    value={editQtyOrder.plannedQuantity}
+                    disabled
+                    className="w-full p-2 rounded-xl bg-slate-100 border border-slate-200 text-xs font-mono text-slate-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الكمية الجديدة المخططة</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editQtyValue}
+                    onChange={(e) => setEditQtyValue(Number(e.target.value))}
+                    className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">سبب التعديل (إلزامي)</label>
+                <textarea
+                  rows={2}
+                  value={editQtyReason}
+                  onChange={(e) => setEditQtyReason(e.target.value)}
+                  placeholder="مثال: تصحيح تخطيط خط الإنتاج قبل بدء الصرف"
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                />
+              </div>
+            </div>
+            {editQtyError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">{editQtyError}</div>
+            )}
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+              <button onClick={() => setEditQtyOrder(null)} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs">إلغاء</button>
+              <button
+                onClick={handleSubmitEditQty}
+                disabled={!editQtyReason.trim() || !(editQtyValue > 0)}
+                className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md disabled:opacity-40"
+              >
+                حفظ التعديل
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ITEM 2 + 8 — staged material issue dialog (requirement / issued / remaining + substitutes) */}
+      {issueOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl p-6 text-right space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <h3 className="font-bold text-base text-slate-900">صرف خامات — أمر {issueOrder.orderNumber} (دفعات جزئية متعددة)</h3>
+              <button onClick={() => setIssueOrder(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl overflow-x-auto">
+              <table className="w-full text-right text-xs">
+                <thead className="bg-slate-100 text-slate-700 font-bold">
+                  <tr>
+                    <th className="p-2.5">المادة</th>
+                    <th className="p-2.5 text-center">احتياج BOM (الخطة)</th>
+                    <th className="p-2.5 text-center">المصروف سابقاً (صافي)</th>
+                    <th className="p-2.5 text-center">المتبقي</th>
+                    <th className="p-2.5 text-center">رصيد WH-01</th>
+                    <th className="p-2.5 text-center">صرف هذه الدفعة</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {issueStatusRows.map(row => (
+                    <tr key={row.materialItemId} className={row.fromBom ? '' : 'bg-teal-50/40'}>
+                      <td className="p-2.5 font-bold text-slate-800">
+                        {row.itemNameAr}
+                        {!row.fromBom && (
+                          <span className="mr-1.5 text-[9px] px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 font-bold">
+                            {row.issueKind === 'substitute' ? 'بديلة' : 'إضافية'} خارج BOM
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-2.5 text-center font-mono">{row.fromBom ? row.requiredQuantity : '—'}</td>
+                      <td className="p-2.5 text-center font-mono">{row.issuedQuantity}</td>
+                      <td className="p-2.5 text-center font-mono font-bold">{row.fromBom ? row.remainingQuantity : '—'}</td>
+                      <td className={`p-2.5 text-center font-mono ${row.stockBalance <= 0 ? 'text-rose-600 font-bold' : 'text-slate-600'}`}>
+                        {row.stockBalance} {row.unitNameAr}
+                      </td>
+                      <td className="p-2.5 text-center">
+                        {row.fromBom ? (
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={issueQtyByMaterial[row.materialItemId] ?? 0}
+                            onChange={(e) => setIssueQtyByMaterial(prev => ({
+                              ...prev,
+                              [row.materialItemId]: Math.max(0, Number(e.target.value)),
+                            }))}
+                            className="w-28 p-1.5 rounded-lg bg-slate-50 border border-slate-300 text-xs font-mono text-center"
+                          />
+                        ) : (
+                          <span className="font-mono text-slate-500">{row.issuedQuantity}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {issueStatusRows.length === 0 && (
+                    <tr><td colSpan={6} className="py-6 text-center text-slate-400">لا توجد مواد مسجلة لهذا الأمر بعد</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              يمكن تنفيذ عدة دفعات جزئية حتى استكمال الاحتياج المسموح. يمنع النظام أي صرف يتجاوز خطة BOM أو يجعل الرصيد سالبًا،
+              ويُسجَّل كل سطر صرف مرتبطًا بأمر الإنتاج والمستخدم والتاريخ بتكلفة FIFO فعلية.
+            </p>
+
+            {/* ITEM 8 — substitute / additional materials outside the BOM */}
+            <div className="border border-teal-200 rounded-xl p-3 space-y-2 bg-teal-50/40">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-xs text-teal-900">خامات بديلة / إضافية خارج معادلة التصنيع</h4>
+                <button
+                  onClick={() => setIssueExtras(prev => [...prev, {
+                    materialItemId: materialItems[0]?.id || '', quantity: 0,
+                    issueKind: 'additional', substituteForMaterialItemId: '', reason: '',
+                  }])}
+                  className="px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg text-[10px]"
+                >
+                  + إضافة بند
+                </button>
+              </div>
+              <p className="text-[10px] text-teal-800">
+                يتطلب سببًا وصلاحية اعتماد. كمية البديل لا تُضاف إلى احتياجات الخامة الأصلية (لا ازدواج استهلاك).
+              </p>
+              {issueExtras.map((ex, idx) => (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-3">
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">الخامة</label>
+                    <select
+                      value={ex.materialItemId}
+                      onChange={(e) => setIssueExtras(prev => prev.map((x, i) => i === idx ? { ...x, materialItemId: e.target.value } : x))}
+                      className="w-full p-1.5 rounded-lg bg-white border border-slate-300 text-[11px]"
+                    >
+                      {materialItems.map(mi => <option key={mi.id} value={mi.id}>{mi.nameAr}</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">النوع</label>
+                    <select
+                      value={ex.issueKind}
+                      onChange={(e) => setIssueExtras(prev => prev.map((x, i) => i === idx ? { ...x, issueKind: e.target.value as 'substitute' | 'additional' } : x))}
+                      className="w-full p-1.5 rounded-lg bg-white border border-slate-300 text-[11px]"
+                    >
+                      <option value="additional">إضافية</option>
+                      <option value="substitute">بديلة</option>
+                    </select>
+                  </div>
+                  {ex.issueKind === 'substitute' && (
+                    <div className="col-span-3">
+                      <label className="block text-[10px] font-bold text-slate-600 mb-1">تحل محل</label>
+                      <select
+                        value={ex.substituteForMaterialItemId}
+                        onChange={(e) => setIssueExtras(prev => prev.map((x, i) => i === idx ? { ...x, substituteForMaterialItemId: e.target.value } : x))}
+                        className="w-full p-1.5 rounded-lg bg-white border border-slate-300 text-[11px]"
+                      >
+                        <option value="">— اختر خامة BOM —</option>
+                        {issueStatusRows.filter(r => r.fromBom).map(r => (
+                          <option key={r.materialItemId} value={r.materialItemId}>{r.itemNameAr}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div className={ex.issueKind === 'substitute' ? 'col-span-2' : 'col-span-3'}>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">الكمية (وحدة الأساس)</label>
+                    <input
+                      type="number" min="0" step="0.001"
+                      value={ex.quantity}
+                      onChange={(e) => setIssueExtras(prev => prev.map((x, i) => i === idx ? { ...x, quantity: Number(e.target.value) } : x))}
+                      className="w-full p-1.5 rounded-lg bg-white border border-slate-300 text-[11px] font-mono"
+                    />
+                  </div>
+                  <div className={ex.issueKind === 'substitute' ? 'col-span-2' : 'col-span-3'}>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">السبب (إلزامي)</label>
+                    <input
+                      type="text"
+                      value={ex.reason}
+                      onChange={(e) => setIssueExtras(prev => prev.map((x, i) => i === idx ? { ...x, reason: e.target.value } : x))}
+                      placeholder="سبب الاستبدال/الإضافة"
+                      className="w-full p-1.5 rounded-lg bg-white border border-slate-300 text-[11px]"
+                    />
+                  </div>
+                  <div className="col-span-1">
+                    <button
+                      onClick={() => setIssueExtras(prev => prev.filter((_, i) => i !== idx))}
+                      className="w-full p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-[11px]"
+                      title="حذف البند"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {issueError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">{issueError}</div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+              <button onClick={() => setIssueOrder(null)} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs">إلغاء</button>
+              <button
+                onClick={handleSubmitIssue}
+                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md"
+              >
+                تنفيذ الصرف (FIFO فعلي)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ITEM 10 — documented raw-material recovery (real items / units / quantities only) */}
+      {recoverOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl p-6 text-right space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <h3 className="font-bold text-base text-slate-900">استرداد خامات فعلية — أمر {recoverOrder.orderNumber}</h3>
+              <button onClick={() => setRecoverOrder(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+            <div className="p-3 rounded-xl bg-teal-50 border border-teal-200 text-teal-900 text-[11px] font-semibold leading-relaxed">
+              يُسجَّل الأصناف والوحدات والكميات الحقيقية المستردة فقط — لا نسب ولا قيم مخترعة. المنتج التام لا يُدخل مخزن الخامات أبدًا.
+              إن كان للاسترداد تكلفة دفترية يُرحَّل قيد متوازن (مدين 1108 / دائن 5104) لدعم زيادة المخزون.
+            </div>
+            <div className="space-y-2">
+              {recoverLines.map((line, idx) => (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
+                  <div className="col-span-7">
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">المادة المستردة</label>
+                    <select
+                      value={line.materialItemId}
+                      onChange={(e) => setRecoverLines(prev => prev.map((l, i) => i === idx ? { ...l, materialItemId: e.target.value } : l))}
+                      className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                    >
+                      {materialItems.map(mi => <option key={mi.id} value={mi.id}>{mi.nameAr} ({mi.baseUnitId})</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-4">
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">الكمية (وحدة الأساس)</label>
+                    <input
+                      type="number" min="0" step="0.001"
+                      value={line.quantity}
+                      onChange={(e) => setRecoverLines(prev => prev.map((l, i) => i === idx ? { ...l, quantity: Number(e.target.value) } : l))}
+                      className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+                    />
+                  </div>
+                  <div className="col-span-1">
+                    <button
+                      onClick={() => setRecoverLines(prev => prev.filter((_, i) => i !== idx))}
+                      className="w-full p-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs"
+                    >✕</button>
+                  </div>
+                </div>
+              ))}
+              <button
+                onClick={() => setRecoverLines(prev => [...prev, { materialItemId: materialItems[0]?.id || '', quantity: 0 }])}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-[11px]"
+              >
+                + إضافة مادة مستردة
+              </button>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">سبب الاسترداد والعملية (إلزامي)</label>
+              <textarea
+                rows={2}
+                value={recoverReason}
+                onChange={(e) => setRecoverReason(e.target.value)}
+                placeholder="مثال: استرداد مواد سليمة من تشغيلة معيبة X بعد فحص الجودة"
+                className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+              />
+            </div>
+            {recoverError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">{recoverError}</div>
+            )}
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+              <button onClick={() => setRecoverOrder(null)} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs">إلغاء</button>
+              <button
+                onClick={handleSubmitRecovery}
+                disabled={!recoverReason.trim() || recoverLines.every(l => !(l.quantity > 0))}
+                className="px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-md disabled:opacity-40"
+              >
+                اعتماد الاسترداد
               </button>
             </div>
           </div>

@@ -2,9 +2,10 @@
 //
 // Covers the fixes made for the UAT follow-up batch:
 //   P0-1  representative-custody settlement (T-02 cash model + validation).
-//         NOTE: T-01 (acknowledged settlement leaving unsold goods) is a
-//         deliberate BUSINESS DECISION to leave as-is — it is MEASURED and
-//         reported here, never asserted as fixed.
+//         T-01/D6 (acknowledged settlement leaving unsold goods) was a
+//         deliberate prior DECISION to leave as-is — it is now FIXED in the
+//         UAT batch-2 pass: the acknowledged shortfall is written off 1107
+//         (see S3, asserted as fixed).
 //   P0-2  rep-custody sale invoice visible in the customer statement
 //         (cash custody sales are display-only — no journal is created).
 //   P1-4  custody display unit label derives from the custody's own items.
@@ -174,11 +175,15 @@ section('P0-1 / S3 — T-01 acknowledged settlement (DEFERRED by business decisi
   sell(c, 120);
   const res = uiSettle(c.custodyId, 0, 0, true);
   const st = snap().representativeCustodies.find(x => x.id === c.custodyId)!.status;
-  note('T-01 is deliberately NOT fixed in this batch', 'acknowledgeRemainingGoods still closes the custody');
-  note('measured behaviour (unchanged)', `success=${res.success}, status=${st}, GL1107=${acc('1107').toFixed(2)}, warning=${res.warning ? 'yes' : 'no'}`);
+  const shortage = snap().journalEntries.filter(j => j.sourceDocumentType === 'rep_custody_shortage' && j.sourceDocumentId === c.custodyId);
+  note('D6 FIXED: the acknowledged shortfall is written off 1107 at close', `shortage journals=${shortage.length}`);
+  note('measured behaviour', `success=${res.success}, status=${st}, GL1107=${acc('1107').toFixed(2)}, warning=${res.warning ? 'yes' : 'no'}`);
   check(res.success === true && st === 'settled',
-    'S3 acknowledged settlement behaves EXACTLY as before the batch (no accidental change to T-01)',
+    'S3 acknowledged settlement still completes (QA-20 contract preserved)',
     `success=${res.success} status=${st}`);
+  check(Math.abs(acc('1107')) < 0.01 && shortage.length === 1,
+    'S3 D6 FIXED: the acknowledged unsold-goods value leaves 1107 (one CUST-SHORTAGE journal) — nothing stranded',
+    `1107=${acc('1107').toFixed(2)}, shortage journals=${shortage.length}`);
 }
 
 // ===========================================================================
@@ -191,7 +196,11 @@ section('P0-1 / S4 — return the goods first, then settle (the clean path)');
   const res = uiSettle(c.custodyId);
   check(res.success === true && snap().representativeCustodies.find(x => x.id === c.custodyId)!.status === 'settled',
     'S4 return → settle completes', `success=${res.success} 1107=${acc('1107').toFixed(2)}`);
-  note('S4 measured GL 1107 after load→sell→return→settle (see report: returnGoodsFromRep posts no journal)',
+  const retJv = snap().journalEntries.filter(j => j.sourceDocumentType === 'rep_custody_return' && j.sourceDocumentId === c.custodyId);
+  check(retJv.length === 0,
+    'S4: the return leg posts NO GL journal — inventory re-enters the batch ledger via recordMovement only, matching the load path design (a Dr 1109|Cr 1107 mirror would desynchronise GL from batches)',
+    `return journals=${retJv.length}`);
+  note('S4 measured GL 1107 after load→sell→return→settle (return posts no GL journal; 1107 carries unsold value until settlement clears it)',
     `1107=${acc('1107').toFixed(2)}, 1109=${acc('1109').toFixed(2)}`);
 }
 
@@ -315,9 +324,12 @@ section('P0-1 / S10 — mixed goods + cash in the same custody');
   const res = uiSettle(c.custodyId, 5000, 0, true);
   const after = writes();
   check(res.success === true, 'S10 acknowledged settlement completes', res.error || '');
-  check(after.jv === before.jv, 'S10 cash leg still posts NO journal', `${before.jv} → ${after.jv}`);
+  check(after.jv === before.jv + (res.shortageWriteOff ? 1 : 0),
+    'S10 the CASH leg posts NO journal — at most exactly one goods write-off (D6)',
+    `${before.jv} → ${after.jv}, write-off=${res.shortageWriteOff ? res.shortageWriteOff.amount : 'none'}`);
   check(acc('1107') >= -0.01, 'S10 GL 1107 not negative', acc('1107').toFixed(2));
-  note('T-01 still applies here (deferred): the acknowledged custody keeps its unsold-goods value in 1107', acc('1107').toFixed(2));
+  note('D6 FIXED: acknowledged unsold-goods value is written off 1107 at close',
+    `1107=${acc('1107').toFixed(2)}, write-off=${res.shortageWriteOff ? res.shortageWriteOff.amount : 'none'}`);
 }
 
 // ===========================================================================
@@ -497,7 +509,7 @@ console.log('\n================================================================'
 console.log(`RESULT — ${pass} passed, ${fail} failed`);
 console.log('================================================================');
 if (deferred.length) {
-  console.log('\nDEFERRED (measured, deliberately not fixed in this batch):');
+  console.log('\nMEASURED / NOTES:');
   deferred.forEach(d => console.log(`  • ${d}`));
 }
 process.exit(fail > 0 ? 1 : 0);

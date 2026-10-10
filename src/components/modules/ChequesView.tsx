@@ -42,7 +42,9 @@ export const ChequesView: React.FC = () => {
     return activeCheques.filter(c => {
       // Status filter
       let matchesStatus = true;
-      if (statusFilter === 'pending') {
+      if (statusFilter === 'under_collection') {
+        matchesStatus = c.status === 'under_collection';
+      } else if (statusFilter === 'pending') {
         matchesStatus = c.status === 'received' || c.status === 'issued';
       } else if (statusFilter === 'due') {
         matchesStatus = (c.status === 'received' || c.status === 'issued' || c.status === 'under_collection') && c.dueDate <= todayStr;
@@ -187,6 +189,11 @@ export const ChequesView: React.FC = () => {
   const countDue = activeCheques.filter(c => (c.status === 'received' || c.status === 'issued' || c.status === 'under_collection') && c.dueDate <= today).length;
   const countCollectedPaid = activeCheques.filter(c => c.status === 'collected' || c.status === 'paid').length;
   const countReturned = activeCheques.filter(c => c.status === 'bounced').length;
+  // ITEM 17: dedicated "cheques under collection" card (deposited at the bank,
+  // not yet notified as collected).
+  const underCollection = activeCheques.filter(c => c.status === 'under_collection');
+  const countUnderCollection = underCollection.length;
+  const sumUnderCollection = underCollection.reduce((s, c) => s + c.amount, 0);
 
   return (
     <div className="space-y-6 text-right">
@@ -312,6 +319,49 @@ export const ChequesView: React.FC = () => {
         >
           مرتد ومرفوض (Returned) ({countReturned})
         </button>
+      </div>
+
+      {/* ITEM 17: cheques-under-collection card */}
+      <div
+        className={`p-4 rounded-2xl border shadow-xs flex flex-wrap items-center justify-between gap-4 transition ${
+          statusFilter === 'under_collection'
+            ? 'bg-indigo-600 border-indigo-700'
+            : 'bg-indigo-50 border-indigo-200 hover:border-indigo-300'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-xl ${statusFilter === 'under_collection' ? 'bg-white/15' : 'bg-white border border-indigo-100'}`}>
+            <Clock className={`w-5 h-5 ${statusFilter === 'under_collection' ? 'text-white' : 'text-indigo-600'}`} />
+          </div>
+          <div>
+            <p className={`text-sm font-black ${statusFilter === 'under_collection' ? 'text-white' : 'text-indigo-900'}`}>
+              شيكات تحت التحصيل (Under Collection)
+            </p>
+            <p className={`text-[11px] font-semibold ${statusFilter === 'under_collection' ? 'text-indigo-100' : 'text-indigo-700'}`}>
+              شيكات مودعة بالبنك ولم يرد إشعار تحصيلها بعد — {activeTab === 'incoming' ? 'أوراق القبض' : 'أوراق الدفع'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-left">
+            <p className={`text-lg font-black font-mono ${statusFilter === 'under_collection' ? 'text-white' : 'text-indigo-900'}`}>
+              {countUnderCollection} شيك
+            </p>
+            <p className={`text-[11px] font-semibold ${statusFilter === 'under_collection' ? 'text-indigo-100' : 'text-indigo-700'}`}>
+              إجمالي {sumUnderCollection.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م
+            </p>
+          </div>
+          <button
+            onClick={() => setStatusFilter(s => (s === 'under_collection' ? 'all' : 'under_collection'))}
+            className={`px-4 py-2 rounded-xl font-bold text-xs transition cursor-pointer ${
+              statusFilter === 'under_collection'
+                ? 'bg-white text-indigo-700 hover:bg-indigo-50'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700'
+            }`}
+          >
+            {statusFilter === 'under_collection' ? 'إظهار الكل' : 'عرض الشيكات'}
+          </button>
+        </div>
       </div>
 
       {/* Search Bar */}

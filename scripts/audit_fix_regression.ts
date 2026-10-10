@@ -637,9 +637,35 @@ section('QA-02 / QA-03 / QA-04 — production guards (parts G / H / I)');
     closedOrder!.materialReconciliation!.every(r =>
       Math.abs(r.issuedQuantity - (r.consumedQuantity + r.returnedQuantity + r.approvedVarianceQuantity)) <= 1e-3),
     JSON.stringify(closedOrder?.materialReconciliation || []));
-  check('QA-12: scrap/damaged stock is reconciled to the GL (1112 / 1111 / 1108)',
-    dbAfter.journalEntries.some(j => j.sourceDocumentType === 'production_waste' && j.sourceDocumentId === order.order!.id),
-    'no production_waste journal was posted');
+  // ITEM 11 — the OLD behaviour (a production_waste journal capitalising the
+  // scrap at 10% into 1112, the defective share at 50% into 1111) is
+  // deliberately REMOVED: it created inventory value out of nothing. The new
+  // invariants asserted here:
+  //   1. NO production_waste journal is posted for the order,
+  //   2. the scrap transfer is a QUANTITY-only movement (unitCost 0),
+  //   3. production journals never debit 1111/1112 (no invented scrap value),
+  //   4. the QC-fail cost share is written off EXACTLY ONCE by the closure
+  //      entry into 5104 — and the closure journal balances (asserted above).
+  const A12 = (code: string) => snap().accounts.find(a => a.code === code)?.id;
+  check('QA-12: NO production_waste journal capitalises scrap (ITEM 11 removed the 10% valuation)',
+    !dbAfter.journalEntries.some(j => j.sourceDocumentType === 'production_waste' && j.sourceDocumentId === order.order!.id),
+    'production_waste journal absent as designed');
+  const wasteTxs12 = dbAfter.inventoryTransactions.filter(
+    t => t.documentNumber === order.order!.orderNumber && t.documentType === 'هالك إنتاج');
+  check('QA-12: the scrap transfer is QUANTITY-only (unitCost 0 — nothing invented)',
+    wasteTxs12.length > 0 && wasteTxs12.every(t => (t.unitCost || 0) === 0 && (t.totalCost || 0) === 0),
+    `movements=${wasteTxs12.length}`);
+  check('QA-12: production journals never debit 1112/1111 (GL gains no invented scrap value)',
+    !dbAfter.journalEntries.filter(j => j.sourceDocumentId === order.order!.id)
+      .some(j => j.lines.some(l => (l.accountId === A12('1112') || l.accountId === A12('1111')) && (l.debit || 0) > 0)),
+    'no 1112/1111 debits from production');
+  const closeJv12 = dbAfter.journalEntries.find(
+    j => j.sourceDocumentType === 'production_order_close' && j.sourceDocumentId === order.order!.id);
+  const qcWriteOff = closeJv12
+    ? closeJv12.lines.filter(l => l.accountId === A12('5104')).reduce((s, l) => s + (l.debit || 0), 0)
+    : 0;
+  check('QA-12: the QC-fail cost share is written off exactly ONCE via 5104 (closure entry)',
+    qcWriteOff > 0, `writeOff=${qcWriteOff.toFixed(2)}`);
 }
 
 // ===========================================================================

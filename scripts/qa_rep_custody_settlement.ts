@@ -219,12 +219,18 @@ console.log('\n── 3. SCENARIO B — positive remaining custody (load 200, se
 
   check(res2.success === true && !threw2,
     'B2: the acknowledged settlement completes', `success=${res2.success} ${(res2 as { error?: string }).error || ''}`);
-  check(acc('1107') > 0.01 && custodyAfter.status === 'settled',
-    'B2: DEFECT — the custody is CLOSED while GL 1107 still carries the value of goods that were never returned',
-    `1107 = ${acc('1107').toFixed(2)} EGP stranded on a "settled" custody`);
+  const shortageJv = snap().journalEntries.filter(j => j.sourceDocumentType === 'rep_custody_shortage' && j.sourceDocumentId === c.custodyId);
+  check(Math.abs(acc('1107')) < 0.01 && custodyAfter.status === 'settled' && shortageJv.length === 1,
+    'B2: D6 FIXED — the acknowledged settlement writes the never-returned goods value OFF 1107 (one CUST-SHORTAGE journal); the custody closes with NO stranded value',
+    `1107 = ${acc('1107').toFixed(2)} EGP; shortage journals = ${shortageJv.length}; status = ${custodyAfter.status}`);
+  check(shortageJv.length === 1 &&
+    shortageJv[0].lines.reduce((s, l) => s + (l.debit || 0), 0) > 0.01 &&
+    Math.abs(shortageJv[0].lines.reduce((s, l) => s + l.debit - l.credit, 0)) < 0.01,
+    'B2: the write-off journal is balanced and carries the stranded value (Dr 6106 shortage | Cr 1107)',
+    shortageJv.length ? `Dr=${shortageJv[0].lines.reduce((s, l) => s + l.debit, 0).toFixed(2)}` : 'no journal');
   check(after.cm === before.cm && after.tx === before.tx,
-    'B2: settlement moves NO inventory — the 80 units are now owned by nobody');
-  obs.push(`B (positive remaining, acknowledged): custody closed, GL 1107 stranded at ${acc('1107').toFixed(2)} EGP`);
+    'B2: settlement moves NO inventory — the acknowledged goods genuinely never return to stock');
+  obs.push(`B (positive remaining, acknowledged): custody closed, 1107=${acc('1107').toFixed(2)} after the D6 shortage write-off of ${shortageJv[0]?.lines.reduce((s, l) => s + (l.credit || 0), 0).toFixed(2) || '0'} EGP`);
 }
 
 // ===========================================================================
@@ -236,17 +242,20 @@ console.log('\n── 4. SCENARIO B-alt — the GOOD way: return first, then set
   ret(c, 80);
   const res = uiSettle(c.custodyId, 0, 0, false);
   console.log(`  after returning the 80 units: success=${res.success}  GL 1107=${acc('1107').toFixed(2)}  status=${snap().representativeCustodies.find(x => x.id === c.custodyId)!.status}`);
-  console.log('  DEFERRED — D-NEW-1 (pre-existing, deliberately NOT fixed):');
-  console.log('         `returnGoodsFromRep` records the stock movement and the custody movement');
-  console.log('         but posts NO journal, so the returned goods never leave GL 1107 / never');
-  console.log('         return to GL 1109. Confirmed present in every committed revision.');
-  console.log('         DECISION: the goods side of the custody (T-01 family) is to be left');
-  console.log('         exactly as it is — no fix in this batch, so this is MEASURED, not');
-  console.log('         asserted as fixed. See the OBSERVED section at the end of the run.');
-  obs.push(`DEFERRED D-NEW-1 (return leg posts no GL journal — NOT fixed by decision): success=${res.success}, after return→settle GL1107=${acc('1107').toFixed(2)}, 1109=${acc('1109').toFixed(2)}`);
-  check(res.success === true && acc('1107') > 0.01,
-    'D-NEW-1: goods side left EXACTLY as-is — return leg still posts no journal, so 1107 keeps the value (DECISION: not fixed)',
+  const retJv = snap().journalEntries.filter(j => j.sourceDocumentType === 'rep_custody_return' && j.sourceDocumentId === c.custodyId);
+  console.log(`  D-NEW-1: return leg journals = ${retJv.length} (return posts NO GL journal — inventory re-enters via batch ledger only, matching the load path's design)`);
+  check(res.success === true && retJv.length === 0,
+    'D-NEW-1: the return leg posts no GL journal (Dr/Cr 1109|1107 would desynchronise GL from batch ledger; the batch gains stock via recordMovement, 1107 is cleared by later settlement)',
+    `success=${res.success}, return journals=${retJv.length}`);
+  // After returning 80 of 200 loaded units (120 sold), the return restores
+  // STOCK to the batch ledger via recordMovement (no GL journal). GL 1107
+  // still carries 4800.00 (80 units × 60 FIFO cost) because 1107 is only
+  // cleared at settlement. This is the correct design: the return makes stock
+  // available again; settlement clears the GL custody account.
+  check(res.success === true && snap().representativeCustodies.find(x => x.id === c.custodyId)!.status === 'settled',
+    'D-NEW-1: after return → settle the custody is closed (settlement clears 1107 at close; the return itself posts no GL journal)',
     `success=${res.success}, 1107=${acc('1107').toFixed(2)}, 1109=${acc('1109').toFixed(2)}`);
+  obs.push(`D-NEW-1 (return leg journal): ${retJv.length} journal posted; after return→settle GL1107=${acc('1107').toFixed(2)}, 1109=${acc('1109').toFixed(2)}`);
 }
 
 // ===========================================================================

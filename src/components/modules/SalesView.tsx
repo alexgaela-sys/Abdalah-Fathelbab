@@ -5,6 +5,18 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { WorkflowService } from '../../services/workflows';
+
+/** Resolve an invoice line item's configured base-unit display name. */
+function itemUnitLabel(db: ReturnType<typeof erpDb.getSnapshot>, itemId?: string): string {
+  if (itemId) {
+    const itm = db.items.find((i) => i.id === itemId);
+    if (itm?.baseUnitId) {
+      const u = db.units.find((u) => u.id === itm.baseUnitId);
+      if (u?.nameAr) return u.nameAr;
+    }
+  }
+  return 'قطعة';
+}
 import { SalesChannel, PaymentMethod } from '../../types/erp';
 import { priceFor, channelForCustomerType, currencyForChannel, warehouseForChannel } from '../../services/pricing';
 import { PermissionService } from '../../services/permissions';
@@ -173,11 +185,24 @@ export const SalesView: React.FC = () => {
     setCurrency(currencyForChannel(defaultChannel));
     setTaxTreatment('taxable');
     setExchangeRate(db.company.currentUsdExchangeRate);
-    setLines([]);
+    // Seed EXACTLY one line synchronously (STALE-01 fix): the old pattern
+    // setLines([]) + setTimeout(addLine, 50) let addLine run against the
+    // STALE `lines` closure of this render, resurrecting the previous
+    // invoice's lines — the form grew by one row on every open.
+    const seedItem = finishedProducts[0];
+    setLines(seedItem
+      ? [{
+          itemId: seedItem.id,
+          quantity: 10,
+          freeQuantity: 0,
+          unitPrice: priceFor(seedItem, defaultChannel),
+          vatRate: defaultChannel === 'export' ? 0 : seedItem.vatRate,
+          priceOverridden: false,
+        }]
+      : []);
     setFormError(null);
     setCreditAlert(null);
     setShowCreateModal(true);
-    setTimeout(() => addLine({ preventDefault() {} } as React.MouseEvent<HTMLButtonElement>, defaultChannel), 50);
   };
 
   const handleSaveInvoice = () => {
@@ -700,7 +725,7 @@ export const SalesView: React.FC = () => {
                     return (
                       <tr key={line.id}>
                         <td className="p-2 font-bold">{itm?.nameAr || line.itemId}</td>
-                        <td className="p-2 text-center font-mono">{line.quantity} كرتونة</td>
+                        <td className="p-2 text-center font-mono">{line.quantity} {itemUnitLabel(db, line.itemId)}</td>
                         <td className="p-2 text-center font-mono text-emerald-700 font-bold">{line.freeQuantity || 0}</td>
                         <td className="p-2 text-center font-mono">{line.unitPrice}</td>
                         <td className="p-2 text-left font-mono font-black">{line.netTotal.toFixed(2)}</td>

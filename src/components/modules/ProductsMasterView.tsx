@@ -8,6 +8,7 @@ import {
 import { erpDb } from '../../services/db';
 import { Item, ProductFamily, ItemType } from '../../types/erp';
 import { MasterDataService } from '../../services/masterData';
+import { InventoryEngine } from '../../services/inventory';
 
 export const ProductsMasterView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -335,14 +336,14 @@ export const ProductsMasterView: React.FC = () => {
                 <th className="p-3.5 whitespace-nowrap text-left">سعر الجملة</th>
                 <th className="p-3.5 whitespace-nowrap text-left">تصدير (USD)</th>
                 <th className="p-3.5 whitespace-nowrap text-center">حد الطلب</th>
+                <th className="p-3.5 whitespace-nowrap text-center">الرصيد الحالي</th>
                 <th className="p-3.5 whitespace-nowrap text-center">الحالة</th>
                 <th className="p-3.5 whitespace-nowrap text-center">الإجراءات</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredItems.length === 0 ? (
-                <tr>
-                  <td colSpan={13} className="py-12 text-center text-slate-400">
+                <tr>                    <td colSpan={14} className="py-12 text-center text-slate-400">
                     لا توجد أصناف مطابقة لمعايير البحث الحالية
                   </td>
                 </tr>
@@ -401,6 +402,17 @@ export const ProductsMasterView: React.FC = () => {
                     </td>
                     <td className="p-3.5 text-center font-mono text-slate-600 whitespace-nowrap">
                       {item.minStockLevel || 0}
+                    </td>
+                    <td className="p-3.5 text-center font-mono whitespace-nowrap">
+                      {(() => {
+                        const bal = InventoryEngine.getItemBalance(item.id);
+                        const belowMin = bal <= (item.minStockLevel || 0);
+                        return (
+                          <span className={`font-black ${bal === 0 ? 'text-rose-600' : belowMin ? 'text-amber-600' : 'text-emerald-700'}`}>
+                            {bal.toLocaleString('ar-EG')}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="p-3.5 text-center whitespace-nowrap">
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${

@@ -18,6 +18,8 @@ export const CustomersView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'list' | 'statement' | 'returns'>('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  // MD-CUST-06 — non-null while editing an existing customer (null = create mode)
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   // QA-25: UI permission affordance (service authorization stays the real wall).
   const writeAccess = useModuleWriteAccess('customers', 'العملاء');
   const [showPaymentModal, setShowPaymentModal] = useState<Customer | null>(null);
@@ -98,6 +100,39 @@ export const CustomersView: React.FC = () => {
   const [paymentRef, setPaymentRef] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
 
+  const openCreateCustomer = () => {
+    if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
+    setEditingCustomer(null);
+    setCode(`CUST-00${db.customers.length + 1}`);
+    setName('');
+    setOpeningBalanceInput(0);
+    setShowAddModal(true);
+  };
+
+  // MD-CUST-06 — open the shared customer form in EDIT mode, prefilled from the row.
+  // Balances are intentionally NOT part of the form: editing a master record must
+  // never rewrite posted history (service enforces the same).
+  const openEditCustomer = (cust: Customer) => {
+    if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
+    setEditingCustomer(cust);
+    setCode(cust.code);
+    setName(cust.name);
+    setCustomerType(cust.customerType);
+    setAddress(cust.address || '');
+    setPhone(cust.phone || '');
+    setTaxNumber(cust.taxNumber || '');
+    setCurrency(cust.currency);
+    setCreditLimit(cust.creditLimit);
+    setPaymentTerms(cust.paymentTerms || '');
+    setOpeningBalanceInput(0);
+    setShowAddModal(true);
+  };
+
+  const closeCustomerModal = () => {
+    setShowAddModal(false);
+    setEditingCustomer(null);
+  };
+
   const handleSaveCustomer = () => {
     if (!name.trim()) {
       alert('يرجى إدخال اسم العميل');
@@ -105,27 +140,41 @@ export const CustomersView: React.FC = () => {
     }
 
     // F15: writes go through the guarded master-data service (AuthorizationService).
-    const res = MasterDataService.createCustomer({
-      code,
-      name,
-      customerType,
-      channel,
-      address,
-      phone,
-      taxNumber,
-      currency,
-      creditLimit: Number(creditLimit) || 0,
-      openingBalance: Number(openingBalanceInput) || 0,
-      paymentTerms,
-      userId: 'usr-admin',
-      userName: 'المشرف العام (Admin)',
-    });
+    const res = editingCustomer
+      ? MasterDataService.updateCustomer(editingCustomer.id, {
+          code,
+          name,
+          customerType,
+          address,
+          phone,
+          taxNumber,
+          currency,
+          creditLimit: Number(creditLimit) || 0,
+          paymentTerms,
+          userId: 'usr-admin',
+          userName: 'المشرف العام (Admin)',
+        })
+      : MasterDataService.createCustomer({
+          code,
+          name,
+          customerType,
+          channel,
+          address,
+          phone,
+          taxNumber,
+          currency,
+          creditLimit: Number(creditLimit) || 0,
+          openingBalance: Number(openingBalanceInput) || 0,
+          paymentTerms,
+          userId: 'usr-admin',
+          userName: 'المشرف العام (Admin)',
+        });
     if (!res.success) {
       alert(res.error || 'تعذر حفظ بيانات العميل');
       return;
     }
 
-    setShowAddModal(false);
+    closeCustomerModal();
     setName('');
     setOpeningBalanceInput(0);
   };
@@ -261,11 +310,7 @@ export const CustomersView: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => {
-              if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
-              setCode(`CUST-00${db.customers.length + 1}`);
-              setShowAddModal(true);
-            }}
+            onClick={openCreateCustomer}
             disabled={!writeAccess.canCreate}
             title={writeAccess.canCreate ? '' : writeAccess.createDeniedTitle}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
@@ -393,6 +438,14 @@ export const CustomersView: React.FC = () => {
                         </td>
                         <td className="p-3.5 text-center">
                           <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => openEditCustomer(cust)}
+                              disabled={!writeAccess.canCreate}
+                              title={writeAccess.canCreate ? 'تعديل بيانات العميل' : writeAccess.createDeniedTitle}
+                              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              تعديل
+                            </button>
                             <button
                               onClick={() => {
                                 setStatementCustomerId(cust.id);
@@ -818,8 +871,10 @@ export const CustomersView: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg p-6 text-right space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <h3 className="font-bold text-base text-slate-900">إضافة عميل جديد للنظام</h3>
-              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">✕</button>
+              <h3 className="font-bold text-base text-slate-900">
+                {editingCustomer ? 'تعديل بيانات العميل' : 'إضافة عميل جديد للنظام'}
+              </h3>
+              <button onClick={closeCustomerModal} className="text-slate-400 hover:text-slate-600 cursor-pointer">✕</button>
             </div>
 
             <div className="space-y-3">
@@ -904,21 +959,23 @@ export const CustomersView: React.FC = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">الرصيد الافتتاحي (Opening Balance)</label>
-                <input
-                  type="number"
-                  value={openingBalanceInput}
-                  onChange={(e) => setOpeningBalanceInput(Number(e.target.value))}
-                  placeholder="0.00"
-                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
-                />
-              </div>
+              {!editingCustomer && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الرصيد الافتتاحي (Opening Balance)</label>
+                  <input
+                    type="number"
+                    value={openingBalanceInput}
+                    onChange={(e) => setOpeningBalanceInput(Number(e.target.value))}
+                    placeholder="0.00"
+                    className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={closeCustomerModal}
                 className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs cursor-pointer"
               >
                 إلغاء
@@ -927,7 +984,7 @@ export const CustomersView: React.FC = () => {
                 onClick={handleSaveCustomer}
                 className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md cursor-pointer"
               >
-                حفظ العميل
+                {editingCustomer ? 'حفظ التعديلات' : 'حفظ العميل'}
               </button>
             </div>
           </div>

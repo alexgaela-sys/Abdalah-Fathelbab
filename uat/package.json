@@ -1,0 +1,10 @@
+{
+  "name": "snakdip-uat-harness",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "ISOLATED UAT harness for SnakDip ERP. Not part of the application build.",
+  "dependencies": {
+    "playwright": "^1.64.0"
+  }
+}

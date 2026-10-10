@@ -1,0 +1,179 @@
+{
+  "suite": "03_forms_map",
+  "generatedAt": "2026-10-09T12:14:22.204Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-items-إضافة صن",
+      "name": "[items] create surface \"إضافة صنف / منتج جديد\" opens",
+      "status": "PASS",
+      "detail": "title=\"إضافة صنف / منتج جديد للكتالوج\" fields=17 buttons=✕/إلغاء/حفظ الصنف الجديد",
+      "ts": "2026-10-09T12:13:20.511Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-sales-فاتورة ب",
+      "name": "[sales] create surface \"فاتورة بيع جديدة\" opens",
+      "status": "PASS",
+      "detail": "title=\"إصدار فاتورة مبيعات جديدة\" fields=13 buttons=✕/+ إضافة صنف/عرض 10+1/✕/إلغاء/حفظ وترحيل الفاتورة بالدفاتر",
+      "ts": "2026-10-09T12:13:23.633Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-purchasing-فاتورة ا",
+      "name": "[purchasing] create surface \"فاتورة استلام خامات جديدة\" opens",
+      "status": "PASS",
+      "detail": "title=\"فاتورة استلام خامات ومواد تعبئة (Material Receipt)\" fields=13 buttons=✕/+ إضافة مادة خام / تعبئة/✕/إلغاء/حفظ وترحيل الاستلام المخزني",
+      "ts": "2026-10-09T12:13:27.102Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-inventory-تحويل مخ",
+      "name": "[inventory] create surface \"تحويل مخزني داخلي\" opens",
+      "status": "PASS",
+      "detail": "title=\"تحويل مخزني داخلي بين المستودعات\" fields=5 buttons=✕/إلغاء/تنفيذ التحويل وتوثيق الحركات",
+      "ts": "2026-10-09T12:13:30.424Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-inventory-جرد فعلي",
+      "name": "[inventory] create surface \"جرد فعلي وتسوية\" opens",
+      "status": "PASS",
+      "detail": "title=\"محضر جرد فعلي وتسوية الفروق المخزنية\" fields=1 buttons=✕/إلغاء/اعتماد الجرد وتسوية الفروق بالدفاتر",
+      "ts": "2026-10-09T12:13:33.439Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-manufacturing-أمر إنتا",
+      "name": "[manufacturing] create surface \"أمر إنتاج جديد\" opens",
+      "status": "PASS",
+      "detail": "title=\"إصدار أمر إنتاج وتشغيل جديد\" fields=5 buttons=✕/إلغاء/اعتماد وإطلاق أمر الإنتاج",
+      "ts": "2026-10-09T12:13:36.552Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-quality-تسجيل مح",
+      "name": "[quality] create surface \"تسجيل محضر فحص جودة\" opens",
+      "status": "PASS",
+      "detail": "title=\"تسجيل محضر فحص جودة جديد\" fields=7 buttons=✕/إلغاء/اعتماد محضر الفحص وتوجيه البضاعة",
+      "ts": "2026-10-09T12:13:39.701Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-costing-تحديث مع",
+      "name": "[costing] create surface \"تحديث معدل تكلفة معياري جديد\" opens",
+      "status": "PASS",
+      "detail": "title=\"تحديث معدل تكلفة تحويل صناعية معيارية\" fields=5 buttons=✕/إلغاء/حفظ المعدل المعياري",
+      "ts": "2026-10-09T12:13:42.898Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-customers-إضافة عم",
+      "name": "[customers] create surface \"إضافة عميل جديد\" opens",
+      "status": "PASS",
+      "detail": "title=\"إضافة عميل جديد للنظام\" fields=8 buttons=✕/إلغاء/حفظ العميل",
+      "ts": "2026-10-09T12:13:46.119Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-suppliers-إضافة مو",
+      "name": "[suppliers] create surface \"إضافة مورد جديد\" opens",
+      "status": "PASS",
+      "detail": "title=\"تسجيل مورد خامات ومواد تعبئة جديد\" fields=9 buttons=✕/إلغاء/حفظ المورد",
+      "ts": "2026-10-09T12:13:49.166Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-representatives-مندوب جد",
+      "name": "[representatives] create surface \"مندوب جديد\" opens",
+      "status": "PASS",
+      "detail": "title=\"تسجيل مندوب مبيعات جديد\" fields=4 buttons=✕/إلغاء/تسجيل المندوب",
+      "ts": "2026-10-09T12:13:52.233Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-representatives-فتح عهدة",
+      "name": "[representatives] create surface \"فتح عهدة مندوب جديدة\" opens",
+      "status": "PASS",
+      "detail": "title=\"فتح عهدة مندوب مبيعات جديدة\" fields=2 buttons=✕/إلغاء/فتح العهدة",
+      "ts": "2026-10-09T12:13:55.246Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-export-تسجيل شح",
+      "name": "[export] create surface \"تسجيل شحنة تصدير جديدة\" opens",
+      "status": "PASS",
+      "detail": "title=\"تسجيل شحنة تصدير وتكاليف لوجستية\" fields=12 buttons=✕/إلغاء/حفظ الشحنة واحتساب الربحية",
+      "ts": "2026-10-09T12:13:58.589Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-treasury-حركة قبض",
+      "name": "[treasury] create surface \"حركة قبض / صرف خزينة\" opens",
+      "status": "PASS",
+      "detail": "title=\"تسجيل حركة نقدية بالخزينة\" fields=6 buttons=✕/إلغاء/حفظ وترحيل القيد المحاسبي",
+      "ts": "2026-10-09T12:14:01.852Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-banks-إجراء حر",
+      "name": "[banks] create surface \"إجراء حركة مصرفية\" opens",
+      "status": "PASS",
+      "detail": "title=\"تسجيل حركة مصرفية جديدة\" fields=6 buttons=✕/إلغاء/ترحيل الحركة بالدفاتر",
+      "ts": "2026-10-09T12:14:05.119Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-cheques-تسجيل شي",
+      "name": "[cheques] create surface \"تسجيل شيك جديد\" opens",
+      "status": "PASS",
+      "detail": "title=\"تسجيل شيك وارد من عميل (ورقة قبض)\" fields=8 buttons=✕/إلغاء/حفظ الشيك بالسجل",
+      "ts": "2026-10-09T12:14:08.300Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-expenses-تسجيل إذ",
+      "name": "[expenses] create surface \"تسجيل إذن صرف مصروف\" opens",
+      "status": "PASS",
+      "detail": "title=\"تسجيل مصروف ومصادقة على الصرف\" fields=8 buttons=✕/إلغاء/تأكيد الصرف وترحيل القيد",
+      "ts": "2026-10-09T12:14:11.477Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-accounting-قيد يومي",
+      "name": "[accounting] create surface \"قيد يومية يدوي متزن\" opens",
+      "status": "PASS",
+      "detail": "title=\"إنشاء قيد يومية عامة يدوي متزن (Double-Entry Journal)\" fields=11 buttons=✕/+ إضافة طرف/إلغاء/ترحيل القيد بالدفاتر",
+      "ts": "2026-10-09T12:14:14.571Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-users-إضافة مس",
+      "name": "[users] create surface \"إضافة مستخدم جديد\" opens",
+      "status": "PASS",
+      "detail": "title=\"إضافة مستخدم جديد للنظام\" fields=5 buttons=✕/إلغاء/إنشاء المستخدم",
+      "ts": "2026-10-09T12:14:17.801Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORM-settings-إضافة من",
+      "name": "[settings] create surface \"إضافة منتج تام جديد\" opens",
+      "status": "PASS",
+      "detail": "title=\"تعريف منتج تام سناكس جديد\" fields=8 buttons=✕/إلغاء/حفظ المنتج وإنشاء معادلة BOM",
+      "ts": "2026-10-09T12:14:20.949Z"
+    },
+    {
+      "suite": "03_forms_map",
+      "id": "FORMS-CONSOLE",
+      "name": "No console errors while opening all create surfaces",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-09T12:14:22.203Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

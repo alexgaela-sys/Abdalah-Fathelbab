@@ -1,0 +1,43 @@
+{
+  "suite": "07_stale_forms",
+  "generatedAt": "2026-10-09T02:04:31.743Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "07_stale_forms",
+      "id": "STALE-01",
+      "name": "Sales invoice form starts empty on every open (no leftover line items)",
+      "status": "PASS",
+      "detail": "[{\"open\":1,\"rows\":1,\"firstQty\":\"0\"},{\"open\":2,\"rows\":1,\"firstQty\":\"0\"},{\"open\":3,\"rows\":1,\"firstQty\":\"0\"},{\"open\":4,\"rows\":1,\"firstQty\":\"0\"}]",
+      "ts": "2026-10-09T02:04:18.023Z"
+    },
+    {
+      "suite": "07_stale_forms",
+      "id": "STALE-02",
+      "name": "Purchase receipt form starts empty on every open",
+      "status": "PASS",
+      "detail": "[{\"open\":1,\"rows\":1},{\"open\":2,\"rows\":1},{\"open\":3,\"rows\":1}]",
+      "ts": "2026-10-09T02:04:25.021Z"
+    },
+    {
+      "suite": "07_stale_forms",
+      "id": "STALE-03",
+      "name": "Manual journal form keeps exactly its two default sides on every open",
+      "status": "PASS",
+      "detail": "[{\"open\":1,\"rows\":2},{\"open\":2,\"rows\":2},{\"open\":3,\"rows\":2}] (expected: 2 default sides — debit + credit)",
+      "ts": "2026-10-09T02:04:31.742Z"
+    },
+    {
+      "suite": "07_stale_forms",
+      "id": "STALE-CONSOLE",
+      "name": "No console errors during stale-form probe",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-09T02:04:31.743Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

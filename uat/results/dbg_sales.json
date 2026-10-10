@@ -1,0 +1,10 @@
+{
+  "suite": "dbg_sales",
+  "generatedAt": "2026-10-08T23:42:31.178Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

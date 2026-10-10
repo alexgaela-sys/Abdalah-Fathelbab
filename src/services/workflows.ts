@@ -1,13 +1,13 @@
 // End-to-End Operational Workflows for Purchasing, Sales, Custody, Payments, Cheques, Export, Quality & Physical Counts
 // Every workflow is atomic: all validation happens BEFORE any mutation, and each posted
 // document produces balanced accounting via AccountingEngine (AccountMapping-driven).
-import { erpDb, generateErpId, nextDocNumber } from './db';
+import { erpDb, generateErpId, nextDocNumber, getUnitConversion } from './db';
 import { 
   PurchaseInvoice, PurchaseInvoiceLine, SalesInvoice, SalesInvoiceLine, 
   Payment, Cheque, ChequeStatus, QualityInspection, InventoryCount, InventoryCountLine, 
   ExportShipment, Expense, Customer, Supplier, SalesRepresentative, 
   RepresentativeCustody, CustodyMovement, SalesReturn, SalesReturnLine,
-  PurchaseReturn, TreasuryTransaction, BankTransaction, isDebitNatureCategory
+  PurchaseReturn, PurchaseReturnLine, ScrapSaleDocument, TreasuryTransaction, BankTransaction, isDebitNatureCategory
 } from '../types/erp';
 import { InventoryEngine } from './inventory';
 import { AccountingEngine } from './accounting';
@@ -1389,6 +1389,13 @@ export class WorkflowService {
     }>;
     /** Optional per-item quality destination override (defaults to saleable restock) */
     inspectionOverrides?: Record<string, QualityInspection['destination']>;
+    /**
+     * ITEM 6 — REQUIRED only on the exception path (no linked invoice): the
+     * explicit, approved tax treatment. A linked return inherits the original
+     * line's rate and never needs this; 14% is never assumed just because a
+     * value is missing.
+     */
+    exceptionTaxTreatment?: 'taxable' | 'exempt';
     userId?: string;
     userName?: string;
     isTest?: boolean;
@@ -1397,6 +1404,35 @@ export class WorkflowService {
     const customer = db.customers.find(c => c.id === params.customerId);
     if (!customer) return { success: false, error: 'العميل غير مسجل بالنظام' };
     if (!params.lines || params.lines.length === 0) return { success: false, error: 'يجب إدخال أصناف المرتجع' };
+
+    // ITEM 6 — EXCEPTION PATH GUARDS: a return with NO original invoice must be
+    // explicit — documented reason + approved tax treatment + approval-grade
+    // permission. The default 14% can no longer be assumed from a missing value.
+    if (!params.invoiceId) {
+      if (!(params.reason || '').trim()) {
+        return { success: false, error: 'مرتجع بدون فاتورة أصلية يتطلب سببًا موثقًا صريحًا' };
+      }
+      if (!params.exceptionTaxTreatment) {
+        return {
+          success: false,
+          error: 'مرتجع بدون فاتورة أصلية يتطلب تحديد معاملة ضريبية صريحة (خاضع للضريبة / معفى) — لا يُقبل افتراض 14% لمجرد غياب الفاتورة',
+        };
+      }
+      if (params.exceptionTaxTreatment === 'taxable') {
+        for (const l of params.lines) {
+          const rate = Number(l.vatRate);
+          if (!Number.isFinite(rate) || rate < 0) {
+            return { success: false, error: 'مرتجع خاضع للضريبة بدون فاتورة أصلية يتطلب معاملة ضريبية معتمدة على كل صنف' };
+          }
+        }
+      }
+      const approveGuard = AuthorizationService.enforce('sales', 'approve', {
+        userId: params.userId, userName: params.userName, isTest: params.isTest,
+      });
+      if (!approveGuard.allowed) {
+        return { success: false, error: `مرتجع بدون فاتورة أصلية يتطلب صلاحية اعتماد: ${approveGuard.error}` };
+      }
+    }
 
     for (const l of params.lines) {
       if (!db.items.find(i => i.id === l.itemId)) return { success: false, error: 'صنف في المرتجع غير معرف بالنظام' };
@@ -1442,17 +1478,28 @@ export class WorkflowService {
     // at price 0.00 and carries no VAT — a bonus can never create revenue or VAT.
     const lineEconomics = params.lines.map(l => {
       const origLine = originalInvoiceLines.find(sl => sl.itemId === l.itemId);
-      const effectiveVatRate = origLine ? (origLine.vatRate || 0) : (l.vatRate || 0);
+      // ITEM 6 — the linked return inherits BOTH the rate AND the unit price of
+      // the original invoice line (the caller's price is never used when the
+      // invoice exists); the exception path honors its explicit treatment.
+      const effectiveVatRate = origLine
+        ? (origLine.vatRate || 0)
+        : (params.exceptionTaxTreatment === 'exempt' ? 0 : (l.vatRate || 0));
+      const effectiveUnitPrice = origLine ? (Number(origLine.unitPrice) || 0) : (Number(l.unitPrice) || 0);
       const bonusQty = origLine
         ? Math.min(l.quantity, Number(origLine.freeQuantity) || 0)
         : Math.min(l.quantity, Number((l as { freeQuantity?: number }).freeQuantity) || 0);
       const paidQty = Math.max(0, l.quantity - bonusQty);
-      const lineNet = paidQty * l.unitPrice;
+      const lineNet = paidQty * effectiveUnitPrice;
       revenueNet += lineNet;
       vatTotal += lineNet * effectiveVatRate;
       return { line: l, origLine, bonusQty, paidQty, effectiveVatRate, lineNet };
     });
-    const totalAmount = revenueNet + vatTotal;
+    // ITEM 6 — unified 2-decimal rounding: each total is rounded once, then the
+    // amount added to receivables is their (already rounded) sum, so the journal
+    // balances to the cent and matches the invoice's calculation basis.
+    revenueNet = Math.round(revenueNet * 100) / 100;
+    vatTotal = Math.round(vatTotal * 100) / 100;
+    const totalAmount = Math.round((revenueNet + vatTotal) * 100) / 100;
 
     // COGS value of returned goods.
     // QA-09: the return must reverse the ECONOMIC effect of the original sale.
@@ -1655,7 +1702,7 @@ export class WorkflowService {
     // Determine actual cost per line from the original purchase invoice when available,
     // otherwise from the current batch cost in the warehouse.
     const sourceInvoice = params.purchaseInvoiceId ? db.purchaseInvoices.find(i => i.id === params.purchaseInvoiceId) : undefined;
-    const costLines: Array<{ itemId: string; quantity: number; unitCost: number; batchNumber?: string; vatRate: number }> = [];
+    const costLines: Array<{ itemId: string; quantity: number; unitCost: number; unitPrice: number; batchNumber?: string; vatRate: number }> = [];
 
     for (const l of params.lines) {
       const item = db.items.find(i => i.id === l.itemId);
@@ -1669,18 +1716,38 @@ export class WorkflowService {
         if (invLine) {
           unitCost = invLine.unitPrice;
           vatRate = invLine.vatRate || 0;
+          // ITEM 4 — returnable cap: received qty minus qty already returned on
+          // this invoice. Neither the quantity nor the amount may exceed what
+          // the original posted invoice makes returnable.
+          const alreadyReturned = db.purchaseReturns
+            .filter(r => r.purchaseInvoiceId === sourceInvoice.id && r.status === 'posted')
+            .reduce((s, r) => s + (r.lines || [])
+              .filter(x => x.itemId === l.itemId)
+              .reduce((s2, x) => s2 + (Number(x.quantity) || 0), 0), 0);
+          const returnable = (Number(invLine.quantity) || 0) - alreadyReturned;
+          if (Number(l.quantity) > returnable + 0.0001) {
+            return {
+              success: false,
+              error: `لا يمكن إرجاع أكثر من القابل للإرجاع من الفاتورة ${sourceInvoice.invoiceNumber}: الصنف (${item.nameAr}) `
+                + `المستلم ${invLine.quantity}، مرتجع سابق ${alreadyReturned}، المتبقي القابل للإرجاع ${Math.max(0, returnable)} — الطلب ${l.quantity}.`,
+            };
+          }
         }
       }
-      if (unitCost === 0) {
-        const est = InventoryEngine.estimateIssueCost(l.itemId, params.warehouseId, l.quantity, l.batchNumber);
-        unitCost = est.actualUnitCost || item.standardCost || 0;
-      }
-      costLines.push({ itemId: l.itemId, quantity: l.quantity, unitCost, batchNumber: l.batchNumber, vatRate });
+      costLines.push({ itemId: l.itemId, quantity: l.quantity, unitCost, unitPrice: unitCost, batchNumber: l.batchNumber, vatRate });
     }
 
-    const invSubtotal = costLines.reduce((s, l) => s + l.quantity * l.unitCost, 0);
-    const invVat = costLines.reduce((s, l) => s + l.quantity * l.unitCost * l.vatRate, 0);
-    const totalAmount = invSubtotal + invVat;
+    // ITEM 4 — every per-line amount is rounded to 2 decimals first, and the
+    // totals are the SUMS of those rounded lines, so the journal, the return
+    // document and the supplier balance all agree to the cent.
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const lineAmounts = costLines.map(cl => ({
+      net: r2(cl.quantity * cl.unitPrice),
+      vat: r2(cl.quantity * cl.unitPrice * cl.vatRate),
+    }));
+    const invSubtotal = lineAmounts.reduce((s, a) => s + a.net, 0);
+    const invVat = lineAmounts.reduce((s, a) => s + a.vat, 0);
+    const totalAmount = r2(invSubtotal + invVat);
 
     // Issue goods from warehouse first (validates stock, computes actual FIFO cost)
     const issueResults: Array<ReturnType<typeof InventoryEngine.recordMovement>> = [];
@@ -1708,19 +1775,35 @@ export class WorkflowService {
     const rawAcc = AccountingEngine.getMappedAccountId('purchase_raw_inventory', 'acc-1108');
     const vatInAcc = AccountingEngine.getMappedAccountId('purchase_vat_input', 'acc-1113');
 
-    const actualIssuedCost = issueResults.reduce((s, r) => s + (r.actualCost || 0), 0);
+    // ITEM 4 — journal, with the FIFO/price difference routed to the EXISTING
+    // material price variance account (5103) — never plugged into inventory:
+    //   Dr supplier payable (invoice price + input VAT)
+    //   Cr inventory (actual FIFO cost that left the warehouse)
+    //   Cr VAT input (reverses the original document's input tax)
+    //   ± price variance (invoice price vs FIFO carrying cost)
+    const actualIssuedCost = r2(issueResults.reduce((s, r) => s + (r.actualCost || 0), 0));
+    const priceVariance = r2(invSubtotal - actualIssuedCost);
+    const varAcc = AccountingEngine.getMappedAccountId('variance_material_price', 'acc-5103');
     const lines: JLine[] = [
       jl(supAcc, totalAmount, 0, totalAmount, 1, 'EGP', `مرتجع مشتريات ${returnNumber} - تخفيض مستحقات المورد ${supplier.name}`),
-      jl(rawAcc, 0, actualIssuedCost, actualIssuedCost, 1, 'EGP', `مرتجع مشتريات ${returnNumber} - صرف مخزون بالتكلفة الفعلية`),
+      jl(rawAcc, 0, actualIssuedCost, actualIssuedCost, 1, 'EGP', `مرتجع مشتريات ${returnNumber} - صرف مخزون بالتكلفة الفعلية (FIFO)`),
       ...(invVat > 0 ? [jl(vatInAcc, 0, invVat, invVat, 1, 'EGP', `مرتجع مشتريات ${returnNumber} - عكس ضريبة مدخلات`)] : []),
+      ...(Math.abs(priceVariance) >= 0.01
+        ? [priceVariance > 0
+            ? jl(varAcc, 0, priceVariance, priceVariance, 1, 'EGP', `مرتجع مشتريات ${returnNumber} - فرق سعر شراء (سعر الفاتورة أعلى من التكلفة الفعلية)`)
+            : jl(varAcc, -priceVariance, 0, -priceVariance, 1, 'EGP', `مرتجع مشتريات ${returnNumber} - فرق سعر شراء (التكلفة الفعلية أعلى من سعر الفاتورة)`)]
+        : []),
     ];
 
-    // Balance any rounding difference into inventory credit side (never post unbalanced)
+    // Safety: any residual rounding difference goes to the SAME variance
+    // account — inventory value is never adjusted to force a balance.
     const dr = lines.reduce((s, l) => s + l.debit, 0);
     const cr = lines.reduce((s, l) => s + l.credit, 0);
     const diff = Number((dr - cr).toFixed(2));
     if (Math.abs(diff) >= 0.01) {
-      if (diff > 0) lines[1].credit += diff; else lines[0].debit -= diff;
+      lines.push(diff > 0
+        ? jl(varAcc, 0, diff, diff, 1, 'EGP', `مرتجع مشتريات ${returnNumber} - فروق تقريب`)
+        : jl(varAcc, -diff, 0, -diff, 1, 'EGP', `مرتجع مشتريات ${returnNumber} - فروق تقريب`));
     }
 
     const jv = AccountingEngine.postJournal({
@@ -1735,6 +1818,25 @@ export class WorkflowService {
 
     let created: PurchaseReturn | undefined;
     erpDb.mutate(draft => {
+      const returnLines: PurchaseReturnLine[] = costLines.map((cl, idx) => {
+        const issued = issueResults[idx];
+        const issuedQty = (issued?.consumedBatches || []).reduce((s, b) => s + b.quantity, 0) || cl.quantity;
+        const issuedCost = Number((issued?.actualCost || 0).toFixed(2));
+        return {
+          id: `pretl-${returnId}-${idx + 1}`,
+          returnId,
+          itemId: cl.itemId,
+          quantity: cl.quantity,
+          unitId: db.items.find(i => i.id === cl.itemId)?.baseUnitId || 'unit-kg',
+          unitPrice: cl.unitPrice,
+          vatRate: cl.vatRate,
+          vatAmount: lineAmounts[idx].vat,
+          netTotal: lineAmounts[idx].net,
+          batchNumber: cl.batchNumber,
+          issuedUnitCost: issuedQty > 0 ? issuedCost / issuedQty : 0,
+          issuedCostTotal: issuedCost,
+        };
+      });
       created = {
         id: returnId,
         returnNumber,
@@ -1747,6 +1849,7 @@ export class WorkflowService {
         totalVat: invVat,
         status: 'posted',
         journalEntryId: jv.entry?.id,
+        lines: returnLines,
         isTest: params.isTest,
       };
       draft.purchaseReturns.push(created);
@@ -1768,6 +1871,243 @@ export class WorkflowService {
     });
 
     return { success: true, purchaseReturn: created };
+  }
+
+  /**
+   * ITEM 12 — INTERNAL SCRAP SALE document (explicitly NOT a sales invoice):
+   * unique number, date, item, quantity, price, buyer, user, wh-scrap issue,
+   * VAT-EXEMPT by explicit user decision, revenue recognized in 4104.
+   *
+   * Entries (balanced, no invented counterpart accounts):
+   *   Revenue: Dr cash (1101) or receivable (1105) | Cr 4104 scrap revenue
+   *   Cost   (only when the scrap carries book value): Dr 5104 | Cr 1112
+   * Stock leaves wh-scrap through the FIFO engine — selling above balance is
+   * rejected, and a zero book value is respected (no value is invented).
+   */
+  public static createScrapSale(params: {
+    itemId: string;
+    quantity: number;
+    unitPrice: number;
+    unitId?: string;
+    buyerName: string;
+    paymentMethod: 'cash' | 'credit';
+    date: string;
+    notes?: string;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; scrapSale?: ScrapSaleDocument; error?: string } {
+    const guard = AuthorizationService.enforce('sales', 'create', {
+      userId: params.userId, userName: params.userName, isTest: params.isTest,
+    });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    const db = erpDb.getSnapshot();
+    const item = db.items.find(i => i.id === params.itemId);
+    if (!item) return { success: false, error: 'صنف السكراب غير مسجل بالنظام' };
+    if (!(Number(params.quantity) > 0)) return { success: false, error: 'كمية بيع السكراب يجب أن تكون أكبر من صفر' };
+    if (!(Number(params.unitPrice) > 0)) return { success: false, error: 'سعر بيع السكراب يجب أن يكون أكبر من صفر' };
+    if (!(params.buyerName || '').trim()) return { success: false, error: 'يجب إدخال الجهة المستلمة / المشتري' };
+    if (!params.date) return { success: false, error: 'تاريخ المستند مطلوب' };
+
+    // Unit of measure: convert the entered quantity into the item's base unit.
+    let qtyBase = Number(params.quantity);
+    if (params.unitId && params.unitId !== item.baseUnitId) {
+      try {
+        qtyBase = qtyBase * getUnitConversion(db, params.unitId, item.baseUnitId);
+      } catch (e) {
+        return { success: false, error: `لا يوجد معامل تحويل وحدة لبيع السكراب (${item.nameAr}): ${(e as Error).message}` };
+      }
+    }
+    qtyBase = Number(qtyBase.toFixed(6));
+
+    // Above-balance sale is rejected by the FIFO engine (no negative scrap stock).
+    const est = InventoryEngine.estimateIssueCost(item.id, 'wh-scrap', qtyBase);
+    if (est.shortfall > 0) {
+      const balance = InventoryEngine.getItemBalance(item.id, 'wh-scrap');
+      return {
+        success: false,
+        error: `لا يمكن بيع السكراب فوق الرصيد: المتاح من (${item.nameAr}) في مخزن السكراب ${balance} والطلب ${qtyBase} ${item.baseUnitId}.`,
+      };
+    }
+
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const totalValue = r2(qtyBase * Number(params.unitPrice));
+    const unitCost = est.actualUnitCost || 0; // 0 when the scrap carries no book value
+    const bookValue = r2(qtyBase * unitCost);
+
+    const docNumber = nextDocNumber(
+      db as unknown as Record<string, unknown>, 'scrapSales', 'SCRAP-SALE', 5, 'docNumber'
+    );
+    const docId = generateErpId('ssale');
+
+    // ---- Revenue entry: Dr cash/receivable | Cr 4104 (VAT exempt by decision) ----
+    const revAcc = params.paymentMethod === 'cash'
+      ? AccountingEngine.getMappedAccountId('cash_treasury', 'acc-1101')
+      : AccountingEngine.getMappedAccountId('customer_receivable_local', 'acc-1105');
+    const scrapRevAcc = AccountingEngine.getMappedAccountId('scrap_sales_revenue', 'acc-4104');
+    const revJv = AccountingEngine.postJournal({
+      date: params.date,
+      reference: docNumber,
+      description: `بيع سكراب داخلي ${docNumber} — ${item.nameAr} × ${qtyBase} ${item.baseUnitId} للجهة ${params.buyerName} (معفى من الضريبة)`,
+      sourceDocumentType: 'scrap_sale',
+      sourceDocumentId: docId,
+      lines: [
+        jl(revAcc, totalValue, 0, totalValue, 1, 'EGP', `بيع سكراب ${docNumber} — ${params.paymentMethod === 'cash' ? 'نقدًا' : 'آجل (ذمم)'}`),
+        jl(scrapRevAcc, 0, totalValue, totalValue, 1, 'EGP', `إيراد بيع السكراب ${docNumber} (4104)`),
+      ],
+    }, guard.userId, guard.userName, params.isTest);
+    if (!revJv.success || !revJv.entry) return { success: false, error: revJv.error };
+
+    // ---- Cost entry — ONLY when book value exists (never invented) ----
+    let costJvId: string | undefined;
+    if (bookValue > 0.005) {
+      const scrapInvAcc = AccountingEngine.getMappedAccountId('inventory_scrap', 'acc-1112');
+      const varAcc = AccountingEngine.getMappedAccountId('variance_material_quantity', 'acc-5104');
+      const costJv = AccountingEngine.postJournal({
+        date: params.date,
+        reference: docNumber,
+        description: `صرف قيمة دفترية لسكراب مبيع ${docNumber} — ${item.nameAr}`,
+        sourceDocumentType: 'scrap_sale_cost',
+        sourceDocumentId: docId,
+        lines: [
+          jl(varAcc, bookValue, 0, bookValue, 1, 'EGP', `خرج قيمة سكراب ${docNumber} من المخزون`),
+          jl(scrapInvAcc, 0, bookValue, bookValue, 1, 'EGP', `تخفيض مخزون السكراب 1112 — ${docNumber}`),
+        ],
+      }, guard.userId, guard.userName, params.isTest);
+      if (!costJv.success || !costJv.entry) {
+        return { success: false, error: `تعذر ترحيل تكلفة بيع السكراب: ${costJv.error}` };
+      }
+      costJvId = costJv.entry.id;
+    }
+
+    // ---- Physical issue from wh-scrap (FIFO) ----
+    const mv = InventoryEngine.recordMovement({
+      itemId: item.id,
+      warehouseId: 'wh-scrap',
+      movementType: 'scrap',
+      date: params.date,
+      quantityIn: 0,
+      quantityOut: qtyBase,
+      unitCost: 0,
+      documentType: 'بيع سكراب داخلي',
+      documentNumber: docNumber,
+      notes: `بيع سكراب ${docNumber} للجهة ${params.buyerName}`,
+      isTest: params.isTest,
+    });
+    if (!mv.success) return { success: false, error: `فشل صرف السكراب من المخزن: ${mv.error}` };
+
+    const created: ScrapSaleDocument = {
+      id: docId,
+      docNumber,
+      date: params.date,
+      itemId: item.id,
+      quantity: qtyBase,
+      unitId: item.baseUnitId,
+      unitPrice: Number(params.unitPrice),
+      unitCost,
+      totalValue,
+      bookValue,
+      buyerName: params.buyerName.trim(),
+      paymentMethod: params.paymentMethod,
+      warehouseId: 'wh-scrap',
+      status: 'posted',
+      journalEntryId: revJv.entry.id,
+      costJournalEntryId: costJvId,
+      notes: params.notes,
+      createdByUserId: guard.userId,
+      createdByName: guard.userName,
+      createdAt: new Date().toISOString(),
+      isTest: params.isTest,
+    };
+    erpDb.mutate(draft => {
+      draft.scrapSales.push(created);
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: guard.userId,
+        userName: guard.userName,
+        module: 'المخزون - بيع السكراب',
+        action: 'post',
+        recordId: docId,
+        description: `مستند بيع سكراب داخلي ${docNumber}: ${item.nameAr} × ${qtyBase} ${item.baseUnitId} بسعر ${params.unitPrice} = ${totalValue} ج.م للجهة ${params.buyerName} (${params.paymentMethod === 'cash' ? 'نقدًا' : 'آجل'}) — إيراد 4104، معفى من الضريبة`,
+      });
+    });
+
+    return { success: true, scrapSale: created };
+  }
+
+  /**
+   * ITEM 12 — cancel a scrap-sale document through an ACCOUNTING REVERSAL
+   * (never by deleting the movement): reverse both entries, then return the
+   * quantity to wh-scrap at its original book cost.
+   */
+  public static cancelScrapSale(params: {
+    scrapSaleId: string;
+    reason: string;
+    userId?: string;
+    userName?: string;
+    isTest?: boolean;
+  }): { success: boolean; error?: string } {
+    const guard = AuthorizationService.enforce('sales', 'cancel', {
+      userId: params.userId, userName: params.userName, isTest: params.isTest,
+    });
+    if (!guard.allowed) return { success: false, error: guard.error };
+
+    const db = erpDb.getSnapshot();
+    const doc = db.scrapSales.find(s => s.id === params.scrapSaleId);
+    if (!doc) return { success: false, error: 'مستند بيع السكراب غير موجود' };
+    if (doc.status === 'cancelled') return { success: false, error: 'مستند بيع السكراب ملغى بالفعل' };
+    const reason = (params.reason || '').trim();
+    if (!reason) return { success: false, error: 'إلغاء مستند بيع السكراب يتطلب سببًا صريحًا' };
+
+    // 1) reverse the revenue entry (and the cost entry when one exists)
+    const reversalIds: string[] = [];
+    if (doc.journalEntryId) {
+      const rev = AccountingEngine.reverseJournal(doc.journalEntryId, `إلغاء بيع سكراب ${doc.docNumber}: ${reason}`, params.userId || 'usr-admin', params.userName || 'مدير النظام');
+      if (!rev.success) return { success: false, error: rev.error };
+      reversalIds.push(rev.reversalEntry!.id);
+    }
+    if (doc.costJournalEntryId) {
+      const rev = AccountingEngine.reverseJournal(doc.costJournalEntryId, `إلغاء بيع سكراب ${doc.docNumber}: ${reason}`, params.userId || 'usr-admin', params.userName || 'مدير النظام');
+      if (!rev.success) return { success: false, error: rev.error };
+      reversalIds.push(rev.reversalEntry!.id);
+    }
+
+    // 2) return the quantity to wh-scrap at its ORIGINAL book cost
+    const item = db.items.find(i => i.id === doc.itemId);
+    const back = InventoryEngine.recordMovement({
+      itemId: doc.itemId,
+      warehouseId: 'wh-scrap',
+      movementType: 'scrap',
+      date: new Date().toISOString().split('T')[0],
+      quantityIn: doc.quantity,
+      quantityOut: 0,
+      unitCost: doc.unitCost || 0,
+      documentType: 'إلغاء بيع سكراب',
+      documentNumber: doc.docNumber,
+      notes: `إرجاع سكراب بعد إلغاء ${doc.docNumber} — ${reason}`,
+      isTest: params.isTest,
+    });
+    if (!back.success) return { success: false, error: `تعذر إرجاع السكراب للمخزن: ${back.error}` };
+
+    erpDb.mutate(draft => {
+      const target = draft.scrapSales.find(s => s.id === params.scrapSaleId);
+      if (!target) return;
+      target.status = 'cancelled';
+      target.reversalJournalEntryIds = reversalIds;
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: params.userId || 'usr-admin',
+        userName: params.userName || 'مدير النظام',
+        module: 'المخزون - بيع السكراب',
+        action: 'cancel',
+        recordId: target.id,
+        description: `إلغاء مستند بيع سكراب ${target.docNumber} (${item?.nameAr || target.itemId} × ${target.quantity}) بعكس محاسبي موثق — السبب: ${reason}`,
+      });
+    });
+    return { success: true };
   }
 
   /**

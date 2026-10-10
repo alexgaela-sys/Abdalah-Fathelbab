@@ -14,7 +14,52 @@ export const PurchasingView: React.FC = () => {
   // QA-25: UI permission affordance (service authorization stays the real wall).
   const writeAccess = useModuleWriteAccess('purchasing', 'المشتريات');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'invoices' | 'price_comparison'>('invoices');
+  const [activeTab, setActiveTab] = useState<'invoices' | 'purchase_returns' | 'price_comparison'>('invoices');
+
+  // ---------- ITEM 4 — purchase return from a posted invoice ----------
+  const [retInvoiceId, setRetInvoiceId] = useState('');
+  const [retDate, setRetDate] = useState(new Date().toISOString().split('T')[0]);
+  const [retReason, setRetReason] = useState('');
+  const [retQtys, setRetQtys] = useState<Record<string, number>>({});
+  const [retError, setRetError] = useState<string | null>(null);
+  const [retNotice, setRetNotice] = useState<string | null>(null);
+
+  const postedInvoices = db.purchaseInvoices.filter(i => i.status === 'posted');
+  const retInvoice = postedInvoices.find(i => i.id === retInvoiceId) || null;
+  const retInvoiceLines = retInvoice
+    ? db.purchaseInvoiceLines.filter(l => l.purchaseInvoiceId === retInvoice.id)
+    : [];
+  const previouslyReturned = (itemId: string): number => {
+    if (!retInvoice) return 0;
+    return db.purchaseReturns
+      .filter(r => r.purchaseInvoiceId === retInvoice.id && r.status === 'posted')
+      .reduce((s, r) => s + (r.lines || [])
+        .filter(x => x.itemId === itemId)
+        .reduce((s2, x) => s2 + (Number(x.quantity) || 0), 0), 0);
+  };
+
+  const handlePostPurchaseReturn = () => {
+    setRetError(null);
+    setRetNotice(null);
+    if (!retInvoice) { setRetError('اختر فاتورة شراء مرحّلة أولاً'); return; }
+    if (!retReason.trim()) { setRetError('سبب المرتجع مطلوب'); return; }
+    const lines = retInvoiceLines
+      .map(l => ({ itemId: l.itemId, quantity: Number(retQtys[l.itemId]) || 0, batchNumber: l.batchNumber }))
+      .filter(l => l.quantity > 0);
+    if (lines.length === 0) { setRetError('أدخل كمية مرتجع لصنف واحد على الأقل'); return; }
+    const res = WorkflowService.postPurchaseReturn({
+      supplierId: retInvoice.supplierId,
+      purchaseInvoiceId: retInvoice.id,
+      warehouseId: retInvoice.warehouseId || 'wh-raw',
+      date: retDate,
+      reason: retReason.trim(),
+      lines,
+    });
+    if (!res.success) { setRetError(res.error || 'تعذر ترحيل مرتجع المشتريات'); return; }
+    setRetNotice(`تم ترحيل المرتجع ${res.purchaseReturn?.returnNumber} وإخراج الكميات من المخزن بتكلفة FIFO وعكس ضريبة المدخلات.`);
+    setRetQtys({});
+    setRetReason('');
+  };
 
   // Form State
   const [supplierId, setSupplierId] = useState('');
@@ -239,6 +284,14 @@ export const PurchasingView: React.FC = () => {
           سجل فواتير استلام الخامات
         </button>
         <button
+          onClick={() => setActiveTab('purchase_returns')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
+            activeTab === 'purchase_returns' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          مرتجع المشتريات
+        </button>
+        <button
           onClick={() => setActiveTab('price_comparison')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
             activeTab === 'price_comparison' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
@@ -317,6 +370,182 @@ export const PurchasingView: React.FC = () => {
             </table>
           </div>
         </>
+      )}
+
+      {/* ITEM 4 — purchase return screen */}
+      {activeTab === 'purchase_returns' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-3">
+            <div>
+              <h3 className="font-bold text-xs text-slate-800">إنشاء مرتجع شراء من فاتورة أصلية مرحّلة</h3>
+              <p className="text-[11px] text-slate-500 mt-1">
+                تعرض الكميات المستلمة والمرتجعة سابقًا والمتبقي القابل للإرجاع لكل صنف. يُمنع تجاوز الكمية أو المبلغ القابل للإرجاع،
+                وتُصرف الكميات من المخزن وفق التشغيلات (FIFO) بالتكلفة الفعلية، ويُعكس التزام المورد وضريبة المدخلات حسب المستند الأصلي،
+                ويُوجَّه فرق السعر إلى حساب فروق أسعار الشراء (5103) دون تعديل قيمة المخزون اعتباطيًا.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">فاتورة الشراء الأصلية (مرحّلة)</label>
+                <select
+                  value={retInvoiceId}
+                  onChange={(e) => { setRetInvoiceId(e.target.value); setRetQtys({}); setRetError(null); setRetNotice(null); }}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                >
+                  <option value="">— اختر الفاتورة —</option>
+                  {postedInvoices.map(inv => (
+                    <option key={inv.id} value={inv.id}>
+                      {inv.invoiceNumber} — {db.suppliers.find(s => s.id === inv.supplierId)?.name} — {inv.date}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">تاريخ المرتجع</label>
+                <input
+                  type="date"
+                  value={retDate}
+                  onChange={(e) => setRetDate(e.target.value)}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1">سبب المرتجع (إلزامي)</label>
+                <input
+                  type="text"
+                  value={retReason}
+                  onChange={(e) => setRetReason(e.target.value)}
+                  placeholder="مثال: تالف عند الاستلام / عدم مطابقة المواصفة"
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                />
+              </div>
+            </div>
+
+            {retInvoice && (
+              <div className="border border-slate-200 rounded-xl overflow-x-auto">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-100 text-slate-700 font-bold">
+                    <tr>
+                      <th className="p-2.5">الصنف</th>
+                      <th className="p-2.5 text-center">المستلم</th>
+                      <th className="p-2.5 text-center">مرتجع سابق</th>
+                      <th className="p-2.5 text-center">المتبقي القابل للإرجاع</th>
+                      <th className="p-2.5 text-center">سعر الفاتورة</th>
+                      <th className="p-2.5 text-center">كمية الإرجاع</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {retInvoiceLines.map(l => {
+                      const item = db.items.find(i => i.id === l.itemId);
+                      const returned = previouslyReturned(l.itemId);
+                      const returnable = Math.max(0, (Number(l.quantity) || 0) - returned);
+                      return (
+                        <tr key={l.id} className="hover:bg-slate-50">
+                          <td className="p-2.5 font-bold text-slate-800">{item?.nameAr || l.itemId}</td>
+                          <td className="p-2.5 text-center font-mono">{l.quantity} {db.units.find(u => u.id === l.unitId)?.nameAr || ''}</td>
+                          <td className="p-2.5 text-center font-mono text-rose-600">{returned}</td>
+                          <td className="p-2.5 text-center font-mono font-black text-slate-900">{returnable}</td>
+                          <td className="p-2.5 text-center font-mono">{l.unitPrice.toFixed(2)}</td>
+                          <td className="p-2.5 text-center">
+                            <input
+                              type="number"
+                              min="0"
+                              max={returnable}
+                              step="0.001"
+                              value={retQtys[l.itemId] ?? 0}
+                              onChange={(e) => setRetQtys(prev => ({
+                                ...prev,
+                                [l.itemId]: Math.max(0, Number(e.target.value)),
+                              }))}
+                              className="w-28 p-1.5 rounded-lg bg-slate-50 border border-slate-300 text-xs font-mono text-center"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {retInvoiceLines.length === 0 && (
+                      <tr><td colSpan={6} className="py-5 text-center text-slate-400">لا توجد بنود على هذه الفاتورة</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {retError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">{retError}</div>
+            )}
+            {retNotice && (
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">{retNotice}</div>
+            )}
+
+            <div className="flex justify-end">
+              <button
+                onClick={handlePostPurchaseReturn}
+                disabled={!retInvoice || !retReason.trim()}
+                className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md disabled:opacity-40"
+              >
+                ترحيل المرتجع وإخراج المخزون
+              </button>
+            </div>
+          </div>
+
+          {/* Registered returns */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-200">
+              <h3 className="font-bold text-xs text-slate-800">سجل مرتجعات المشتريات</h3>
+            </div>
+            {db.purchaseReturns.length === 0 ? (
+              <div className="py-10 text-center text-slate-400 text-xs">لا توجد مرتجعات مشتريات مسجّلة</div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {db.purchaseReturns.map(r => (
+                  <div key={r.id} className="p-4 space-y-2 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-bold text-slate-900">
+                        <span className="font-mono ml-2">{r.returnNumber}</span>
+                        {db.suppliers.find(s => s.id === r.supplierId)?.name}
+                        <span className="mx-2 font-mono text-indigo-700">{r.totalAmount.toLocaleString('ar-EG')} ج.م</span>
+                        {r.totalVat > 0 && <span className="text-slate-500 font-mono">+ ضريبة {r.totalVat.toFixed(2)}</span>}
+                        <span className={`mr-2 px-2 py-0.5 rounded-full text-[10px] ${r.status === 'posted' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
+                          {r.status === 'posted' ? 'مرحّل' : 'ملغى'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        {r.date} — السبب: {r.reason}
+                        {r.purchaseInvoiceId && ` — فاتورة أصلية: ${db.purchaseInvoices.find(i => i.id === r.purchaseInvoiceId)?.invoiceNumber || ''}`}
+                      </div>
+                    </div>
+                    {(r.lines || []).length > 0 && (
+                      <table className="w-full text-right text-[11px]">
+                        <thead className="bg-slate-50 text-slate-600 font-bold">
+                          <tr>
+                            <th className="p-2">الصنف</th>
+                            <th className="p-2 text-center">الكمية</th>
+                            <th className="p-2 text-center">سعر الفاتورة</th>
+                            <th className="p-2 text-center">قيمة المرتجع</th>
+                            <th className="p-2 text-center">تكلفة FIFO المصروفة</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50 font-mono">
+                          {(r.lines || []).map(l => (
+                            <tr key={l.id}>
+                              <td className="p-2 font-bold font-sans">{db.items.find(i => i.id === l.itemId)?.nameAr}</td>
+                              <td className="p-2 text-center">{l.quantity}</td>
+                              <td className="p-2 text-center">{l.unitPrice.toFixed(2)}</td>
+                              <td className="p-2 text-center">{l.netTotal.toFixed(2)}</td>
+                              <td className="p-2 text-center text-slate-500">{(l.issuedCostTotal || 0).toFixed(2)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {activeTab === 'price_comparison' && (

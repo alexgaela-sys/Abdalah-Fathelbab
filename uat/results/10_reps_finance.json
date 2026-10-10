@@ -1,0 +1,171 @@
+{
+  "suite": "10_reps_finance",
+  "generatedAt": "2026-10-09T12:27:26.648Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-SETUP",
+      "name": "Setup: 500 cartons produced into WH-02 for the custody scenario",
+      "status": "PASS",
+      "detail": "WH-02=500; order=PRD-2026-0001",
+      "ts": "2026-10-09T12:26:14.885Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-01",
+      "name": "Custody opened for the representative through the UI",
+      "status": "PASS",
+      "detail": "custodies=1; status=open",
+      "ts": "2026-10-09T12:26:17.399Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-02",
+      "name": "Load 100 cartons issues WH-02 into the custody with a movement record",
+      "status": "PASS",
+      "detail": "WH-02 500→400; movements=1; Δ1107=14814.17; dialogs=",
+      "ts": "2026-10-09T12:26:20.821Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-03",
+      "name": "Second load of the same item records its own unit cost",
+      "status": "PASS",
+      "detail": "movements={\"id\":\"cstm-mv0xvxa9-020\",\"custodyId\":\"cst-mv0xvuyg-01v\",\"itemId\":\"item-fp-s1\",\"movementType\":\"loaded\",\"quantity\":100,\"unitPrice\":140,\"date\":\"2026-10-09\",\"refer, {\"id\":\"cstm-mv0xvzvo-025\",\"custodyId\":\"cst-mv0xvuyg-01v\",\"itemId\":\"item-fp-s1\",\"movementType\":\"loaded\",\"quantity\":50,\"unitPrice\":140,\"date\":\"2026-10-09\",\"refere; WH-02=350",
+      "ts": "2026-10-09T12:26:24.197Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-05",
+      "name": "Representative-custody sale posts from the custody without a second warehouse issue",
+      "status": "PASS",
+      "detail": "invoices 0→1; stockSource=rep_custody; custodyId=cst-mv0xvuyg-01v; WH-02 350→350; custodySelectIdx=4; itemSelectIdx=7; lineNumbers=4; stockSourceField=rep_custody; selects=[{\"i\":0,\"value\":\"cust-mv0xvdh4-002\",\"n\":1,\"first\":\"عميل مندوب UAT (wholesale) - ح\"},{\"i\":1,\"value\":\"wholesale\",\"n\":3,\"first\":\"جملة (Wholesale)\"},{\"i\":2,\"value\":\"taxable\",\"n\":2,\"first\":\"خاضع للضريبة (Taxable - حسب ال\"},{\"; modal=; dialogs=",
+      "ts": "2026-10-09T12:26:59.183Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-06",
+      "name": "Returning 30 cartons puts them back into WH-02 exactly once",
+      "status": "PASS",
+      "detail": "WH-02 350→380",
+      "ts": "2026-10-09T12:27:02.657Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-04",
+      "name": "Returning more than the custody holds is rejected",
+      "status": "PASS",
+      "detail": "WH-02 380→380 (Δ0 units accepted without stock); dialog=الكمية المطلوب إرجاعها (100000) تتجاوز رصيد العهدة الحالي من هذا الصنف (100) — لا يمكن إرجاع أكثر مما تحمله العهدة.; modalLeftOpen=true",
+      "ts": "2026-10-09T12:27:05.284Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-07",
+      "name": "Custody settlement executes once and closes the custody",
+      "status": "PASS",
+      "detail": "status=settled; settledQty=undefined; newJournals=1; dialogs=prompt:المبلغ النقدي المُسلَّم من المندوب عند التسوية — لا يمكن أن يتجاوز النقد الفعلي الذي جمعه من هذه الع | prompt:مبلغ نقدي يُصرف من الخزينة للمندوب عند التسوية (رد/استرداد) — لا يمكن أن يتجاوز النقد المُسلَّم في ن | confirm:العهدة CUST-2026-0001 ما زالت تحتوي على بضاعة غير مباعة (سنجل فاير سويت: 100). يجب إرجاعها إلى المخز | alert:تمت تسوية العهدة مع تنبيه.\nنقد سلّمه المندوب: 0.00 ج.م\nنقد صُصرف للمندوب: 0.00 ج.م — حركة الخزينة ال",
+      "ts": "2026-10-09T12:27:07.660Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-08",
+      "name": "Settling twice does not post a second settlement",
+      "status": "PASS",
+      "detail": "settleControlStillPresent=false; journals 6→6",
+      "ts": "2026-10-09T12:27:07.757Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "REP-09",
+      "name": "Custody ledger movements exist and GL 1107 carries the custody value",
+      "status": "PASS",
+      "detail": "movements=4; ledgerValue=0; 1107=0; custodyStatus=settled; unbalanced=0",
+      "ts": "2026-10-09T12:27:07.805Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-TRE-01",
+      "name": "Treasury receipt of 2,500 posts a journal and increases cash (1101)",
+      "status": "PASS",
+      "detail": "1101 0→2500; treasuryTx=1; dialogs=",
+      "ts": "2026-10-09T12:27:11.178Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-TRE-02",
+      "name": "Negative treasury amount is rejected",
+      "status": "PASS",
+      "detail": "tx 1→1; dialogs=المبلغ يجب أن يكون أكبر من صفر",
+      "ts": "2026-10-09T12:27:15.001Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-BNK-01",
+      "name": "Bank deposit posts a bank transaction and updates bank GL (1102)",
+      "status": "PASS",
+      "detail": "1102 0→1000; bankTx=1",
+      "ts": "2026-10-09T12:27:18.970Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-CHQ-01",
+      "name": "Cheque recorded with due date and status",
+      "status": "PASS",
+      "detail": "cheques 0→1; status=received; due=2026-11-08",
+      "ts": "2026-10-09T12:27:22.260Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-EXP-01",
+      "name": "Expense of 750 posts and reduces cash (1101)",
+      "status": "PASS",
+      "detail": "expenses 0→1; 1101 1500→750",
+      "ts": "2026-10-09T12:27:25.539Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-EXP-02",
+      "name": "Treasury Excel export downloads a real file",
+      "status": "PASS",
+      "detail": "file=download; bytes=909",
+      "ts": "2026-10-09T12:27:26.495Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-REC-01",
+      "name": "Treasury/bank subledgers reconcile with their GL accounts",
+      "status": "PASS",
+      "detail": "treasurySubledgerSum=2500; GL1101=750; bankSubledgerSum=1000; GL1102=1000 (subledger sums are directional totals; full opening-balance tie-out is asserted in the accounting suite)",
+      "ts": "2026-10-09T12:27:26.548Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-GL-01",
+      "name": "All journals balanced after finance operations",
+      "status": "PASS",
+      "detail": "journals=10; unbalanced=none",
+      "ts": "2026-10-09T12:27:26.548Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-CONSOLE",
+      "name": "No console/page errors during reps + finance testing",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-09T12:27:26.548Z"
+    },
+    {
+      "suite": "10_reps_finance",
+      "id": "FIN-DIALOGS",
+      "name": "Dialogs observed",
+      "status": "PASS",
+      "detail": "[\"confirm:صرف خامات ومواد التعبئة من مستودع الخامات لأمر الإنتاج PRD-2026-0001 و\",\"alert:تم صرف المواد بنجاح بتكلفة فعلية ٧٤٬٠٧٠٫٨٥ ج.م\",\"alert:تم إغلاق أمر الإنتاج بنجاح (إغلاق كامل).\",\"alert:الكمية المطلوب إرجاعها (100000) تتجاوز رصيد العهدة الحالي من هذا الصنف\",\"prompt:المبلغ النقدي المُسلَّم من المندوب عند التسوية — لا يمكن أن يتجاوز الن\",\"prompt:مبلغ نقدي يُصرف من الخزينة للمندوب عند التسوية (رد/استرداد) — لا يمكن \",\"confirm:العهدة CUST-2026-0001 ما زالت تحتوي على بضاعة غير مباعة (سنجل فاير سوي\",\"alert:تمت تسوية العهدة مع تنبيه.\\nنقد سلّمه المندوب: 0.00 ج.م\\nنقد صُصرف للمند\",\"alert:المبلغ يجب أن يكون أكبر من صفر\"]",
+      "ts": "2026-10-09T12:27:26.548Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}

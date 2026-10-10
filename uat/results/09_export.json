@@ -1,0 +1,131 @@
+{
+  "suite": "09_export",
+  "generatedAt": "2026-10-09T02:00:42.990Z",
+  "baseUrl": "http://localhost:3000",
+  "results": [
+    {
+      "suite": "09_export",
+      "id": "EXP-SETUP-CUST",
+      "name": "Setup: export customer created with USD currency",
+      "status": "PASS",
+      "detail": "currency=USD; type=export; channel=export",
+      "ts": "2026-10-09T02:00:04.026Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-SETUP-STOCK",
+      "name": "Setup: export production delivered finished goods into WH-03",
+      "status": "PASS",
+      "detail": "WH-03 qty=300; item=FP-SNG-01; order=PRD-2026-0001; orderStatus=completed",
+      "ts": "2026-10-09T02:00:23.848Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-111-01",
+      "name": "Three USD invoices of 1 × $1 post exactly three documents with FX applied",
+      "status": "PASS",
+      "detail": "FX=48.5; staleLinesRemovedPerOpen=[0,1,1]; invoices=SINV-2026-00001:1USD/48.5EGP@48.5, SINV-2026-00002:1USD/48.5EGP@48.5, SINV-2026-00003:1USD/48.5EGP@48.5",
+      "ts": "2026-10-09T02:00:35.353Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-111-02",
+      "name": "Export receivable (1106) equals 3 × rate and revenue (4103) equals 3 × rate",
+      "status": "PASS",
+      "detail": "expected=145.5; Δ4103=145.5; Δ1106=145.5; Δ5102=444.43; Δ1110=-444.43",
+      "ts": "2026-10-09T02:00:35.354Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-111-03",
+      "name": "Export stock deducted once per invoice from WH-03 (no double issue)",
+      "status": "PASS",
+      "detail": "WH-03 300→297",
+      "ts": "2026-10-09T02:00:35.354Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-111-04",
+      "name": "Export COGS matches an independent FIFO recomputation (no double COGS)",
+      "status": "PASS",
+      "detail": "cogsOnInvoices=444.43; expectedFIFO=444.43; layers=PRD-PRD-2026-0001-20261009:300@148.14166666666668; Δ5102(GL)=444.43",
+      "ts": "2026-10-09T02:00:35.354Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-111-05",
+      "name": "Export journal traced line-by-line with account codes, debits and credits",
+      "status": "PASS",
+      "detail": "jv=JV-2026-00005; lines=1106 عملاء تجاريون - تصدير (USD): D=48.5 C=0 | 4103 إيراد مبيعات التصدير (USD): D=0 C=48.5 | 5102 تكلفة البضاعة المباعة - تصدير: D=148.14166666666668 C=0 | 1110 مخزون الإنتاج التام - تصدير: D=0 C=148.14166666666668; unbalancedJournals=0",
+      "ts": "2026-10-09T02:00:35.354Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-111-06",
+      "name": "Invoice numbering stays unique across local + export",
+      "status": "PASS",
+      "detail": "SINV-2026-00001,SINV-2026-00002,SINV-2026-00003",
+      "ts": "2026-10-09T02:00:35.354Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-SHIP-01",
+      "name": "Export shipment recorded with freight/port/customs costs",
+      "status": "PASS",
+      "detail": "shipments 0→1; container=MSCU-UAT-001; usd=1; rate=48.5; shipping=500; port=250; customs=125; otherExportCosts=0; productCost=148.14166666666668; dialogs=",
+      "ts": "2026-10-09T02:00:39.006Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-SHIP-02",
+      "name": "Shipment posts a journal carrying the export costs",
+      "status": "PASS",
+      "detail": "journals=1; sample=[\"acc-6104:875/0\",\"acc-2104:0/875\"]; accountBalances: 5102=444.43 1106=145.5",
+      "ts": "2026-10-09T02:00:39.056Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-SHIP-03",
+      "name": "All journals balanced after the shipment",
+      "status": "PASS",
+      "detail": "unbalanced=none",
+      "ts": "2026-10-09T02:00:39.057Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-SHIP-04",
+      "name": "Shipment cost journal equals the costs entered in the form (no phantom charges)",
+      "status": "PASS",
+      "detail": "journalCost=875; entered(shipping+port+customs)=875; stored otherExportCosts=0 — the shipment form exposes no input for it (ExportView initialises otherCosts=5000 and never renders a control), so 5,000 EGP is posted that no user entered",
+      "ts": "2026-10-09T02:00:39.057Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-COLL-01",
+      "name": "Export collection recorded through the UI moves bank/treasury",
+      "status": "PASS",
+      "detail": "[{\"i\":0,\"tag\":\"input\",\"type\":\"number\",\"value\":\"1\"},{\"i\":1,\"tag\":\"input\",\"type\":\"number\",\"value\":\"48.5\"},{\"i\":2,\"tag\":\"select\",\"type\":\"select-one\",\"value\":\"bank-2\",\"options\":[\"bank-2\"]},{\"i\":3,\"tag\":\"input\",\"type\":\"date\",\"value\":\"2026-10-09\"}]; bankTx 0→0; treasuryTx 0→0; Δ1106=-48.5; dialogs=",
+      "ts": "2026-10-09T02:00:42.864Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-FINAL",
+      "name": "Export module end state (accounts, stock, journals)",
+      "status": "PASS",
+      "detail": "4103=145.5; 1106=97; 5102=444.43; 1110=43998.07; WH-03=297; journals=7; unbalanced=0; FX=48.5",
+      "ts": "2026-10-09T02:00:42.917Z"
+    },
+    {
+      "suite": "09_export",
+      "id": "EXP-CONSOLE",
+      "name": "No console/page errors during export testing",
+      "status": "PASS",
+      "detail": "[]",
+      "ts": "2026-10-09T02:00:42.917Z"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "dialogs": []
+}
