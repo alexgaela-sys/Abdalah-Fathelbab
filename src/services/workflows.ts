@@ -856,6 +856,10 @@ export class WorkflowService {
           bankName: params.chequeBank || 'بنك العميل',
           amount: params.amount,
           currency: params.currency,
+          // The payment journal recognized this cheque's trade balance at the
+          // payment's documented rate — stamp it so every later transition
+          // (collection / bounce) reverses at the SAME rate (never rate 1).
+          exchangeRate: params.exchangeRate,
           issueDate: params.date,
           dueDate: params.chequeDueDate || params.date,
           status: 'received',
@@ -1039,6 +1043,9 @@ export class WorkflowService {
           bankName: params.chequeBank || 'بنك مصر',
           amount: params.amount,
           currency: params.currency,
+          // Same as PATH A: the supplier-payment journal recognized this cheque
+          // at the payment's documented rate — persist it for later transitions.
+          exchangeRate: params.exchangeRate,
           issueDate: params.date,
           dueDate: params.chequeDueDate || params.date,
           status: 'issued',
@@ -1396,6 +1403,13 @@ export class WorkflowService {
      * value is missing.
      */
     exceptionTaxTreatment?: 'taxable' | 'exempt';
+    /**
+     * ITEM 6 — the exception path (no linked invoice) on a USD customer has no
+     * historical invoice rate to inherit, so the EGP value of the reversal must
+     * be converted at a DOCUMENTED rate supplied by the caller. A rate is never
+     * invented and 1 is never assumed for a non-EGP customer.
+     */
+    exchangeRate?: number;
     userId?: string;
     userName?: string;
     isTest?: boolean;
@@ -1421,7 +1435,11 @@ export class WorkflowService {
       if (params.exceptionTaxTreatment === 'taxable') {
         for (const l of params.lines) {
           const rate = Number(l.vatRate);
-          if (!Number.isFinite(rate) || rate < 0) {
+          // A POSITIVE approved rate is required: this system has only
+          // taxable/exempt (no zero-rated treatment), so 'taxable' with 0% is
+          // a contradiction — it would post a labelled-taxable return with no
+          // VAT at all. Zero-VAT outcomes must say 'exempt' explicitly.
+          if (!Number.isFinite(rate) || rate <= 0) {
             return { success: false, error: 'مرتجع خاضع للضريبة بدون فاتورة أصلية يتطلب معاملة ضريبية معتمدة على كل صنف' };
           }
         }
@@ -1445,24 +1463,64 @@ export class WorkflowService {
     // sold creates inventory and COGS reversals that have no source sale to
     // reverse, which silently inflates inventory and deflates COGS.
     if (params.invoiceId) {
+      // F22 — the ceiling is the quantity STILL returnable on that invoice:
+      // (sold + bonus) − quantity already returned by earlier posted returns.
+      // Checking only the invoice line let a customer return the same goods
+      // repeatedly (10 + 10 against a 10-unit sale), inflating stock and
+      // reversing COGS twice. Cancelled returns never consumed the ceiling.
+      const invoice = db.salesInvoices.find(i => i.id === params.invoiceId);
+      if (!invoice) return { success: false, error: 'فاتورة البيع الأصلية غير موجودة' };
+      if (invoice.customerId !== params.customerId) {
+        return { success: false, error: 'الفاتورة الأصلية لا تخص هذا العميل — لا يمكن ترحيل مرتجع على حساب عميل آخر' };
+      }
+      if (invoice.status !== 'posted') {
+        return { success: false, error: `لا يمكن ترحيل مرتجع على فاتورة بحالة (${invoice.status}) — الفاتورة الأصلية يجب أن تكون مرحلة` };
+      }
+      const priorReturnedByItem = new Map<string, number>();
+      for (const l of db.salesReturnLines) {
+        const prior = db.salesReturns.find(r => r.id === l.returnId);
+        if (!prior || prior.invoiceId !== params.invoiceId || prior.status === 'cancelled') continue;
+        priorReturnedByItem.set(l.itemId, (priorReturnedByItem.get(l.itemId) || 0) + (Number(l.quantity) || 0));
+      }
       const invLines = db.salesInvoiceLines.filter(sl => sl.invoiceId === params.invoiceId);
       for (const l of params.lines) {
         const orig = invLines.find(sl => sl.itemId === l.itemId);
-        if (orig) {
-          const returnedQty = Math.max(0, l.quantity);
-          const allowedQty = Math.max(0, (orig.quantity || 0)) + Math.max(0, Number(orig.freeQuantity || 0));
-          if (returnedQty > allowedQty + 0.0001) {
-            return {
-              success: false,
-              error: `كمية المرتجع من الصنف (${(db.items.find(i => i.id === l.itemId)?.nameAr || l.itemId)}) هي ${returnedQty} لكن الفاتورة الأصلية تحتوي على ${allowedQty} فقط (تم البيع ${orig.quantity} + bonus ${orig.freeQuantity}). لا يمكن ترجيع أكثر مما بُيع.`,
-            };
-          }
+        if (!orig) {
+          return {
+            success: false,
+            error: `الصنف (${(db.items.find(i => i.id === l.itemId)?.nameAr || l.itemId)}) غير موجود في الفاتورة الأصلية — مرتجع مرتبط بفاتورة يُقصر على أصنافها. لترجيع صنف خارجها استخدم المرتجع بدون فاتورة مع سبب واعتماد صريحين.`,
+          };
+        }
+        const soldQty = Math.max(0, (orig.quantity || 0)) + Math.max(0, Number(orig.freeQuantity || 0));
+        const alreadyReturned = priorReturnedByItem.get(l.itemId) || 0;
+        const remainingQty = Math.max(0, soldQty - alreadyReturned);
+        const requestedQty = Math.max(0, Number(l.quantity) || 0);
+        if (requestedQty > remainingQty + 0.0001) {
+          return {
+            success: false,
+            error: `كمية المرتجع المطلوبة من الصنف (${(db.items.find(i => i.id === l.itemId)?.nameAr || l.itemId)}) هي ${requestedQty} لكن المتبقي القابل للترجيع على هذه الفاتورة هو ${remainingQty} (بُيع ${soldQty} وسُبق ترجيع ${alreadyReturned}). لا يمكن ترجيع أكثر مما بُيع أو تكرار ترحيل نفس الكمية.`,
+          };
         }
       }
     }
 
     const channel = customer.customerType === 'export' ? 'export' : (customer.customerType === 'wholesale' ? 'wholesale' : 'retail');
-    const exchangeRate = params.invoiceId ? (db.salesInvoices.find(i => i.id === params.invoiceId)?.exchangeRate || 1) : 1;
+    // A linked return inherits the original invoice's historical rate (never
+    // the current company rate — that would revalue posted history). The
+    // exception path must be handed an explicit rate for a USD customer.
+    let exchangeRate = 1;
+    if (params.invoiceId) {
+      exchangeRate = db.salesInvoices.find(i => i.id === params.invoiceId)?.exchangeRate || 1;
+    } else if (customer.currency === 'USD') {
+      const given = Number(params.exchangeRate);
+      if (!(given > 0)) {
+        return {
+          success: false,
+          error: 'مرتجع بدون فاتورة أصلية لعميل بالدولار يتطلب سعر صرف موثقًا (جنيه للدولار) لاحتساب القيمة بالجنيه — لا يُفترض سعر 1 ولا سعر الشركة الحالي تلقائيًا',
+        };
+      }
+      exchangeRate = given;
+    }
 
     // Financial reversal amounts (net revenue + VAT at original selling prices)
     // F5: when the return references the original invoice, inherit the ACTUAL posted
@@ -1547,10 +1605,20 @@ export class WorkflowService {
       channel === 'export' ? 'acc-1106' : 'acc-1105'
     );
 
+    // The debit/credit fields of a journal line are ALWAYS EGP (the invoice
+    // posts totalAmountEGP the same way); the original currency and rate are
+    // carried on the line for audit. R-22: the old reversal posted the raw USD
+    // net/VAT/total into the EGP fields, so a $1,000 return reduced the EGP
+    // receivable by only 1,000 instead of 1,000 x rate.
+    const retCurrency: 'EGP' | 'USD' = customer.currency === 'USD' ? 'USD' : 'EGP';
+    const revenueNetEGP = Math.round(revenueNet * exchangeRate * 100) / 100;
+    const vatTotalEGP = Math.round(vatTotal * exchangeRate * 100) / 100;
+    const totalAmountEGP = Math.round(totalAmount * exchangeRate * 100) / 100;
+
     const revLines: JLine[] = [
-      ...(revenueNet > 0 ? [jl(revAcc, revenueNet, 0, revenueNet, exchangeRate, 'EGP', `مرتجع مبيعات ${returnNumber} - إلغاء إيراد`)] : []),
-      ...(vatTotal > 0 ? [jl(vatAcc, vatTotal, 0, vatTotal, exchangeRate, 'EGP', `مرتجع مبيعات ${returnNumber} - عكس ضريبة مخرجات`)] : []),
-      ...(totalAmount > 0 ? [jl(recvAcc, 0, totalAmount, totalAmount, exchangeRate, 'EGP', `مرتجع مبيعات ${returnNumber} - تخفيض مديونية العميل ${customer.name}`)] : []),
+      ...(revenueNet > 0 ? [jl(revAcc, revenueNetEGP, 0, revenueNet, exchangeRate, retCurrency, `مرتجع مبيعات ${returnNumber} - إلغاء إيراد`)] : []),
+      ...(vatTotal > 0 ? [jl(vatAcc, vatTotalEGP, 0, vatTotal, exchangeRate, retCurrency, `مرتجع مبيعات ${returnNumber} - عكس ضريبة مخرجات`)] : []),
+      ...(totalAmount > 0 ? [jl(recvAcc, 0, totalAmountEGP, totalAmount, exchangeRate, retCurrency, `مرتجع مبيعات ${returnNumber} - تخفيض مديونية العميل ${customer.name}`)] : []),
     ];
 
     // F17: returning a purely bonus (zero-value) line has NO revenue and NO VAT
@@ -1588,6 +1656,9 @@ export class WorkflowService {
       const amt = r.quantity * r.unitCost;
       if (!(amt > 0)) return;
       const acc = inventoryAccountForRouting(r.routing.warehouseId);
+      // Inventory, COGS and the batch ledger are all carried in EGP BASE units
+      // (QA-01): the invoice rate converts revenue only, never the cost leg.
+      // Applying exchangeRate here re-multiplied export return COGS by the rate.
       cogsLines.push(
         jl(acc.id, amt, 0, amt, 1, 'EGP', `مرتجع مبيعات ${returnNumber} - إعادة تقييم مخزون مرتجع إلى ${acc.code} (${r.routing.label})`),
         jl(cogsAcc, 0, amt, amt, 1, 'EGP', `مرتجع مبيعات ${returnNumber} - عكس تكلفة البضاعة المباعة`),
@@ -1623,6 +1694,10 @@ export class WorkflowService {
     }
 
     let created: SalesReturn | undefined;
+    // The customer card is denormalised in the CUSTOMER's own currency (an
+    // invoice adds `totalAmount`, which is already in that currency), so the
+    // return must subtract the very same magnitude. The EGP journal legs are
+    // converted separately above and must never leak into the card balance.
     erpDb.mutate(draft => {
       created = {
         id: returnId,
@@ -2834,7 +2909,9 @@ export class WorkflowService {
       };
     }
 
-    const bank = db.bankAccounts.find(b => b.currency === 'EGP') || db.bankAccounts[0];
+    const bank = cheque.currency === 'USD'
+      ? (db.bankAccounts.find(b => b.currency === 'USD') || db.bankAccounts.find(b => b.currency === 'EGP') || db.bankAccounts[0])
+      : (db.bankAccounts.find(b => b.currency === 'EGP') || db.bankAccounts[0]);
     const underCollAcc = AccountingEngine.getMappedAccountId('cheques_under_collection', 'acc-1104');
     const payableAcc = AccountingEngine.getMappedAccountId('cheques_payable', 'acc-2102');
     const recvAcc = AccountingEngine.getMappedAccountId(
@@ -2852,6 +2929,20 @@ export class WorkflowService {
     const isBounce = params.newStatus === 'bounced' || params.newStatus === 'returned';
     const needsRecognition = !cheque.receiptJournalId;
 
+    // F-CHQ-FX — every journal below must move GL by the cheque's EGP value.
+    // The recognition rate is the one stamped on the cheque (PATH A: the
+    // payment's rate; PATH B: the registration rate), so a later collection or
+    // bounce reverses EXACTLY what was posted — no FX noise, no rate 1.
+    // Legacy USD cheques recorded before the rate existed fall back to the
+    // company's current rate and SAY SO in the line, so nothing is invented.
+    const chequeRate = cheque.currency === 'USD'
+      ? (Number(cheque.exchangeRate) > 0 ? Number(cheque.exchangeRate) : Number(db.company?.currentUsdExchangeRate) || 1)
+      : 1;
+    const rateNote = cheque.currency === 'USD'
+      ? (Number(cheque.exchangeRate) > 0 ? ` بسعر ${chequeRate}` : ` بسعر الشركة الحالي ${chequeRate} (شيك قديم بلا سعر موثق)`) 
+      : '';
+    const egp = cheque.amount * chequeRate;
+
     // Journal plan: optional recognition first, then the transition journal (if any).
     const plan: Array<{ description: string; reference: string; lines: JLine[]; isRecognition: boolean }> = [];
 
@@ -2863,8 +2954,8 @@ export class WorkflowService {
             reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
             isRecognition: false,
             lines: [
-              jl(recvAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `إعادة تحميل العميل ${partyName} بمديونية شيك مرتد ${cheque.chequeNumber}`),
-              jl(underCollAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `عكس أوراق قبض شيك مرتد ${cheque.chequeNumber}`),
+              jl(recvAcc, egp, 0, cheque.amount, chequeRate, cheque.currency, `إعادة تحميل العميل ${partyName} بمديونية شيك مرتد ${cheque.chequeNumber}${rateNote}`),
+              jl(underCollAcc, 0, egp, cheque.amount, chequeRate, cheque.currency, `عكس أوراق قبض شيك مرتد ${cheque.chequeNumber}${rateNote}`),
             ],
           });
         }
@@ -2876,8 +2967,8 @@ export class WorkflowService {
             reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
             isRecognition: true,
             lines: [
-              jl(underCollAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `شيك وارد تحت التحصيل رقم ${cheque.chequeNumber}`),
-              jl(recvAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تحويل مديونية العميل لشيك تحت التحصيل ${cheque.chequeNumber}`),
+              jl(underCollAcc, egp, 0, cheque.amount, chequeRate, cheque.currency, `شيك وارد تحت التحصيل رقم ${cheque.chequeNumber}${rateNote}`),
+              jl(recvAcc, 0, egp, cheque.amount, chequeRate, cheque.currency, `تحويل مديونية العميل لشيك تحت التحصيل ${cheque.chequeNumber}${rateNote}`),
             ],
           });
         }
@@ -2889,8 +2980,8 @@ export class WorkflowService {
             reference: `CHQ-REC-${cheque.chequeNumber}`,
             isRecognition: true,
             lines: [
-              jl(underCollAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `شيك وارد تحت التحصيل رقم ${cheque.chequeNumber}`),
-              jl(recvAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تحويل مديونية العميل لشيك تحت التحصيل ${cheque.chequeNumber}`),
+              jl(underCollAcc, egp, 0, cheque.amount, chequeRate, cheque.currency, `شيك وارد تحت التحصيل رقم ${cheque.chequeNumber}${rateNote}`),
+              jl(recvAcc, 0, egp, cheque.amount, chequeRate, cheque.currency, `تحويل مديونية العميل لشيك تحت التحصيل ${cheque.chequeNumber}${rateNote}`),
             ],
           });
         }
@@ -2899,8 +2990,8 @@ export class WorkflowService {
           reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
           isRecognition: false,
           lines: [
-            jl(bankAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `تحصيل شيك رقم ${cheque.chequeNumber} وإيداعه بالبنك`),
-            jl(underCollAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تسوية أوراق قبض محصلة ${cheque.chequeNumber}`),
+            jl(bankAcc, egp, 0, cheque.amount, chequeRate, cheque.currency, `تحصيل شيك رقم ${cheque.chequeNumber} وإيداعه بالبنك${rateNote}`),
+            jl(underCollAcc, 0, egp, cheque.amount, chequeRate, cheque.currency, `تسوية أوراق قبض محصلة ${cheque.chequeNumber}${rateNote}`),
           ],
         });
       }
@@ -2913,8 +3004,8 @@ export class WorkflowService {
             reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
             isRecognition: false,
             lines: [
-              jl(payableAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `إلغاء ورقة دفع شيك مرتد ${cheque.chequeNumber}`),
-              jl(supAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `إعادة تحميل المورد ${partyName} بمستحقات شيك مرتد ${cheque.chequeNumber}`),
+              jl(payableAcc, egp, 0, cheque.amount, chequeRate, cheque.currency, `إلغاء ورقة دفع شيك مرتد ${cheque.chequeNumber}${rateNote}`),
+              jl(supAcc, 0, egp, cheque.amount, chequeRate, cheque.currency, `إعادة تحميل المورد ${partyName} بمستحقات شيك مرتد ${cheque.chequeNumber}${rateNote}`),
             ],
           });
         }
@@ -2925,8 +3016,8 @@ export class WorkflowService {
             reference: `CHQ-REC-${cheque.chequeNumber}`,
             isRecognition: true,
             lines: [
-              jl(supAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `اعتراف بورقة دفع للمورد ${cheque.chequeNumber}`),
-              jl(payableAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `تسجيل أوراق دفع شيك صادر ${cheque.chequeNumber}`),
+              jl(supAcc, egp, 0, cheque.amount, chequeRate, cheque.currency, `اعتراف بورقة دفع للمورد ${cheque.chequeNumber}${rateNote}`),
+              jl(payableAcc, 0, egp, cheque.amount, chequeRate, cheque.currency, `تسجيل أوراق دفع شيك صادر ${cheque.chequeNumber}${rateNote}`),
             ],
           });
         }
@@ -2935,8 +3026,8 @@ export class WorkflowService {
           reference: `CHQ-${params.newStatus}-${cheque.chequeNumber}`,
           isRecognition: false,
           lines: [
-            jl(payableAcc, cheque.amount, 0, cheque.amount, 1, cheque.currency, `صرف شيك صادر رقم ${cheque.chequeNumber}`),
-            jl(bankAcc, 0, cheque.amount, cheque.amount, 1, cheque.currency, `خصم شيك صادر ${cheque.chequeNumber} من البنك`),
+            jl(payableAcc, egp, 0, cheque.amount, chequeRate, cheque.currency, `صرف شيك صادر رقم ${cheque.chequeNumber}${rateNote}`),
+            jl(bankAcc, 0, egp, cheque.amount, chequeRate, cheque.currency, `خصم شيك صادر ${cheque.chequeNumber} من البنك${rateNote}`),
           ],
         });
       }
@@ -3012,6 +3103,8 @@ export class WorkflowService {
     bankName: string;
     amount: number;
     currency: 'EGP' | 'USD';
+    /** F-CHQ-FX — EGP-per-USD rate this cheque is recognized at (REQUIRED for USD). */
+    exchangeRate?: number;
     issueDate: string;
     dueDate: string;
     notes?: string;
@@ -3028,6 +3121,20 @@ export class WorkflowService {
     if (!params.chequeNumber?.trim()) return { success: false, error: 'يرجى إدخال رقم الشيك' };
     if (Number(params.amount) <= 0) return { success: false, error: 'مبلغ الشيك يجب أن يكون أكبر من صفر' };
     const amount = Number(params.amount);
+
+    // F-CHQ-FX — a USD cheque's GL effect must be booked in EGP at a DOCUMENTED
+    // rate. The old path posted `amount` at rate 1 for every currency, so a
+    // $500 cheque moved GL 1104/1105/1106 by only 500 EGP instead of
+    // 500 × rate — understating receivables, cheques under collection and the
+    // USD bank. USD now REQUIRES an explicit rate; EGP stays rate 1 (never
+    // converted). The chosen rate is stamped on the cheque so every later
+    // transition reverses at the very same rate.
+    const chequeRate = params.currency === 'USD'
+      ? (Number((params as { exchangeRate?: number }).exchangeRate) || 0)
+      : 1;
+    if (params.currency === 'USD' && !(chequeRate > 0)) {
+      return { success: false, error: 'تسجيل شيك بالدولار يتطلب سعر صرف موثقًا (جنيه لكل دولار) — لا يُقبل الترحيل بسعر 1 افتراضيًا' };
+    }
 
     // F-CHQ-03: a cheque's due date must not precede its issue date.
     // The same rule recordCustomerPayment/recordSupplierPayment enforce for
@@ -3080,17 +3187,19 @@ export class WorkflowService {
         customer.currency === 'USD' ? 'customer_receivable_export' : 'customer_receivable_local',
         'acc-1105'
       );
+      const egp = amount * chequeRate;
       recognitionLines = [
-        jl(underCollAcc, amount, 0, amount, 1, params.currency, `استلام شيك وارد رقم ${chequeNumber} تحت التحصيل`),
-        jl(recvAcc, 0, amount, amount, 1, params.currency, `تحويل مديونية العميل ${customer.name} إلى شيك وارد ${chequeNumber}`),
+        jl(underCollAcc, egp, 0, amount, chequeRate, params.currency, `استلام شيك وارد رقم ${chequeNumber} تحت التحصيل${chequeRate !== 1 ? ` بسعر ${chequeRate}` : ''}`),
+        jl(recvAcc, 0, egp, amount, chequeRate, params.currency, `تحويل مديونية العميل ${customer.name} إلى شيك وارد ${chequeNumber}${chequeRate !== 1 ? ` بسعر ${chequeRate}` : ''}`),
       ];
       recognitionDesc = `تسجيل شيك وارد ${chequeNumber} من العميل ${customer.name} وخصم المديونية`;
     } else {
       const supplier = db.suppliers.find(s => s.id === params.partyId);
       if (!supplier) return { success: false, error: 'المورد غير مسجل بالنظام' };
+      const egp = amount * chequeRate;
       recognitionLines = [
-        jl(supAcc, amount, 0, amount, 1, params.currency, `سداد مستحقات المورد ${supplier.name} بشيك صادر ${chequeNumber}`),
-        jl(payableAcc, 0, amount, amount, 1, params.currency, `تسجيل أوراق دفع شيك صادر ${chequeNumber}`),
+        jl(supAcc, egp, 0, amount, chequeRate, params.currency, `سداد مستحقات المورد ${supplier.name} بشيك صادر ${chequeNumber}${chequeRate !== 1 ? ` بسعر ${chequeRate}` : ''}`),
+        jl(payableAcc, 0, egp, amount, chequeRate, params.currency, `تسجيل أوراق دفع شيك صادر ${chequeNumber}${chequeRate !== 1 ? ` بسعر ${chequeRate}` : ''}`),
       ];
       recognitionDesc = `تسجيل شيك صادر ${chequeNumber} للمورد ${supplier.name}`;
     }
@@ -3114,6 +3223,9 @@ export class WorkflowService {
       bankName: params.bankName?.trim() || 'بنك غير محدد',
       amount,
       currency: params.currency,
+      // F-CHQ-FX: the rate this cheque was recognized at — every later
+      // transition must reuse it so the GL reverses symmetrically.
+      exchangeRate: chequeRate,
       issueDate: params.issueDate,
       dueDate: params.dueDate,
       status: params.type === 'incoming' ? 'received' : 'issued',

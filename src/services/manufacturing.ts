@@ -549,6 +549,72 @@ export class ManufacturingEngine {
   }
 
   /**
+   * R-07 — raw-material usage variance across ALL real production orders.
+   *
+   * For every production order that actually exists (cancelled orders are
+   * excluded — their issues were returned and must not count), the expected
+   * quantity is derived PER MATERIAL from the order's own frozen BOM snapshot
+   * (scaled to the produced units, waste factor and unit conversion applied),
+   * and the issued quantity is the real FIFO consumption recorded on the order.
+   *
+   * A material with no issue record on any order reports zero here, so nothing
+   * that was never issued can appear in the variance report.
+   *
+   * varianceQty = issued − expected (positive = over-use, negative = saving)
+   * varianceValue = that difference valued at the real FIFO issue cost.
+   */
+  public static getRawMaterialUsageReport(params?: { fromDate?: string; toDate?: string }): Array<{
+    materialItemId: string;
+    issuedQty: number;
+    expectedQty: number;
+    varianceQty: number;
+    varianceValue: number;
+    ordersCounted: number;
+  }> {
+    const db = erpDb.getSnapshot();
+    const inRange = (d?: string) => {
+      if (!params?.fromDate && !params?.toDate) return true;
+      if (!d) return false;
+      const t = new Date(d).getTime();
+      if (params?.fromDate && t < new Date(params.fromDate).getTime()) return false;
+      if (params?.toDate) {
+        const to = new Date(params.toDate);
+        to.setHours(23, 59, 59, 999);
+        if (t > to.getTime()) return false;
+      }
+      return true;
+    };
+
+    const rows = new Map<string, { materialItemId: string; issuedQty: number; expectedQty: number; varianceValue: number; ordersCounted: number }>();
+    const orders = db.productionOrders.filter(o => o.status !== 'cancelled' && inRange(o.startDate || o.expectedCompletionDate));
+    for (const order of orders) {
+      // R-07: the benchmark is the STANDARD consumption of the PLAN — the
+      // order's own frozen BOM scaled to its planned quantity. Comparing the
+      // real FIFO issue against it measures over/under use whether the order
+      // is still open or already closed.
+      const planUnits = order.plannedQuantity || 0;
+      const recon = this.computeMaterialConsumption(db, order, planUnits);
+      for (const r of recon) {
+        if (!(r.issued > 0)) continue; // never-issued material: nothing to variance
+        let row = rows.get(r.materialItemId);
+        if (!row) {
+          row = { materialItemId: r.materialItemId, issuedQty: 0, expectedQty: 0, varianceValue: 0, ordersCounted: 0 };
+          rows.set(r.materialItemId, row);
+        }
+        row.issuedQty += r.issued;
+        row.expectedQty += r.expected;
+        row.varianceValue += (r.issued - r.expected) * r.unitCost;
+        row.ordersCounted += 1;
+      }
+    }
+    return [...rows.values()].map(r => ({
+      ...r,
+      varianceQty: r.issuedQty - r.expectedQty,
+      varianceValue: Number(r.varianceValue.toFixed(2)),
+    }));
+  }
+
+  /**
    * QA-17 — Record ACTUAL conversion costs against a production order.
    *
    * The costing architecture already reads actual conversion from posted

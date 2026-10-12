@@ -36,21 +36,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
     .filter(i => i.status === 'posted' && i.paymentMethod === 'credit')
     .reduce((sum, i) => sum + i.totalAmountEGP, 0);
 
-  // 4. تحصيلات الشهر
-  const collectionsThisMonth = db.payments
+  // 4. تحصيلات الشهر — محلية (سندات القبض على 1101/1102/1104) + تصدير (قيود 1106)
+  const exportCollectionsEgp = db.journalEntries
+    .filter(j => j.isPosted && !j.isReversed && j.sourceDocumentType === 'export_collection' && j.date.startsWith(currentMonthPrefix))
+    .reduce((s, j) => s + j.lines.filter(l => l.accountId === 'acc-1106').reduce((t, l) => t + (l.credit || 0), 0), 0);
+  const collectionsLocalThisMonth = db.payments
     .filter(p => p.paymentType === 'customer_receipt' && p.date.startsWith(currentMonthPrefix))
     .reduce((sum, p) => sum + p.amountEGP, 0);
+  const collectionsThisMonth = collectionsLocalThisMonth + exportCollectionsEgp;
 
   // 5. رصيد الخزينة
   const treasuryAccount = db.accounts.find(a => a.id === 'acc-1101');
   const treasuryBalance = treasuryAccount?.currentBalance || 0;
 
-  // 6. أرصدة البنوك (EGP)
+  // 6. أرصدة البنوك — 1102/1103 حسابات أستاذ بالجنيه المصري (قيد الإيداع/السحب
+  //    يُرحَّل دومًا بقيمة الـ EGP)، فلا يُعاد ضربها بسعر الصرف. رصيد البنوك بالدولار
+  //    يُعرض من بطاقة الحساب البنكي (bankAccount.currentBalance) بوحدته الأصلية.
   const bankEgpAccount = db.accounts.find(a => a.id === 'acc-1102');
   const bankUsdAccount = db.accounts.find(a => a.id === 'acc-1103');
   const bankBalancesTotal =
-    (bankEgpAccount?.currentBalance || 0) +
-    (bankUsdAccount?.currentBalance || 0) * db.company.currentUsdExchangeRate;
+    (bankEgpAccount?.currentBalance || 0) + (bankUsdAccount?.currentBalance || 0);
+  const usdBankCard = db.bankAccounts.find(b => b.currency === 'USD');
+  const usdBankBalanceUsd = usdBankCard?.currentBalance || 0;
+
+  // 6b. إيراد/تكلفة/ربح كل قناة على حدة (4101+4102 محلي · 4103 تصدير · 5101 محلي · 5102 تصدير)
+  const rev = (codes: string[]) => db.accounts
+    .filter(a => codes.includes(a.code) && a.category === 'Revenue')
+    .reduce((s, a) => s + a.currentBalance, 0);
+  const cogsOf = (codes: string[]) => db.accounts
+    .filter(a => codes.includes(a.code) && a.category === 'COGS')
+    .reduce((s, a) => s + a.currentBalance, 0);
+  const revenueLocal = rev(['4101', '4102']);
+  const revenueExport = rev(['4103']);
+  const cogsLocal = cogsOf(['5101']);
+  const cogsExport = cogsOf(['5102']);
+  const grossLocal = revenueLocal - cogsLocal;
+  const grossExport = revenueExport - cogsExport;
 
   // 7. مديونية العملاء
   const customerReceivables = db.customers.reduce((sum, c) => {
@@ -232,7 +253,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
         <KpiTile
           label="تحصيلات الشهر"
           value={formatEGP(collectionsThisMonth)}
-          hint="إجمالي المقبوضات وسندات التحصيل"
+          hint={`محلي ${formatEGP(collectionsLocalThisMonth)} + تصدير ${formatEGP(exportCollectionsEgp)}`}
           icon={CheckCircle2}
           tone="bg-teal-50 text-teal-600"
           onClick={() => onNavigateTab('customers')}
@@ -280,10 +301,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
         <KpiTile
           label="البنوك"
           value={formatEGP(bankBalancesTotal)}
-          hint="حسابات البنوك (محولة لـ ج.م)"
+          hint={usdBankCard ? `بالجنيه (1102+1103) · حساب الدولار ${formatNum(usdBankBalanceUsd)} $` : 'حسابات البنوك بالجنيه (1102+1103)'}
           icon={Landmark}
           tone="bg-blue-50 text-blue-600"
           onClick={() => onNavigateTab('banks')}
+        />
+        <KpiTile
+          label="إيرادات محلية"
+          value={formatEGP(revenueLocal)}
+          hint={`تكلفة ${formatEGP(cogsLocal)} · إجمالي الربح ${formatEGP(grossLocal)}`}
+          icon={ShoppingCart}
+          tone="bg-emerald-50 text-emerald-600"
+          onClick={() => onNavigateTab('reports')}
+        />
+        <KpiTile
+          label="إيرادات تصدير"
+          value={formatEGP(revenueExport)}
+          hint={`تكلفة ${formatEGP(cogsExport)} · إجمالي الربح ${formatEGP(grossExport)}`}
+          icon={Truck}
+          tone="bg-cyan-50 text-cyan-700"
+          onClick={() => onNavigateTab('reports')}
         />
         <KpiTile
           label="صافي الربح"

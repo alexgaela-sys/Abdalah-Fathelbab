@@ -30,6 +30,12 @@ export const SalesView: React.FC = () => {
   const canCreateSales = PermissionService.canCreate(sessionRole, 'sales');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // R-21 — channel & currency filters. The local and export channels settle in
+  // different currencies (EGP vs USD) and post to different revenue/receivable
+  // accounts, so the list totals are computed PER FILTERED GROUP and a USD
+  // figure is never added into an EGP one.
+  const [filterChannel, setFilterChannel] = useState<'all' | SalesChannel>('all');
+  const [filterCurrency, setFilterCurrency] = useState<'all' | 'EGP' | 'USD'>('all');
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
 
   // Form State
@@ -257,8 +263,24 @@ export const SalesView: React.FC = () => {
   const filteredInvoices = db.salesInvoices.filter(inv => {
     const cust = db.customers.find(c => c.id === inv.customerId);
     const text = `${inv.invoiceNumber} ${cust?.name || ''}`.toLowerCase();
-    return text.includes(searchQuery.toLowerCase());
+    if (!text.includes(searchQuery.toLowerCase())) return false;
+    if (filterChannel !== 'all' && inv.channel !== filterChannel) return false;
+    if (filterCurrency !== 'all' && inv.currency !== filterCurrency) return false;
+    return true;
   });
+
+  // R-21 — per-currency totals of the current filter (local EGP sales vs export
+  // USD sales stay apart; each is labelled with its own currency).
+  const invoiceTotalsByCurrency = (['EGP', 'USD'] as const)
+    .map(cur => ({
+      currency: cur,
+      count: filteredInvoices.filter(i => i.currency === cur).length,
+      total: filteredInvoices.filter(i => i.currency === cur).reduce((s, i) => s + (i.totalAmountEGP || 0), 0),
+      original: filteredInvoices.filter(i => i.currency === cur).reduce((s, i) => s + (i.totalAmount || 0), 0),
+    }))
+    .filter(g => g.count > 0);
+  const localFiltered = filteredInvoices.filter(i => i.channel !== 'export');
+  const exportFiltered = filteredInvoices.filter(i => i.channel === 'export');
 
   return (
     <div className="space-y-6">
@@ -298,8 +320,41 @@ export const SalesView: React.FC = () => {
             className="w-full pr-9 pl-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs focus:outline-none focus:border-amber-500 text-right"
           />
         </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-xs font-bold text-slate-600">القناة:</label>
+          <select
+            value={filterChannel}
+            onChange={(e) => setFilterChannel(e.target.value as 'all' | SalesChannel)}
+            className="p-1.5 rounded-xl bg-slate-50 border border-slate-300 text-xs font-semibold"
+          >
+            <option value="all">كل القنوات</option>
+            <option value="retail">تجزئة (محلي)</option>
+            <option value="wholesale">جملة (محلي)</option>
+            <option value="export">تصدير</option>
+          </select>
+          <label className="text-xs font-bold text-slate-600">العملة:</label>
+          <select
+            value={filterCurrency}
+            onChange={(e) => setFilterCurrency(e.target.value as 'all' | 'EGP' | 'USD')}
+            className="p-1.5 rounded-xl bg-slate-50 border border-slate-300 text-xs font-semibold"
+          >
+            <option value="all">كل العملات</option>
+            <option value="EGP">جنيه مصري</option>
+            <option value="USD">دولار أمريكي</option>
+          </select>
+        </div>
         <div className="text-xs font-semibold text-slate-500">
           إجمالي الفواتير: <span className="font-bold text-slate-900">{filteredInvoices.length}</span>
+          {invoiceTotalsByCurrency.length > 0 && (
+            <span className="mr-3">
+              ({invoiceTotalsByCurrency.map(g => `${g.count} ${g.currency === 'USD' ? '$' : 'ج.م'} ${g.total.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}`).join(' · ')})
+            </span>
+          )}
+          {localFiltered.length > 0 && exportFiltered.length > 0 && (
+            <span className="mr-3 text-slate-400">
+              محلي {localFiltered.length} · تصدير {exportFiltered.length}
+            </span>
+          )}
         </div>
       </div>
 

@@ -24,6 +24,13 @@ export type CustomerDocType =
 export interface ReceivablesAgingRow {
   customerId: string;
   customerName: string;
+  /**
+   * R-24 — the currency the buckets are expressed in. Every aging figure is
+   * converted into the CUSTOMER's own currency (USD cards read 1106 at the
+   * documented rate), so an EGP and a USD row can never be summed together
+   * without an explicit conversion. Consumers must group by this field.
+   */
+  currency: 'EGP' | 'USD';
   b0_30: number;
   b31_60: number;
   b61_90: number;
@@ -435,6 +442,7 @@ export class LedgerService {
       const row: ReceivablesAgingRow = {
         customerId: customer.id,
         customerName: customer.name,
+        currency: customer.currency === 'USD' ? 'USD' : 'EGP',
         b0_30: 0, b31_60: 0, b61_90: 0, b90plus: 0,
         credit: 0,
         total: 0,

@@ -7,6 +7,7 @@ import { erpDb } from '../../services/db';
 import { isDebitNatureCategory } from '../../types/erp';
 import { LedgerService } from '../../services/ledger';
 import { InventoryEngine } from '../../services/inventory';
+import { ManufacturingEngine } from '../../services/manufacturing';
 import { SettingsService } from '../../services/settings';
 import { printDocument } from '../printUtils';
 
@@ -33,6 +34,15 @@ export const ReportsView: React.FC<{
   const db = erpDb.getSnapshot();
   const [selectedReport, setSelectedReport] = useState<ReportType>(initialReport || 'trial_balance');
 
+  // ITEM 13 / R-13 — the expiry-threshold button used to only navigate away to
+  // Settings, which contained no editor for it, so the value could never be
+  // changed and the "reset threshold" action was dead. It now edits INLINE:
+  // save goes through the guarded SettingsService (audit-logged), the report
+  // re-reads the saved value on the next render and the alert buckets follow.
+  const [thresholdEditing, setThresholdEditing] = useState(false);
+  const [thresholdInput, setThresholdInput] = useState('');
+  const [thresholdMessage, setThresholdMessage] = useState<string | null>(null);
+
   // ---------- Period filter (F13: reports are period-aware, nothing is hidden) ----------
   const firstOfMonth = new Date();
   firstOfMonth.setDate(1);
@@ -48,6 +58,13 @@ export const ReportsView: React.FC<{
 
   // ITEM 7 — raw-material deviation: standard vs REAL book cost on the stock,
   // plus issued-vs-planned usage from actual production consumption records.
+  // R-07 — the usage side of the variance report is now computed by the
+  // MANUFACTURING ENGINE from the real issue records of non-cancelled orders,
+  // with the expected quantity derived per material from the order's FROZEN BOM
+  // snapshot. The old inline version summed every consumption row regardless of
+  // order status and compared it against a rolling "planned" figure that drifted
+  // after BOM edits, so materials that were never issued still showed variance.
+  const rawUsageByMaterial = ManufacturingEngine.getRawMaterialUsageReport();
   const rawMaterialRows = db.items
     .filter(i => i.itemType === 'raw_material' || i.itemType === 'packaging_material')
     .map(item => {
@@ -57,13 +74,10 @@ export const ReportsView: React.FC<{
       const standardUnit = item.standardCost || 0;
       const priceDeltaUnit = actualUnit - standardUnit;
       const stockPriceDeviation = qty * priceDeltaUnit;
-      const cons = db.productionConsumptions.filter(c => c.materialItemId === item.id);
-      const issuedQty = cons.reduce((s, c) => s + (c.actualQuantity || 0), 0);
-      const plannedQty = cons.reduce((s, c) => s + (c.plannedQuantity || 0), 0);
-      const usageDeltaValue = cons.reduce(
-        (s, c) => s + ((c.actualQuantity || 0) - (c.plannedQuantity || 0)) * (c.unitCost || 0),
-        0,
-      );
+      const usage = rawUsageByMaterial.find(u => u.materialItemId === item.id);
+      const issuedQty = usage?.issuedQty || 0;
+      const plannedQty = usage?.expectedQty || 0;
+      const usageDeltaValue = usage?.varianceValue || 0;
       return { item, qty, actualUnit, standardUnit, priceDeltaUnit, stockPriceDeviation, issuedQty, plannedQty, usageDeltaValue };
     })
     .filter(r => r.qty > 0 || r.issuedQty > 0);
@@ -208,6 +222,7 @@ export const ReportsView: React.FC<{
   const receivablesAging = LedgerService.buildReceivablesAging()
     .map(r => ({
       custId: r.customerId,
+      currency: r.currency,
       b0_30: r.b0_30,
       b31_60: r.b31_60,
       b61_90: r.b61_90,
@@ -226,6 +241,24 @@ export const ReportsView: React.FC<{
     credit: acc.credit + r.credit,
     total: acc.total + r.total,
   }), { b0_30: 0, b31_60: 0, b61_90: 0, b90plus: 0, credit: 0, total: 0 });
+
+  // R-24 — the aging is expressed in each CUSTOMER's currency, so the totals
+  // are kept apart: an EGP figure and a USD figure are never added together
+  // without an explicit, documented conversion.
+  const agingByCurrency = (['EGP', 'USD'] as const).map(cur => {
+    const rows = receivablesAging.filter(r => r.currency === cur);
+    return {
+      currency: cur,
+      count: rows.length,
+      b0_30: rows.reduce((s, r) => s + r.b0_30, 0),
+      b31_60: rows.reduce((s, r) => s + r.b31_60, 0),
+      b61_90: rows.reduce((s, r) => s + r.b61_90, 0),
+      b90plus: rows.reduce((s, r) => s + r.b90plus, 0),
+      credit: rows.reduce((s, r) => s + r.credit, 0),
+      total: rows.reduce((s, r) => s + r.total, 0),
+    };
+  }).filter(g => g.count > 0);
+  const usdAgingRate = db.company.currentUsdExchangeRate || 1;
 
   // 5. VAT Report — derived from the ACTUAL 1113/2103 journal lines in the period.
   const vatLines = (accountId: string) => {
@@ -631,7 +664,7 @@ export const ReportsView: React.FC<{
           <div className="p-4 bg-slate-50 border-b border-slate-200">
             <h3 className="font-bold text-xs text-slate-800">تقرير أعمار ديون العملاء (Aging of Receivables)</h3>
             <p className="text-[11px] text-slate-500">
-              محسوب من فواتير البيع المرحّلة الفعلية مطروحاً منها التخصيصات المحصّلة فعلياً، buckets: 0-30 / 31-60 / 61-90 / +90 يوم
+              محسوب من فواتير البيع المرحّلة الفعلية مطروحاً منها التخصيصات المحصّلة فعلياً، buckets: 0-30 / 31-60 / 61-90 / +90 يوم — كل صف بعملة صاحبه، والإجماليات مفصولة حسب العملة فلا تُجمع الجنيه بالدولار
             </p>
           </div>
 
@@ -639,6 +672,7 @@ export const ReportsView: React.FC<{
             <thead className="bg-slate-100 text-slate-700 font-bold">
               <tr>
                   <th className="p-3.5">العميل</th>
+                  <th className="p-3.5 text-center">العملة</th>
                   <th className="p-3.5 text-center">الرصيد الكلي</th>
                   <th className="p-3.5 text-center">سارٍ (0 - 30 يوم)</th>
                   <th className="p-3.5 text-center">متأخر (31 - 60 يوم)</th>
@@ -650,7 +684,7 @@ export const ReportsView: React.FC<{
               <tbody className="divide-y divide-slate-100 font-mono">
               {receivablesAging.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400 font-sans">
+                  <td colSpan={8} className="py-12 text-center text-slate-400 font-sans">
                     لا توجد مديونيات عملاء قائمة
                   </td>
                 </tr>
@@ -658,6 +692,11 @@ export const ReportsView: React.FC<{
                 receivablesAging.map((r, idx) => (
                   <tr key={idx} className="hover:bg-slate-50">
                     <td className="p-3.5 font-sans font-bold text-slate-900">{r.cust.name}</td>
+                    <td className="p-3.5 text-center">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${r.currency === 'USD' ? 'bg-cyan-50 text-cyan-800' : 'bg-slate-100 text-slate-700'}`}>
+                        {r.currency}
+                      </span>
+                    </td>
                     <td className={`p-3.5 text-center font-black ${r.total < 0 ? 'text-rose-700' : 'text-slate-900'}`}>
                       {r.total.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}
                     </td>
@@ -672,15 +711,34 @@ export const ReportsView: React.FC<{
             </tbody>
             {receivablesAging.length > 0 && (
               <tfoot className="bg-slate-100 font-mono font-black text-slate-900 border-t-2 border-slate-300">
-                <tr>
-                  <td className="p-3.5 font-sans">الإجمالي</td>
-                  <td className="p-3.5 text-center">{agingTotals.total.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
-                  <td className="p-3.5 text-center text-emerald-800">{agingTotals.b0_30.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
-                  <td className="p-3.5 text-center text-amber-800">{agingTotals.b31_60.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
-                  <td className="p-3.5 text-center text-orange-800">{agingTotals.b61_90.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
-                  <td className="p-3.5 text-center text-rose-800">{agingTotals.b90plus.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
-                  <td className="p-3.5 text-center text-slate-700">{agingTotals.credit.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
-                </tr>
+                {agingByCurrency.map(g => (
+                  <tr key={g.currency}>
+                    <td className="p-3.5 font-sans" colSpan={2}>
+                      إجمالي {g.currency === 'USD' ? 'ديون التصدير بالدولار' : 'ديون محلية بالجنيه'} ({g.count} عميل)
+                    </td>
+                    <td className="p-3.5 text-center">{g.total.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} {g.currency === 'USD' ? '$' : 'ج.م'}</td>
+                    <td className="p-3.5 text-center text-emerald-800">{g.b0_30.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center text-amber-800">{g.b31_60.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center text-orange-800">{g.b61_90.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center text-rose-800">{g.b90plus.toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center text-slate-700">{g.credit > 0 ? g.credit.toLocaleString('ar-EG', { maximumFractionDigits: 2 }) : '-'}</td>
+                  </tr>
+                ))}
+                {agingByCurrency.length > 1 && (
+                  <tr className="border-t border-slate-300">
+                    <td className="p-3.5 font-sans" colSpan={2}>
+                      الإجمالي المجمع بالجنيه (الدولار محوَّل بسعر {usdAgingRate} — للعرض فقط، لا يُخفي فرق العملة)
+                    </td>
+                    <td className="p-3.5 text-center">
+                      {(agingByCurrency.reduce((s, g) => s + g.total * (g.currency === 'USD' ? usdAgingRate : 1), 0)).toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م
+                    </td>
+                    <td className="p-3.5 text-center">{(agingByCurrency.reduce((s, g) => s + g.b0_30 * (g.currency === 'USD' ? usdAgingRate : 1), 0)).toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center">{(agingByCurrency.reduce((s, g) => s + g.b31_60 * (g.currency === 'USD' ? usdAgingRate : 1), 0)).toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center">{(agingByCurrency.reduce((s, g) => s + g.b61_90 * (g.currency === 'USD' ? usdAgingRate : 1), 0)).toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center">{(agingByCurrency.reduce((s, g) => s + g.b90plus * (g.currency === 'USD' ? usdAgingRate : 1), 0)).toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                    <td className="p-3.5 text-center">{(agingByCurrency.reduce((s, g) => s + g.credit * (g.currency === 'USD' ? usdAgingRate : 1), 0)).toLocaleString('ar-EG', { maximumFractionDigits: 2 })}</td>
+                  </tr>
+                )}
               </tfoot>
             )}
           </table>
@@ -742,16 +800,59 @@ export const ReportsView: React.FC<{
             <div>
               <h3 className="font-bold text-sm text-slate-900">تقرير صلاحية المخزون (Expiry Status)</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                عتبة التنبيه الحالية: <span className="font-black text-slate-800">{expiryThresholdDays}</span> يوم — تشمل الأصناف المنتهية وقاربة الانتهاء (قابلة للتعديل من الإعدادات)
+                عتبة التنبيه الحالية: <span className="font-black text-slate-800">{expiryThresholdDays}</span> يوم — تشمل الأصناف المنتهية وقاربة الانتهاء (تُحفظ في إعدادات النظام وتنعكس على هذا التقرير وبطاقة لوحة التحكم)
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => onNavigateTab?.('settings')}
-                className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-[11px]"
-              >
-                ضبط العتبة
-              </button>
+              {!thresholdEditing ? (
+                <button
+                  onClick={() => {
+                    setThresholdInput(String(expiryThresholdDays));
+                    setThresholdMessage(null);
+                    setThresholdEditing(true);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] shadow-sm"
+                >
+                  ضبط العتبة
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={thresholdInput}
+                    onChange={(e) => setThresholdInput(e.target.value)}
+                    className="w-20 p-1.5 rounded-xl bg-white border border-amber-300 text-xs font-mono text-center"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => {
+                      const days = Number(thresholdInput);
+                      const res = SettingsService.setExpiryWarningDays({
+                        days,
+                        userId: 'usr-admin',
+                        userName: 'المشرف العام (Admin)',
+                      });
+                      if (!res.success) {
+                        setThresholdMessage(res.error || 'تعذر حفظ العتبة');
+                        return;
+                      }
+                      setThresholdEditing(false);
+                      setThresholdMessage(`تم حفظ العتبة ${res.value} يوم وتطبيقها على التنبيهات`);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-[11px]"
+                  >
+                    حفظ
+                  </button>
+                  <button
+                    onClick={() => setThresholdEditing(false)}
+                    className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-[11px]"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              )}
               <button
                 onClick={() => onNavigateTab?.('inventory')}
                 className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-[11px]"
@@ -760,6 +861,11 @@ export const ReportsView: React.FC<{
               </button>
             </div>
           </div>
+          {thresholdMessage && (
+            <div className={`px-4 py-2 text-[11px] font-bold border-b ${thresholdMessage.includes('تعذر') ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+              {thresholdMessage}
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-right text-xs">
               <thead className="bg-slate-100 text-slate-700 font-bold">
@@ -820,7 +926,10 @@ export const ReportsView: React.FC<{
             <div>
               <h3 className="font-bold text-sm text-slate-900">تقرير انحراف الخامات (Raw Material Variance)</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                انحراف سعر الوحدة (معيارية مقابل التكلفة الدفترية الفعلية) وانحراف استخدام الكميات (المصروف مقابل المخطط) — من قيود فعلية فقط
+                انحراف سعر الوحدة (معيارية مقابل التكلفة الدفترية الفعلية على الرصيد) وانحراف الاستهلاك (المصروف الفعلي مقابل المخطط المحتسب من وصفة الـ BOM المجمدة لكل أمر إنتاج غير ملغى)
+              </p>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                الكميات المصروفة فعليًا فقط هي الأساس — الخامات التي لم تُصرف لأوامر إنتاج لا تحتسب هنا إطلاقًا
               </p>
             </div>
             <button

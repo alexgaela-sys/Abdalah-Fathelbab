@@ -26,14 +26,53 @@ export const CustomersView: React.FC = () => {
 
   // Sales Return form state
   const [retCustomerId, setRetCustomerId] = useState('');
+  // R-01: the return can now be LINKED to one of the customer's posted invoices.
+  // A linked return inherits the original line's price, VAT rate and cost, and
+  // is capped by what is still returnable on that invoice. An empty selection
+  // takes the documented exception path (explicit reason + tax choice).
+  const [retInvoiceId, setRetInvoiceId] = useState('');
   const [retItemId, setRetItemId] = useState('');
   const [retQty, setRetQty] = useState(10);
   const [retUnitPrice, setRetUnitPrice] = useState(100);
   const [retReason, setRetReason] = useState('مرتجع بضاعة من العميل');
   const [retDestination, setRetDestination] = useState<QualityDestination>('saleable');
+  // R-01: EXPLICIT tax choice for the no-invoice path. '' = not chosen yet
+  // (the form must not assume 14% or exempt on the user's behalf).
+  const [retTaxChoice, setRetTaxChoice] = useState<'' | 'taxable' | 'exempt'>('');
+  const [retVatRate, setRetVatRate] = useState('');
+  // R-01: documented EGP-per-USD rate for a no-invoice return on a USD customer.
+  const [retExchangeRate, setRetExchangeRate] = useState('');
   const [retMessage, setRetMessage] = useState<string | null>(null);
 
   const finishedProducts = db.items.filter(i => i.itemType === 'finished_product' && i.active);
+
+  // R-01: the selected customer / invoice / returnable quantities, derived on
+  // every render so the form always reflects the current posted documents.
+  const retCustomer = db.customers.find(c => c.id === retCustomerId);
+  const retInvoices = retCustomerId
+    ? db.salesInvoices.filter(i => i.customerId === retCustomerId && i.status === 'posted')
+    : [];
+  const retInvoice = retInvoices.find(i => i.id === retInvoiceId);
+  const retPriorReturned = (invoiceId: string, itemId: string) => {
+    let qty = 0;
+    for (const l of db.salesReturnLines) {
+      if (l.itemId !== itemId) continue;
+      const r = db.salesReturns.find(x => x.id === l.returnId);
+      if (!r || r.invoiceId !== invoiceId || r.status === 'cancelled') continue;
+      qty += Number(l.quantity) || 0;
+    }
+    return qty;
+  };
+  const retInvoiceItems = retInvoice
+    ? db.salesInvoiceLines
+        .filter(sl => sl.invoiceId === retInvoice.id)
+        .map(sl => {
+          const item = db.items.find(i => i.id === sl.itemId);
+          const sold = (Number(sl.quantity) || 0) + (Number(sl.freeQuantity) || 0);
+          const returned = retPriorReturned(retInvoice.id, sl.itemId);
+          return { sl, item, sold, returned, remaining: Math.max(0, sold - returned) };
+        })
+    : [];
 
   // Post a sales return through the engine (reverses revenue/VAT/receivable, restocks goods)
   const handlePostSalesReturn = () => {
@@ -41,20 +80,58 @@ export const CustomersView: React.FC = () => {
     if (!retCustomerId) { alert('يرجى اختيار العميل'); return; }
     if (!retItemId) { alert('يرجى اختيار الصنف المرتجع'); return; }
     if (Number(retQty) <= 0) { alert('كمية المرتجع يجب أن تكون أكبر من صفر'); return; }
-    if (Number(retUnitPrice) <= 0) { alert('يرجى إدخال سعر البيع الأصلي'); return; }
 
     const item = db.items.find(i => i.id === retItemId);
+    const linked = !!retInvoice;
+
+    if (linked) {
+      // R-01: linked path — quantity is capped by what is STILL returnable.
+      const line = retInvoiceItems.find(x => x.sl.itemId === retItemId);
+      if (!line) { alert('الصنف المختار غير موجود في الفاتورة الأصلية'); return; }
+      if (Number(retQty) > line.remaining + 0.0001) {
+        alert(`المتبقي القابل للترجيع من هذا الصنف على الفاتورة ${line.remaining} (بُيع ${line.sold} وسُبق ترجيع ${line.returned})`);
+        return;
+      }
+    } else {
+      // R-01: exception path — every tax/FX fact must be explicit. No default 14%.
+      if (!retReason.trim() || retReason.trim() === 'مرتجع بضاعة من العميل') {
+        alert('مرتجع بدون فاتورة أصلية يتطلب سببًا موثقًا صريحًا'); return;
+      }
+      if (!retTaxChoice) {
+        alert('مرتجع بدون فاتورة أصلية يتطلب تحديد معاملة ضريبية صريحة: خاضع للضريبة أو معفى'); return;
+      }
+      if (Number(retUnitPrice) <= 0) { alert('يرجى إدخال سعر البيع الأصلي (قبل الضريبة)'); return; }
+      if (retTaxChoice === 'taxable') {
+        const rate = Number(retVatRate);
+        // The engine requires a POSITIVE approved rate on every line: the system
+        // has only taxable/exempt, so 0% under "taxable" is contradictory —
+        // zero-VAT returns must choose "exempt" explicitly.
+        if (retVatRate.trim() === '' || !Number.isFinite(rate) || rate <= 0 || rate > 1) {
+          alert('المرتجع الخاضع للضريبة بدون فاتورة يتطلب معاملة ضريبية معتمدة موجبة لكل صنف (مثال 0.14) — الصفر يتم اختياره كـ"معفى"'); return;
+        }
+      }
+      if (retCustomer?.currency === 'USD') {
+        const fx = Number(retExchangeRate);
+        if (!retExchangeRate.trim() || !Number.isFinite(fx) || fx <= 0) {
+          alert('مرتجع بدون فاتورة لعميل بالدولار يتطلب سعر صرف موثقًا (جنيه للدولار)'); return;
+        }
+      }
+    }
+
     const res = WorkflowService.postSalesReturn({
       customerId: retCustomerId,
+      invoiceId: linked ? retInvoice!.id : undefined,
       date: new Date().toISOString().split('T')[0],
-      reason: retReason.trim() || 'مرتجع بضاعة من العميل',
+      reason: retReason.trim(),
       lines: [{
         itemId: retItemId,
         quantity: Number(retQty),
         unitPrice: Number(retUnitPrice),
-        vatRate: item?.vatRate ?? 0.14,
+        vatRate: retTaxChoice === 'taxable' ? Number(retVatRate) : 0,
       }],
       inspectionOverrides: { [retItemId]: retDestination },
+      exceptionTaxTreatment: linked ? undefined : (retTaxChoice === 'exempt' ? 'exempt' : retTaxChoice === 'taxable' ? 'taxable' : undefined),
+      exchangeRate: linked ? undefined : (retCustomer?.currency === 'USD' ? Number(retExchangeRate) : undefined),
     });
 
     if (!res.success) {
@@ -62,7 +139,8 @@ export const CustomersView: React.FC = () => {
       return;
     }
 
-    setRetMessage(`نجاح الترحيل: تم إصدار مرتجع مبيعات برقم ${res.salesReturn?.returnNumber} بقيمة ${res.salesReturn?.totalAmount.toLocaleString('ar-EG')} ج.م`);
+    const cur = retCustomer?.currency || 'EGP';
+    setRetMessage(`نجاح الترحيل: تم إصدار مرتجع مبيعات برقم ${res.salesReturn?.returnNumber} بقيمة ${res.salesReturn?.totalAmount.toLocaleString('ar-EG')} ${cur}${linked ? ' (مرتبط بالفاتورة الأصلية)' : ' (مسار استثنائي بمعاملة ضريبية صريحة)'}`);
     setRetQty(10);
   };
 
@@ -237,17 +315,36 @@ export const CustomersView: React.FC = () => {
 
   // Requirement 13: Subledger vs General Ledger Reconciliation Check
   const reconciliation = useMemo(() => {
-    // Total subledger balance of all customers
-    const subledgerTotalEGP = db.customers.reduce((sum, c) => {
-      const rate = c.currency === 'USD' ? db.company.currentUsdExchangeRate : 1;
-      return sum + (c.currentBalance * rate);
-    }, 0);
+    // The subledger (customer card) is denormalised in each customer's OWN
+    // currency: an export customer's card is USD, a local customer's is EGP.
+    // The GL control accounts (1105/1106) are always EGP. Blending both
+    // currencies into one figure hides WHERE a gap is; R-30 keeps them apart.
+    const rate = db.company.currentUsdExchangeRate || 1;
+    const localCustomers = db.customers.filter(c => c.currency !== 'USD');
+    const usdCustomers = db.customers.filter(c => c.currency === 'USD');
+    const subledgerLocalEgp = localCustomers.reduce((s, c) => s + (c.currentBalance || 0), 0);
+    const subledgerUsdOriginal = usdCustomers.reduce((s, c) => s + (c.currentBalance || 0), 0);
+    const subledgerUsdEgp = subledgerUsdOriginal * rate;
+    const subledgerTotalEGP = subledgerLocalEgp + subledgerUsdEgp;
 
     // GL Control Accounts: acc-1105 (Local Customers) + acc-1106 (Export Customers)
+    // FIX: acc-1106.currentBalance is already in EGP (journal lines post totalAmountEGP),
+    // so it must NOT be converted again — multiplying by the exchange rate here was a
+    // double conversion that inflated the GL control total ~52.7x.
     const glLocal = db.accounts.find(a => a.id === 'acc-1105')?.currentBalance || 0;
-    const glExport = (db.accounts.find(a => a.id === 'acc-1106')?.currentBalance || 0) * db.company.currentUsdExchangeRate;
+    const glExport = db.accounts.find(a => a.id === 'acc-1106')?.currentBalance || 0;
     const glControlTotalEGP = glLocal + glExport;
 
+    // R-30: invoices attributed to a customer that no longer exists in the
+    // subledger. Their receivable is real in the GL but has no card to reconcile
+    // against — the single most common cause of a control account drifting away
+    // from the sum of the cards.
+    const customerIds = new Set(db.customers.map(c => c.id));
+    const orphanedInvoices = db.salesInvoices.filter(i => i.status === 'posted' && !customerIds.has(i.customerId));
+    const orphanedReceivableEgp = orphanedInvoices.reduce((s, i) => s + (i.totalAmountEGP || i.totalAmount || 0), 0);
+
+    const diffEgp = Math.abs(subledgerLocalEgp - glLocal);
+    const diffUsd = Math.abs(subledgerUsdEgp - glExport);
     const diff = Math.abs(subledgerTotalEGP - glControlTotalEGP);
     const isMatched = diff < 0.05;
 
@@ -256,6 +353,16 @@ export const CustomersView: React.FC = () => {
       glControlTotalEGP,
       diff,
       isMatched,
+      rate,
+      subledgerLocalEgp,
+      subledgerUsdOriginal,
+      subledgerUsdEgp,
+      glLocal,
+      glExport,
+      diffEgp,
+      diffUsd,
+      orphanCount: orphanedInvoices.length,
+      orphanedReceivableEgp,
     };
   }, [db]);
 
@@ -351,13 +458,28 @@ export const CustomersView: React.FC = () => {
         </button>
       </div>
 
-      {/* Reconciliation Alert Banner (Requirement 13) */}
+      {/* Reconciliation Alert Banner (Requirement 13 + R-30 per-currency diagnosis) */}
       {!reconciliation.isMatched && (
-        <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl flex items-center gap-2.5 text-xs text-amber-900 font-bold">
-          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-          <span>
-            تنبيه المطابقة الرقابية: يوجد فرق يحتاج إلى مراجعة بين إجمالي ميزان العملاء الفرعي ({reconciliation.subledgerTotalEGP.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م) وحساب مراقبة العملاء بالأستاذ العام ({reconciliation.glControlTotalEGP.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م) - الفرق: {reconciliation.diff.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م
-          </span>
+        <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-2xl text-xs text-amber-900 font-bold space-y-1.5">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              تنبيه المطابقة الرقابية: إجمالي ميزان العملاء الفرعي ({reconciliation.subledgerTotalEGP.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م) مقابل حساب المراقبة بالأستاذ العام ({reconciliation.glControlTotalEGP.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م) — الفرق {reconciliation.diff.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م. التحليل حسب العملة:
+            </span>
+          </div>
+          <ul className="list-disc pr-6 space-y-0.5 font-semibold">
+            <li>
+              محلي (EGP): بطاقات العملاء {reconciliation.subledgerLocalEgp.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م مقابل 1105 = {reconciliation.glLocal.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م — فرق {reconciliation.diffEgp.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م
+            </li>
+            <li>
+              تصدير (USD): بطاقات العملاء {reconciliation.subledgerUsdOriginal.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} $ × سعر {reconciliation.rate} = {reconciliation.subledgerUsdEgp.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م مقابل 1106 = {reconciliation.glExport.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م — فرق {reconciliation.diffUsd.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م (يحتوي تاريخيًا على فروق أسعار الصرف بين سعر الفاتورة وسعر اليوم)
+            </li>
+            {reconciliation.orphanCount > 0 && (
+              <li className="text-rose-800">
+                يوجد {reconciliation.orphanCount} فاتورة بيع مرحلة بمدينية {reconciliation.orphanedReceivableEgp.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م مسجلة لعملاء غير موجودين الآن في دفتر العملاء — هذه المديونية بالأستاذ بلا بطاقة مقابلة
+              </li>
+            )}
+          </ul>
         </div>
       )}
 
@@ -485,7 +607,7 @@ export const CustomersView: React.FC = () => {
             <div>
               <h3 className="font-bold text-sm text-slate-900">تسجيل وترحيل مرتجع مبيعات</h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                يقوم النظام تلقائيًا بعكس الإيراد والضريبة والمديونية، وإعادة الكمية للمخزون وفق توجيه الجودة، مع عكس تكلفة البضاعة المباعة
+                مساران: مرتجع مرتبط بفاتورة أصلية (يرث السعر والضريبة والتكلفة ومقيد بالمتبقي القابل للترجيع)، أو مرتجع بدون فاتورة بسبب ومعاملة ضريبية صريحين وسعر صرف موثق للعملاء بالدولار. في الحالتين يعكس النظام الإيراد والضريبة والمديونية ويعيد الكمية وفق توجيه الجودة مع عكس تكلفة البضاعة المباعة
               </p>
             </div>
 
@@ -500,31 +622,84 @@ export const CustomersView: React.FC = () => {
                 <label className="block text-xs font-bold text-slate-700 mb-1">العميل *</label>
                 <select
                   value={retCustomerId}
-                  onChange={(e) => setRetCustomerId(e.target.value)}
+                  onChange={(e) => {
+                    setRetCustomerId(e.target.value);
+                    setRetInvoiceId('');
+                    setRetItemId('');
+                    setRetTaxChoice('');
+                    setRetVatRate('');
+                    setRetExchangeRate('');
+                  }}
                   className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                 >
                   <option value="">اختر العميل</option>
                   {db.customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.code} - {c.name}</option>
+                    <option key={c.id} value={c.id}>{c.code} - {c.name}{c.currency === 'USD' ? ' (USD)' : ''}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  الفاتورة الأصلية {retInvoice ? '' : '(اختياري — الفراغ = مرتجع بدون فاتورة)'}
+                </label>
+                <select
+                  value={retInvoiceId}
+                  onChange={(e) => {
+                    setRetInvoiceId(e.target.value);
+                    setRetItemId('');
+                    setRetTaxChoice('');
+                    setRetVatRate('');
+                  }}
+                  disabled={!retCustomerId}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs disabled:opacity-50"
+                >
+                  <option value="">— بدون فاتورة أصلية —</option>
+                  {retInvoices.map(i => (
+                    <option key={i.id} value={i.id}>{i.invoiceNumber} — {i.date} — {i.totalAmount.toLocaleString('ar-EG')} {i.currency}</option>
+                  ))}
+                </select>
+                {retInvoice && (
+                  <p className="text-[11px] text-slate-500 mt-1 font-semibold">
+                    يُرث المرتجع سعر وضريبة وتكلفة بنود الفاتورة الأصلية — مقيّدًا بالمتبقي القابل للترجيع
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">الصنف المرتجع *</label>
                 <select
                   value={retItemId}
                   onChange={(e) => {
-                    const it = finishedProducts.find(i => i.id === e.target.value);
                     setRetItemId(e.target.value);
-                    if (it) setRetUnitPrice(it.sellingPriceWholesale || it.sellingPriceRetail || 100);
+                    const line = retInvoiceItems.find(x => x.sl.itemId === e.target.value);
+                    if (line) {
+                      setRetUnitPrice(Number(line.sl.unitPrice) || 0);
+                      setRetQty(Math.max(1, line.remaining));
+                    } else {
+                      const it = finishedProducts.find(i => i.id === e.target.value);
+                      if (it) setRetUnitPrice(it.sellingPriceWholesale || it.sellingPriceRetail || 100);
+                    }
                   }}
                   className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                 >
                   <option value="">اختر الصنف</option>
-                  {finishedProducts.map(i => (
-                    <option key={i.id} value={i.id}>{i.code} - {i.nameAr}</option>
-                  ))}
+                  {retInvoice
+                    ? retInvoiceItems.map(({ sl, item, remaining }) => (
+                        <option key={sl.itemId} value={sl.itemId} disabled={remaining <= 0}>
+                          {item?.code || sl.itemId} - {item?.nameAr || ''} (المتبقي {remaining})
+                        </option>
+                      ))
+                    : finishedProducts.map(i => (
+                        <option key={i.id} value={i.id}>{i.code} - {i.nameAr}</option>
+                      ))}
                 </select>
+                {retInvoice && retItemId && (() => {
+                  const line = retInvoiceItems.find(x => x.sl.itemId === retItemId);
+                  return line ? (
+                    <p className="text-[11px] text-slate-500 mt-1 font-semibold">
+                      بُيع {line.sold} · سُبق ترجيع {line.returned} · المتبقي {line.remaining}
+                    </p>
+                  ) : null;
+                })()}
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">الكمية المرتجعة</label>
@@ -537,15 +712,62 @@ export const CustomersView: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">سعر البيع الأصلي (قبل الضريبة)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  سعر البيع الأصلي (قبل الضريبة){retInvoice ? ' — يُرث من الفاتورة' : ''}
+                </label>
                 <input
                   type="number"
                   min="0"
-                  value={retUnitPrice}
+                  value={retInvoice && retItemId ? (retInvoiceItems.find(x => x.sl.itemId === retItemId)?.sl.unitPrice ?? retUnitPrice) : retUnitPrice}
+                  readOnly={!!retInvoice}
                   onChange={(e) => setRetUnitPrice(Number(e.target.value))}
-                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono read-only:opacity-60"
                 />
               </div>
+              {!retInvoice && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">المعاملة الضريبية (إلزامية بدون فاتورة) *</label>
+                  <div className="flex items-center gap-3 p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" name="retTax" checked={retTaxChoice === 'taxable'} onChange={() => setRetTaxChoice('taxable')} />
+                      خاضع للضريبة
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="radio" name="retTax" checked={retTaxChoice === 'exempt'} onChange={() => { setRetTaxChoice('exempt'); setRetVatRate('0'); }} />
+                      معفى
+                    </label>
+                  </div>
+                  {retTaxChoice === 'taxable' && (
+                    <div className="mt-2">
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">معامل الضريبة المعتّمد (مثال 0.14 لـ 14%) *</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={retVatRate}
+                        placeholder="لا يوجد افتراض — أدخل المعاملة"
+                        onChange={(e) => setRetVatRate(e.target.value)}
+                        className="w-full p-2 rounded-xl bg-white border border-amber-300 text-xs font-mono"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              {!retInvoice && retCustomer?.currency === 'USD' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">سعر الصرف الموثق (ج.م لكل دولار) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={retExchangeRate}
+                    placeholder="لا يوجد افتراض — أدخل السعر التاريخي"
+                    onChange={(e) => setRetExchangeRate(e.target.value)}
+                    className="w-full p-2 rounded-xl bg-white border border-amber-300 text-xs font-mono"
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">توجيه الجودة</label>
                 <select
@@ -560,7 +782,9 @@ export const CustomersView: React.FC = () => {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">سبب الإرجاع</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  سبب الإرجاع {retInvoice ? '' : '(إلزامي بدون فاتورة — اكتب سببًا حقيقيًا)'}
+                </label>
                 <input
                   type="text"
                   value={retReason}

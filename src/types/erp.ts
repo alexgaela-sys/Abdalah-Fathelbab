@@ -638,6 +638,16 @@ export interface Cheque {
   bankName: string;
   amount: number;
   currency: 'EGP' | 'USD';
+  /**
+   * The DOCUMENTED EGP-per-unit rate this cheque's trade balance was recognized
+   * at (PATH A stamps the payment's rate; PATH B requires it for USD). Every
+   * downstream transition journal (collection, payout, bounce) must reuse THIS
+   * rate so GL 1104/1105/1106/2101/2102/bank reverse exactly what was posted.
+   * Legacy USD cheques created before this field may have no rate — transitions
+   * then fall back to the company rate at posting time and say so in the line.
+   * NEVER a silent rate of 1 for USD (that was the F-CHQ-FX defect).
+   */
+  exchangeRate?: number;
   issueDate: string;
   dueDate: string;
   status: ChequeStatus;

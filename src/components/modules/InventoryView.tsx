@@ -104,15 +104,22 @@ export const InventoryView: React.FC<{
   const handleExecuteTransfer = () => {
     setTransferError(null);
     const item = items.find(i => i.id === transferItemId);
-    const res = InventoryEngine.transferWarehouse(
-      transferItemId,
-      fromWhId,
-      toWhId,
-      Number(transferQty),
-      item?.standardCost || undefined,
-      undefined,
-      transferNotes
-    );
+    let res: { success: boolean; error?: string };
+    // R-09: an unexpected throw must not unmount the whole inventory screen.
+    try {
+      res = InventoryEngine.transferWarehouse(
+        transferItemId,
+        fromWhId,
+        toWhId,
+        Number(transferQty),
+        item?.standardCost || undefined,
+        undefined,
+        transferNotes
+      );
+    } catch (e) {
+      setTransferError(`حدث خطأ غير متوقع أثناء التحويل: ${(e as Error).message}`);
+      return;
+    }
 
     if (!res.success) {
       setTransferError(res.error || 'فشل التحويل المخزني');
@@ -125,11 +132,20 @@ export const InventoryView: React.FC<{
   // ITEM 9: shared count-line builder. Zero-balance items are excluded by
   // default (QA-11: only the selected warehouse's real stock is counted), but
   // the user can opt in so items that SHOULD have stock are counted too.
+  // R-09: resolve the REAL valuation the settlement will use (FIFO in the
+  // counted warehouse, falling back to the item's standard cost) so the
+  // preview's فارق التكلفة column shows the value that will actually post —
+  // the old form always previewed 0.00 ج.م and passed unitCost: 0, which left
+  // every zero-FIFO-cost item impossible to count.
   const buildCountLines = (whId: string, includeZero: boolean) =>
     items
       .map(itm => ({ itemId: itm.id, systemQty: InventoryEngine.getItemBalance(itm.id, whId) }))
       .filter(x => includeZero || x.systemQty !== 0)
-      .map(({ itemId, systemQty }) => ({ itemId, systemQty, physicalQty: systemQty, unitCost: 0 }));
+      .map(({ itemId, systemQty }) => {
+        const resolved = InventoryEngine.resolveActualUnitCost(itemId, whId, 1);
+        const unitCost = resolved.ok ? resolved.unitCost : (items.find(i => i.id === itemId)?.standardCost || 0);
+        return { itemId, systemQty, physicalQty: systemQty, unitCost };
+      });
 
   const handleOpenPhysicalCount = () => {
     if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
@@ -147,17 +163,27 @@ export const InventoryView: React.FC<{
   const handleApproveCount = () => {
     const todayStr = new Date().toISOString().split('T')[0];
 
-    const res = WorkflowService.postInventoryCount({
-      warehouseId: countWarehouseId,
-      date: todayStr,
-      approvedBy: 'مدير عام المخازن والمراجعة',
-      lines: countLines.map(l => ({
-        itemId: l.itemId,
-        systemQuantity: l.systemQty,
-        physicalQuantity: l.physicalQty,
-        unitCost: l.unitCost,
-      })),
-    });
+    // R-09: never let an unexpected engine throw blank the inventory screen —
+    // the message is surfaced instead and the modal stays open for correction.
+    let res: { success: boolean; error?: string };
+    try {
+      res = WorkflowService.postInventoryCount({
+        warehouseId: countWarehouseId,
+        date: todayStr,
+        approvedBy: 'مدير عام المخازن والمراجعة',
+        lines: countLines.map(l => ({
+          itemId: l.itemId,
+          systemQuantity: l.systemQty,
+          physicalQuantity: l.physicalQty,
+          // The builder already resolved the FIFO/standard valuation, so the
+          // settlement value matches the previewed فارق التكلفة exactly.
+          unitCost: l.unitCost,
+        })),
+      });
+    } catch (e) {
+      alert(`حدث خطأ غير متوقع أثناء ترحيل الجرد: ${(e as Error).message}`);
+      return;
+    }
 
     if (!res.success) {
       alert(res.error || 'خطأ في ترحيل الجرد الفعلي');
@@ -172,17 +198,24 @@ export const InventoryView: React.FC<{
 
   const handleCreateScrapSale = () => {
     setScrapError(null);
-    const res = WorkflowService.createScrapSale({
-      itemId: scrapItemId,
-      quantity: Number(scrapQty),
-      unitPrice: Number(scrapPrice),
-      buyerName: scrapBuyer,
-      paymentMethod: scrapPay,
-      date: scrapDate,
-      notes: scrapNotes.trim() || undefined,
-      userId: 'usr-admin',
-      userName: 'المشرف العام (Admin)',
-    });
+    let res: { success: boolean; error?: string };
+    // R-09: never let an engine throw blank the screen; surface it instead.
+    try {
+      res = WorkflowService.createScrapSale({
+        itemId: scrapItemId,
+        quantity: Number(scrapQty),
+        unitPrice: Number(scrapPrice),
+        buyerName: scrapBuyer,
+        paymentMethod: scrapPay,
+        date: scrapDate,
+        notes: scrapNotes.trim() || undefined,
+        userId: 'usr-admin',
+        userName: 'المشرف العام (Admin)',
+      });
+    } catch (e) {
+      setScrapError(`حدث خطأ غير متوقع أثناء تسجيل بيع السكراب: ${(e as Error).message}`);
+      return;
+    }
     if (!res.success) {
       setScrapError(res.error || 'تعذر تسجيل مستند بيع السكراب');
       return;
