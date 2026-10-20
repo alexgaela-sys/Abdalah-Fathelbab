@@ -444,6 +444,14 @@ export interface SalesInvoice {
   withholdingReason?: string;
   /** F-WH: configured withholding rate used for the preview (fraction, e.g. 0.01). */
   withholdingRate?: number;
+  /**
+   * F-WH-MANUAL: the user's explicit choice on the create screen. True only when
+   * "تطبيق خصم تحت حساب ضريبة الدخل 1%" was ticked for this invoice; absent/false
+   * means it was never applied (no automatic eligibility anymore).
+   */
+  withholdingEnabled?: boolean;
+  /** F-WH-MANUAL: the pre-VAT base the 1% was computed from (invoice subtotal). */
+  withholdingBase?: number;
   isTest?: boolean;
 }
 

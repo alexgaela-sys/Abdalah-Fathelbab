@@ -14,6 +14,7 @@ import { erpDb } from '../../services/db';
 import { CompanySettingsService } from '../../services/companySettings';
 import { printDocument } from '../printUtils';
 import { InvoiceFooter, InvoiceHeader, InvoiceDocStyle, NetDueHighlight } from '../invoiceTemplate';
+import { WithholdingSummary } from '../withholdingSummary';
 import { SalesInvoice, SalesInvoiceLine, PurchaseInvoice, PurchaseInvoiceLine } from '../../types/erp';
 import { Printer, X } from 'lucide-react';
 
@@ -305,14 +306,15 @@ const InvoicePrint: React.FC<{
         {/* F-WH: withholding preview is shown SEPARATELY so it is clear this is NOT
             VAT and does NOT reduce the invoice gross total or the customer receivable
             at issuance. */}
-        {template.showWithholding && Number.isFinite(Number(s.withholdingAmount)) && Number(s.withholdingAmount) > 0 && (
-          <>
-            <div>
-              خصم تحت حساب ضريبة الدخل (خصم من المنبع){s.withholdingRate ? ` بنسبة ${(Number(s.withholdingRate) * 100).toFixed(2)}%` : ''}:
-              {' '}<b>{fmt(Number(s.withholdingAmount))} {s.currency === 'USD' ? 'USD' : 'EGP'}</b>
-              {' '}({s.withholdingReason || 'تقديري'})
-            </div>
-          </>
+        {template.showWithholding && (
+          <WithholdingSummary
+            rate={s.withholdingRate}
+            amount={s.withholdingAmount}
+            base={Number(s.withholdingBase) || s.subtotal}
+            currency={s.currency === 'USD' ? 'USD' : 'EGP'}
+            reason={s.withholdingReason}
+            className="mt-2"
+          />
         )}
         <div className="text-base font-black">الإجمالي النهائي (قبل خصم المنبع): {fmt(s.totalAmount)} {s.currency === 'USD' ? 'USD' : 'EGP'}</div>
         <NetDueHighlight

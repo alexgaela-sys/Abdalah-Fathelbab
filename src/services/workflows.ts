@@ -336,6 +336,12 @@ export class WorkflowService {
     exportShipmentId?: string;
     /** Invoice-level tax treatment. Absent = current behavior (per-line vatRate governs). */
     taxTreatment?: 'taxable' | 'exempt';
+    /**
+     * F-WH-MANUAL — the user's explicit, per-invoice choice to apply the 1%
+     * withholding-at-source preview. Default (absent/false) = NO withholding.
+     * Eligibility is never inferred from "local" or "credit" alone anymore.
+     */
+    applyWithholding?: boolean;
     lines: Array<{
       itemId: string;
       quantity: number;
@@ -660,28 +666,35 @@ export class WorkflowService {
       }
     }
 
-    // F-WH: optional withholding income tax at source preview for DOMESTIC EGP
-    // invoices only. It is an INFORMATIONAL preview stored with the invoice and
-    // shown on the view/print. It does NOT touch subtotal, totalAmount, vatAmount,
-    // revenue, COGS, or the customer receivable at issuance. When absent or zero
-    // it means the feature is not applicable to this transaction.
+    // F-WH-MANUAL: withholding is applied ONLY when the user explicitly ticks
+    // "تطبيق خصم تحت حساب ضريبة الدخل 1%" on this invoice. The old automatic
+    // eligibility (local + credit + retail → always applied) is removed.
+    //
+    // It is still an INFORMATIONAL preview stored with the invoice: it does NOT
+    // touch subtotal, totalAmount, vatAmount, revenue, COGS or the receivable at
+    // issuance, and it is an EGP, non-export, non-exempt concept only — asking
+    // for it outside those bounds is refused loudly instead of silently assumed.
     let withholdingPreviewAmount = 0;
     let withholdingPreviewRate = 0;
     let withholdingPreviewReason = '';
-    if (
-      params.currency === 'EGP' &&
-      params.channel !== 'export' &&
-      params.paymentMethod === 'credit' &&
-      customer.customerType === 'retail' &&
-      params.taxTreatment !== 'exempt'
-    ) {
-      // Default configuration: 1% of the invoice subtotal (before VAT) as a
-      // withholding-at-source preview where applicable. This is a business-policy
-      // default that must be overridable/configurable in a real rollout; until a
-      // settings field exists, the rate and applicability live here and are
-      // surfaced on the invoice so the user can edit/confirm or waive it at the
-      // UI level before printing/issuing.
+    let withholdingEnabled = false;
+    if (params.applyWithholding) {
+      const blockedBy: string[] = [];
+      if (params.paymentMethod !== 'credit') blockedBy.push('الخصم مخصص لفاتورة البيع الآجلة فقط');
+      if (params.currency !== 'EGP') blockedBy.push('الخصم يُطبَّق بالجنيه المصري فقط');
+      if (params.channel === 'export') blockedBy.push('فاتورة التصدير خارج نطاق الخصم المحلي');
+      if (params.taxTreatment === 'exempt') blockedBy.push('الفاتورة المعفاة من ضريبة القيمة المضافة ليس عليها وعاء خصم');
+      if (blockedBy.length > 0) {
+        return {
+          success: false,
+          error: `تعذّر تطبيق خصم ضريبة الدخل من المنبع: ${blockedBy.join('؛ ')}. أوقف الاختيار أو عدّل شروط الفاتورة.`,
+        };
+      }
+      // Policy: 1% of the invoice subtotal BEFORE VAT — never of the VAT, never
+      // changing sales revenue or VAT. Requires the responsible accountant's
+      // confirmation that the transaction is legally subject to withholding.
       const rate = 0.01;
+      withholdingEnabled = true;
       withholdingPreviewRate = rate;
       withholdingPreviewAmount = Math.round(subtotal * rate * 100) / 100;
       withholdingPreviewReason = 'خصم تحت حساب ضريبة الدخل (خصم من المنبع)';
@@ -722,9 +735,13 @@ export class WorkflowService {
         custodyId: custody?.id,
         bonusQuantity,
         cashAmount: params.paymentMethod === 'cash' ? totalAmountEGP : 0,
-        // F-WH: informational-only withholding preview. Does NOT reduce revenue / totalAmount / receivable.
+        // F-WH-MANUAL: informational-only withholding preview. Does NOT reduce
+        // revenue / totalAmount / receivable. withholdingEnabled + withholdingBase
+        // persist the user's choice and the pre-VAT base with the invoice itself.
+        withholdingEnabled,
         withholdingAmount: withholdingPreviewAmount,
         withholdingRate: withholdingPreviewRate,
+        withholdingBase: withholdingEnabled ? subtotal : undefined,
         withholdingReason: withholdingPreviewReason,
       };
 

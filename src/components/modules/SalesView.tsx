@@ -5,23 +5,13 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { WorkflowService } from '../../services/workflows';
-
-/** Resolve an invoice line item's configured base-unit display name. */
-function itemUnitLabel(db: ReturnType<typeof erpDb.getSnapshot>, itemId?: string): string {
-  if (itemId) {
-    const itm = db.items.find((i) => i.id === itemId);
-    if (itm?.baseUnitId) {
-      const u = db.units.find((u) => u.id === itm.baseUnitId);
-      if (u?.nameAr) return u.nameAr;
-    }
-  }
-  return 'قطعة';
-}
 import { SalesChannel, PaymentMethod } from '../../types/erp';
 import { priceFor, channelForCustomerType, currencyForChannel, warehouseForChannel } from '../../services/pricing';
 import { PermissionService } from '../../services/permissions';
 import { AuthService } from '../../services/auth';
 import InvoicePrint from './InvoicePrint';
+import { SalesInvoiceDetails } from '../salesInvoiceDetails';
+import { WithholdingSummary } from '../withholdingSummary';
 
 export const SalesView: React.FC = () => {
   const db = erpDb.getSnapshot();
@@ -53,6 +43,9 @@ export const SalesView: React.FC = () => {
   const [notes, setNotes] = useState('');
   // F5: invoice-level tax treatment (default = current behavior: line rates govern)
   const [taxTreatment, setTaxTreatment] = useState<'taxable' | 'exempt'>('taxable');
+  // F-WH-MANUAL: opt-in toggle for the 1% withholding-at-source preview.
+  // OFF by default — withholding is never inferred from local/credit alone.
+  const [applyWithholding, setApplyWithholding] = useState(false);
   // F7: printable document state
   const [printInvoiceId, setPrintInvoiceId] = useState<string | null>(null);
 
@@ -237,6 +230,7 @@ export const SalesView: React.FC = () => {
       date,
       notes,
       taxTreatment,
+      applyWithholding,
       lines: lines.map(l => ({
         itemId: l.itemId,
         quantity: Number(l.quantity),
@@ -257,8 +251,29 @@ export const SalesView: React.FC = () => {
       alert(res.creditWarning);
     }
 
+    setApplyWithholding(false);
     setShowCreateModal(false);
   };
+
+  // F-WH-MANUAL: the toggle must fit the invoice it is asked for; otherwise the
+  // service refuses the save with the same reason (never a silent assumption).
+  const withholdingBlockedReason = !applyWithholding ? '' : [
+    paymentMethod !== 'credit' ? 'الخصم مخصص لفاتورة البيع الآجلة' : '',
+    currency !== 'EGP' ? 'يُطبَّق بالجنيه المصري فقط' : '',
+    channel === 'export' ? 'خارج نطاق فواتير التصدير' : '',
+    taxTreatment === 'exempt' ? 'الفاتورة المعفاة ليس عليها وعاء خصم' : '',
+  ].filter(Boolean).join('؛ ');
+
+  // Live form preview (read-only): subtotal → VAT → total → optional 1% → net due.
+  const formSubtotal = lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0);
+  const formVat = taxTreatment === 'exempt'
+    ? 0
+    : lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0) * (Number(l.vatRate) || 0), 0);
+  const formTotalBeforeDeduction = formSubtotal + formVat;
+  const formWithholding = applyWithholding && !withholdingBlockedReason
+    ? Math.round(formSubtotal * 0.01 * 100) / 100
+    : 0;
+  const formNetDue = formTotalBeforeDeduction - formWithholding;
 
   const filteredInvoices = db.salesInvoices.filter(inv => {
     const cust = db.customers.find(c => c.id === inv.customerId);
@@ -563,6 +578,29 @@ export const SalesView: React.FC = () => {
                   </select>
                 </div>
 
+                {/* F-WH-MANUAL: explicit per-invoice choice, OFF by default. */}
+                <div className="sm:col-span-2">
+                  <label className="flex items-start gap-2 p-2.5 rounded-xl border border-amber-300 bg-amber-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={applyWithholding}
+                      onChange={(e) => setApplyWithholding(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 accent-amber-600 cursor-pointer"
+                    />
+                    <span className="text-xs font-black text-amber-900">
+                      تطبيق خصم تحت حساب ضريبة الدخل 1%
+                      <span className="block text-[10px] font-semibold text-amber-700 mt-0.5">
+                        يُحسب على المبيعات قبل ض.ق.م فقط، ولا يغيّر قيمة المبيعات أو الضريبة. غير محدد افتراضيًا — يُفعَّل أو يُوقَف لكل فاتورة.
+                      </span>
+                    </span>
+                  </label>
+                  {withholdingBlockedReason && (
+                    <p className="mt-1 text-[10px] font-bold text-rose-600">
+                      ⚠️ لا يمكن تطبيق الخصم هنا: {withholdingBlockedReason} — سيُمنع حفظ الفاتورة بهذا الاختيار.
+                    </p>
+                  )}
+                </div>
+
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">مندوب المبيعات</label>
                   <select
@@ -696,15 +734,47 @@ export const SalesView: React.FC = () => {
                 </table>
               </div>
 
-              {/* Total Summary */}
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center text-xs">
-                <span className="text-slate-500">
+              {/* Total Summary — F-WH-MANUAL: sales pre-VAT, VAT, total before the
+                  deduction, the optional 1% and the net due after it. */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-3">
+                <div className="text-slate-500">
                   ملاحظة: البونص المجاني يظهر بسعر 0 على الفاتورة ويخصم من المخزون ويحمل على تكلفة المبيعات COGS
-                </span>
-                <div className="text-left font-mono space-y-1">
-                  <div className="text-sm font-black text-slate-900">
-                    الإجمالي النهائي: {lines.reduce((s, l) => s + (l.quantity * l.unitPrice * (1 + l.vatRate)), 0).toFixed(2)} {currency}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                  <div className="font-mono space-y-1">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-600">المبيعات قبل الضريبة:</span>
+                      <b>{formSubtotal.toFixed(2)} {currency}</b>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-600">ضريبة القيمة المضافة:</span>
+                      <b>{formVat.toFixed(2)} {currency}</b>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-600">إجمالي الفاتورة قبل الخصم:</span>
+                      <b>{formTotalBeforeDeduction.toFixed(2)} {currency}</b>
+                    </div>
+                    {formWithholding > 0 && (
+                      <>
+                        <div className="flex justify-between gap-4 text-amber-800">
+                          <span>خصم 1% (من الوعاء قبل الضريبة):</span>
+                          <b>{formWithholding.toFixed(2)} {currency}</b>
+                        </div>
+                        <div className="flex justify-between gap-4 text-sm font-black text-slate-900">
+                          <span>صافي المستحق بعد الخصم:</span>
+                          <b>{formNetDue.toFixed(2)} {currency}</b>
+                        </div>
+                      </>
+                    )}
                   </div>
+                  {formWithholding > 0 && (
+                    <WithholdingSummary
+                      rate={0.01}
+                      amount={formWithholding}
+                      base={formSubtotal}
+                      currency={currency}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -739,57 +809,9 @@ export const SalesView: React.FC = () => {
               <button onClick={() => setSelectedInvoice(null)} className="text-slate-400 hover:text-slate-600">✕</button>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
-              <div>
-                <span className="text-slate-400 block">التاريخ:</span>
-                <span className="font-bold text-slate-800">{selectedInvoice.date}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block">العميل:</span>
-                <span className="font-bold text-slate-800">
-                  {db.customers.find(c => c.id === selectedInvoice.customerId)?.name}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-400 block">القناة:</span>
-                <span className="font-bold text-slate-800">{selectedInvoice.channel}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block">القيمة الإجمالية:</span>
-                <span className="font-black text-slate-900 font-mono">
-                  {selectedInvoice.totalAmount.toLocaleString('ar-EG')} {selectedInvoice.currency}
-                </span>
-              </div>
-            </div>
-
-            {/* Lines list */}
-            <div className="border border-slate-200 rounded-xl overflow-hidden">
-              <table className="w-full text-right text-xs">
-                <thead className="bg-slate-100 text-slate-700">
-                  <tr>
-                    <th className="p-2">الصنف</th>
-                    <th className="p-2 text-center">الكمية المباعة</th>
-                    <th className="p-2 text-center">بونص مجاني</th>
-                    <th className="p-2 text-center">سعر الوحدة</th>
-                    <th className="p-2 text-left">الإجمالي</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {db.salesInvoiceLines.filter(l => l.invoiceId === selectedInvoice.id).map(line => {
-                    const itm = db.items.find(i => i.id === line.itemId);
-                    return (
-                      <tr key={line.id}>
-                        <td className="p-2 font-bold">{itm?.nameAr || line.itemId}</td>
-                        <td className="p-2 text-center font-mono">{line.quantity} {itemUnitLabel(db, line.itemId)}</td>
-                        <td className="p-2 text-center font-mono text-emerald-700 font-bold">{line.freeQuantity || 0}</td>
-                        <td className="p-2 text-center font-mono">{line.unitPrice}</td>
-                        <td className="p-2 text-left font-mono font-black">{line.netTotal.toFixed(2)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            {/* Saved invoice (read back from the store) — includes the withholding
+                rate, pre-VAT base and amount plus the unchanged VAT/total. */}
+            <SalesInvoiceDetails invoiceId={selectedInvoice.id} />
 
             <div className="flex justify-end pt-2 gap-2">
               <button

@@ -12,6 +12,14 @@ import { WorkflowService } from '../src/services/workflows';
 import { MasterDataService } from '../src/services/masterData';
 import { InventoryEngine } from '../src/services/inventory';
 import { ensureTestBom } from './qa_test_bom';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import InvoicePrint from '../src/components/modules/InvoicePrint';
+import { SalesInvoiceDetails } from '../src/components/salesInvoiceDetails';
+import { computeInvoiceNetDue } from '../src/services/companySettings';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 const TODAY = new Date().toISOString().split('T')[0];
 const PFX = `TEST-WH-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
@@ -114,11 +122,15 @@ try {
   if (!stock('wh-export', fpExport.id, `${PFX}-STKB-EXP`).success) fatal('S0-6', 'Export stock setup', 'purchase failed');
   check('S0-5', 'Test fixtures built', 'ok', 'ok');
 
-  function invoice(subtotal: number, opts?: { paymentMethod?: 'cash' | 'credit'; customerId?: string; qty?: number }) {
+  function invoice(subtotal: number, opts?: { paymentMethod?: 'cash' | 'credit'; customerId?: string; qty?: number; withholding?: boolean }) {
     const qty = opts?.qty ?? 10;
+    const paymentMethod = opts?.paymentMethod ?? 'credit';
     return WorkflowService.createSalesInvoice({
       customerId: opts?.customerId ?? localCust.id, channel: 'retail', warehouseId: 'wh-local',
-      paymentMethod: opts?.paymentMethod ?? 'credit',
+      paymentMethod,
+      // F-WH-MANUAL: credit fixtures opt IN explicitly; cash fixtures stay off
+      // (the service refuses the toggle for cash). No automatic eligibility.
+      applyWithholding: opts?.withholding ?? (paymentMethod === 'credit'),
       currency: 'EGP', exchangeRate: 1, date: TODAY,
       lines: [{ itemId: fpLocal.id, quantity: qty, unitPrice: subtotal / qty, vatRate: 0.14 }],
       isTest: true, ...ADMIN,
@@ -402,10 +414,156 @@ try {
   check('S11-5', 'Total still includes full VAT', 3420, money(vatInv.invoice!.totalAmount));
   check('S11-6', 'Inventory still tracked', 1, InventoryEngine.getItemBalance(fpLocal.id, 'wh-local') > 0 ? 1 : 0);
 
+  // =====================================================================================
+  // S12 — DISPLAY: the same rate/base/amount must appear on the SAVED invoice
+  // screen and on the preview/print document (not only while creating).
+  // =====================================================================================
+  const htmlText = (markup: string) => markup
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z#0-9]+;/gi, ' ')
+    .replace(/\s+/g, ' ');
+  const detailsHtml = (invoiceId: string) => htmlText(renderToStaticMarkup(
+    React.createElement(SalesInvoiceDetails, { invoiceId }),
+  ));
+  const printHtml = (invoiceId: string) => htmlText(renderToStaticMarkup(
+    React.createElement(InvoicePrint, { invoiceId, onClose: () => {} }),
+  ));
+
+  const displayRes = invoice(10000);
+  if (!displayRes.success) fatal('S12-0', 'Display invoice', displayRes.error || 'failed');
+  // Re-read from the store: this is the persisted document, not form state.
+  const saved = snap().salesInvoices.find(i => i.id === displayRes.invoice!.id)!;
+  check('S12-1', 'Saved invoice keeps the 1% rate', 0.01, Number(saved.withholdingRate));
+  check('S12-2', 'Saved invoice keeps 100 = 1% of the pre-VAT base', 100, money(saved.withholdingAmount));
+  check('S12-3', 'Saved base before VAT = 10,000', 10000, money(saved.subtotal));
+  check('S12-4', 'VAT unchanged by the withholding preview', 1400, money(saved.vatAmount));
+  check('S12-5', 'Withholding is NOT added into the invoice total', 11400, money(saved.totalAmount));
+
+  const dHtml = detailsHtml(saved.id);
+  check('S12-6', 'Saved-invoice screen shows the withholding block', true, dHtml.includes('خصم تحت حساب ضريبة الدخل'));
+  check('S12-7', 'Saved-invoice screen shows the 1.00% rate', true, dHtml.includes('1.00%'));
+  check('S12-8', 'Saved-invoice screen shows the pre-VAT base', true, dHtml.includes('وعاء الحساب قبل ض.ق.م: 10,000.00 EGP'));
+  check('S12-9', 'Saved-invoice screen shows the deduction amount', true, dHtml.includes('قيمة الخصم: 100.00 EGP'));
+  check('S12-10', 'Saved-invoice screen still shows VAT 1,400.00', true, dHtml.includes('1,400.00'));
+  check('S12-11', 'Saved-invoice screen still shows total 11,400.00', true, dHtml.includes('11,400.00'));
+
+  const pHtml = printHtml(saved.id);
+  check('S12-12', 'Preview/print shows the 1.00% rate', true, pHtml.includes('1.00%'));
+  check('S12-13', 'Preview/print shows the pre-VAT base', true, pHtml.includes('وعاء الحساب قبل ض.ق.م: 10,000.00 EGP'));
+  check('S12-14', 'Preview/print shows the deduction amount', true, pHtml.includes('قيمة الخصم: 100.00 EGP'));
+  check('S12-15', 'Preview/print keeps VAT at 14% / 1,400.00', true, pHtml.includes('ضريبة القيمة المضافة (14%)') && pHtml.includes('1,400.00'));
+  check('S12-16', 'Preview/print total excludes the withholding', true, pHtml.includes('11,400.00'));
+
+  // Ineligible: CASH domestic retail invoice.
+  const cashSaved = snap().salesInvoices.find(i => i.id === cashInv.invoice!.id)!;
+  const cashDetails = detailsHtml(cashSaved.id);
+  const cashPrint = printHtml(cashSaved.id);
+  check('S12-17', 'Cash (ineligible) saved screen: no withholding block', false, cashDetails.includes('خصم تحت حساب ضريبة الدخل'));
+  check('S12-18', 'Cash (ineligible) preview/print: no withholding rate/base', false,
+    cashPrint.includes('خصم تحت حساب ضريبة الدخل') || cashPrint.includes('وعاء الحساب قبل ض.ق.م'));
+  check('S12-19', 'Cash (ineligible): VAT 1,400 and total 11,400 unchanged', true,
+    cashPrint.includes('1,400.00') && cashPrint.includes('11,400.00'));
+  check('S12-20', 'Cash (ineligible) stores zero withholding', 0, money(cashSaved.withholdingAmount));
+
+  // Ineligible: EXPORT (USD) invoice.
+  const expSaved = snap().salesInvoices.find(i => i.id === expExempt.invoice!.id)!;
+  const expDetails = detailsHtml(expSaved.id);
+  const expPrint = printHtml(expSaved.id);
+  check('S12-21', 'Export (ineligible) saved screen: no withholding block', false, expDetails.includes('خصم تحت حساب ضريبة الدخل'));
+  check('S12-22', 'Export (ineligible) preview/print: no withholding rate/base', false,
+    expPrint.includes('خصم تحت حساب ضريبة الدخل') || expPrint.includes('وعاء الحساب قبل ض.ق.م'));
+  check('S12-23', 'Export (ineligible) stores zero withholding', 0, money(expSaved.withholdingAmount));
+
+  // Sales totals: across every test invoice, total = subtotal + VAT exactly.
+  const totals = snap().salesInvoices;
+  const sumTotal = money(totals.reduce((s, i) => s + (Number(i.totalAmount) || 0), 0));
+  const sumBaseVat = money(totals.reduce((s, i) => s + (Number(i.subtotal) || 0) + (Number(i.vatAmount) || 0), 0));
+  check('S12-24', 'Sales totals never include withholding (Σtotal = Σsubtotal + ΣVAT)', sumBaseVat, sumTotal);
+
+  // =====================================================================================
+  // S13 — MANUAL TOGGLE: opt-in only; the old automatic eligibility is gone.
+  // =====================================================================================
+  const noFlagRes = invoice(10000, { withholding: false });
+  if (!noFlagRes.success) fatal('S13-0', 'Credit invoice without the toggle', noFlagRes.error || 'failed');
+  const noFlagInv = noFlagRes.invoice!;
+  check('S13-1', 'Credit EGP retail invoice WITHOUT the toggle has NO withholding', 0, money(noFlagInv.withholdingAmount));
+  check('S13-2', 'Stored choice is off', false, Boolean(noFlagInv.withholdingEnabled));
+  check('S13-3', 'Auto-eligibility removed (same invoice used to preview 100)', 0, money(noFlagInv.withholdingAmount),
+    'regression against the old local+credit+retail rule');
+  const noFlagDetails = detailsHtml(noFlagInv.id);
+  const noFlagPrint = printHtml(noFlagInv.id);
+  check('S13-4', 'Saved screen of the untoggled invoice shows no withholding block', false,
+    noFlagDetails.includes('خصم تحت حساب ضريبة الدخل'));
+  check('S13-5', 'Print of the untoggled invoice shows no withholding rate/base/amount', false,
+    noFlagPrint.includes('خصم تحت حساب ضريبة الدخل') || noFlagPrint.includes('وعاء الحساب قبل ض.ق.م'));
+
+  const cashWithFlag = WorkflowService.createSalesInvoice({
+    customerId: localCust.id, channel: 'retail', warehouseId: 'wh-local', paymentMethod: 'cash',
+    currency: 'EGP', exchangeRate: 1, date: TODAY,
+    lines: [{ itemId: fpLocal.id, quantity: 1, unitPrice: 100, vatRate: 0.14 }],
+    applyWithholding: true, isTest: true, ...ADMIN,
+  } as never);
+  check('S13-6', 'Toggle + CASH invoice is refused', false, cashWithFlag.success);
+  check('S13-7', 'Refusal names the credit-invoice rule', true, String(cashWithFlag.error || '').includes('آجلة'));
+
+  const exportWithFlag = WorkflowService.createSalesInvoice({
+    customerId: exportCust.id, channel: 'export', warehouseId: 'wh-export', paymentMethod: 'credit',
+    currency: 'USD', exchangeRate: 48.5, date: TODAY,
+    lines: [{ itemId: fpExport.id, quantity: 5, unitPrice: 10, vatRate: 0 }],
+    taxTreatment: 'exempt', applyWithholding: true, isTest: true, ...ADMIN,
+  } as never);
+  check('S13-8', 'Toggle + EXPORT/USD invoice is refused', false, exportWithFlag.success);
+  check('S13-9', 'Refusal names the export/currency rules', true,
+    String(exportWithFlag.error || '').includes('تصدير') && String(exportWithFlag.error || '').includes('جنيه'));
+
+  const exemptWithFlag = WorkflowService.createSalesInvoice({
+    customerId: localCust.id, channel: 'retail', warehouseId: 'wh-local', paymentMethod: 'credit',
+    currency: 'EGP', exchangeRate: 1, date: TODAY,
+    lines: [{ itemId: fpLocal.id, quantity: 1, unitPrice: 100, vatRate: 0 }],
+    taxTreatment: 'exempt', applyWithholding: true, isTest: true, ...ADMIN,
+  } as never);
+  check('S13-10', 'Toggle + EXEMPT invoice is refused', false, exemptWithFlag.success);
+  check('S13-11', 'Refusal names the exempt rule', true, String(exemptWithFlag.error || '').includes('المعفاة'));
+
+  // The opted-in invoice (created in S12) keeps the full 5-figure contract.
+  const onInv = snap().salesInvoices.find(i => i.id === displayRes.invoice!.id)!;
+  check('S13-12', 'Toggle stores the choice on the invoice', true, Boolean(onInv.withholdingEnabled));
+  check('S13-13', 'Toggle stores the pre-VAT base', 10000, money(onInv.withholdingBase));
+  check('S13-14', 'Rate stored as 1%', 0.01, Number(onInv.withholdingRate));
+  check('S13-15', 'Amount = 1% of the pre-VAT base', 100, money(onInv.withholdingAmount));
+  check('S13-16', 'Sales pre-VAT / VAT / total unchanged (10,000 + 1,400 = 11,400)', '10000.00/1400.00/11400.00',
+    `${money(onInv.subtotal).toFixed(2)}/${money(onInv.vatAmount).toFixed(2)}/${money(onInv.totalAmount).toFixed(2)}`);
+  check('S13-17', 'Net due after deduction = 11,300', 11300,
+    computeInvoiceNetDue(Number(onInv.totalAmount), Number(onInv.withholdingAmount)));
+  const onPrint = printHtml(onInv.id);
+  check('S13-18', 'Print shows 10,000 / 1,400 / 11,400 / 100 / 11,300', true,
+    ['10,000.00', '1,400.00', '11,400.00', '100.00', '11,300.00'].every(v => onPrint.includes(v)));
+  const onDetails = detailsHtml(onInv.id);
+  check('S13-19', 'Saved screen shows base, rate, amount and the untouched total', true,
+    onDetails.includes('وعاء الحساب قبل ض.ق.م: 10,000.00 EGP')
+      && onDetails.includes('1.00%')
+      && onDetails.includes('قيمة الخصم: 100.00 EGP')
+      && onDetails.includes('11,400.00'));
+
+  // ---- UI wiring: the checkbox the user ticks must be what reaches the
+  // service (the service-level checks above would pass even without it).
+  const salesViewSrc = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../src/components/modules/SalesView.tsx'),
+    'utf8',
+  );
+  check('S13-20', 'Create screen shows the explicit toggle label', true,
+    salesViewSrc.includes('تطبيق خصم تحت حساب ضريبة الدخل 1%'));
+  check('S13-21', 'Toggle defaults to OFF and resets after save', true,
+    salesViewSrc.includes('useState(false)') && salesViewSrc.includes('setApplyWithholding(false)'));
+  check('S13-22', 'Toggle is passed into createSalesInvoice', true,
+    /createSalesInvoice\(\{[\s\S]*?applyWithholding,/.test(salesViewSrc));
+
   printTable();
   console.log('\n⚠️  UNCONFIRMED TAX ASSUMPTIONS (not validated legally by this test):');
-  console.log('   1. 1% of the invoice SUBTOTAL before VAT — implementation default only.');
-  console.log('   2. Applicability limited to EGP + non-export + credit + retail customer + non-exempt.');
+  console.log('   1. 1% of the invoice SUBTOTAL before VAT — implementation policy only.');
+  console.log('   2. Applied only on EXPLICIT user opt-in per invoice; service boundaries are');
+  console.log('      credit + EGP + non-export + non-exempt — ticking the box does NOT prove');
+  console.log('      the transaction is legally subject to withholding (accountant sign-off needed).');
   console.log('   3. The reversal debits the customer because the withheld amount is the customer\'s tax credit;');
   console.log('      this treatment needs a tax accountant decision (credit note vs. independent settlement).');
   console.log('   4. Unlinked legacy withholding is never guessed: it needs a manual settlement document.');

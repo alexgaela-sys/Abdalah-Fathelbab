@@ -22,6 +22,7 @@
     "uom": "tsx scripts/qa_uom_conversion.ts",
     "partialclose": "tsx scripts/qa_partial_closure.ts",
     "qa:withholding": "tsx scripts/qa_withholding_income_tax.ts",
+    "qa:cancel": "tsx scripts/qa_sales_cancel_isolation.ts",
     "qa:settings": "tsx scripts/qa_company_settings.ts"
   },
   "dependencies": {
