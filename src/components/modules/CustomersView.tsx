@@ -177,6 +177,20 @@ export const CustomersView: React.FC = () => {
   const [chequeNumber, setChequeNumber] = useState('');
   const [paymentRef, setPaymentRef] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  // F-WH: optional documented withholding captured on the customer receipt form.
+  // It is only relevant when the customer is settling a domestic EGP invoice that
+  // declared a withholding-at-source preview. It is recorded SEPARATELY from cash
+  // received and does NOT reduce the cash amount entered here.
+  // F-WH: optional documented withholding captured on the customer receipt form.
+  // It is only relevant when the customer is settling a domestic EGP invoice that
+  // declared a withholding-at-source preview. It is recorded SEPARATELY from cash
+  // received and does NOT reduce the cash amount entered here.
+  const [whAmount, setWhAmount] = useState(0);
+  const [whCertificate, setWhCertificate] = useState('');
+  const [whDocumentDate, setWhDocumentDate] = useState('');
+  // F-WH fix: explicit link to the original invoice, so a later return can reverse
+  // exactly the withholding that belongs to it.
+  const [whInvoiceId, setWhInvoiceId] = useState('');
 
   const openCreateCustomer = () => {
     if (!writeAccess.canCreate) { alert(writeAccess.createDeniedTitle); return; }
@@ -259,6 +273,12 @@ export const CustomersView: React.FC = () => {
 
   const handleRecordPayment = () => {
     if (!showPaymentModal) return;
+    const wh = Number(whAmount) || 0;
+    // F-WH fix: a documented withholding without a certificate is not documented.
+    if (wh > 0 && !whCertificate.trim()) {
+      alert('أدخل رقم الشهادة / مرجع وثيقة الخصم — لا يُسجّل خصم من المنبع بدون مستند موثق');
+      return;
+    }
     const res = WorkflowService.recordCustomerPayment({
       customerId: showPaymentModal.id,
       amount: Number(paymentAmount),
@@ -269,6 +289,11 @@ export const CustomersView: React.FC = () => {
       chequeNumber: paymentMethod === 'cheque' ? chequeNumber : undefined,
       date: paymentDate,
       reference: paymentRef || 'سند تحصيل عميل',
+      // F-WH: persist the actual documented withholding separately from cash.
+      withholdingAmountEGP: wh > 0 ? wh : undefined,
+      withholdingCertificateNo: whCertificate.trim() || undefined,
+      withholdingDocumentDate: whDocumentDate.trim() || undefined,
+      withholdingInvoiceId: whInvoiceId || undefined,
       userId: 'usr-admin',
       userName: 'المشرف العام (Admin)',
     });
@@ -279,6 +304,10 @@ export const CustomersView: React.FC = () => {
     }
 
     setShowPaymentModal(null);
+    setWhAmount(0);
+    setWhCertificate('');
+    setWhDocumentDate('');
+    setWhInvoiceId('');
   };
 
   // Filtered customer list
@@ -792,6 +821,81 @@ export const CustomersView: React.FC = () => {
                   className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                 />
               </div>
+
+              {/* F-WH: optional withholding documentation on the customer receipt form.
+                  Only rendered when the customer currency is EGP and we are on the receipt
+                  modal (showPaymentModal is the customer being settled). */}
+              {showPaymentModal && showPaymentModal.currency === 'EGP' && (
+                <div className="col-span-1 sm:col-span-2 p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 font-semibold space-y-2">
+                  <div className="font-bold">
+                    خصم تحت حساب ضريبة الدخل (خصم من المنبع) — وثيقة وقت الاستلام:
+                    {' '}<span className="font-bold text-amber-800">{whAmount.toFixed(2)} ج.م</span>
+                    {' '}مُوثَّق بشكل منفصل عن النقد/البنك المستلم.
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-amber-900 font-bold mb-1">
+                        مبلغ الخصم الفعلي (ج.م) — اختياري
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={whAmount}
+                        onChange={(e) => setWhAmount(Number(e.target.value))}
+                        className="w-full p-2 rounded-xl bg-white border border-amber-300 text-xs font-mono"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-amber-900 font-bold mb-1">
+                        تاريخ وثيقة الخصم (YYYY-MM-DD) — اختياري
+                      </label>
+                      <input
+                        type="date"
+                        value={whDocumentDate}
+                        onChange={(e) => setWhDocumentDate(e.target.value)}
+                        className="p-2 rounded-xl bg-white border border-amber-300 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-amber-900 font-bold mb-1">
+                      الفاتورة الأصلية المرتبطة بالخصم — لازمة لعكس الخصم عند المرتجع
+                    </label>
+                    <select
+                      value={whInvoiceId}
+                      onChange={(e) => setWhInvoiceId(e.target.value)}
+                      className="w-full p-2 rounded-xl bg-white border border-amber-300 text-xs font-bold"
+                    >
+                      <option value="">— ربط تلقائي إن كانت هناك فاتورة واحدة —</option>
+                      {db.salesInvoices
+                        .filter(i => i.customerId === showPaymentModal.id && i.status === 'posted' && Number(i.withholdingAmount) > 0)
+                        .map(i => (
+                          <option key={i.id} value={i.id}>
+                            {i.invoiceNumber} — {i.date} — إجمالي {i.totalAmount.toLocaleString('en-US')} {i.currency} — خصم {Number(i.withholdingAmount).toLocaleString('en-US')}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-amber-900 font-bold mb-1">
+                      رقم الشهادة / المرجع — مطلوب عند إدخال خصم
+                    </label>
+                    <input
+                      type="text"
+                      value={whCertificate}
+                      onChange={(e) => setWhCertificate(e.target.value)}
+                      className="w-full p-2 rounded-xl bg-white border border-amber-300 text-xs font-mono"
+                      placeholder="مرجع الوثيقة أو رقم الشهادة"
+                    />
+                  </div>
+                  <div className="text-[11px] text-amber-800 leading-tight">
+                    ملاحظة: الخصم الموثَّق يُسجَّل كأصل ضريبي مستقل (حساب 1114) ولا يُخفِّض مبلغ النقد/البنك المستلم،
+                    لكنه يُخفِّض رصيد العميل كجزء من التسوية. عند المرتجع يُعاد الجزء المرتبط منه فقط بموجب سند تسوية مستقل.
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end">

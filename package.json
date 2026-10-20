@@ -20,7 +20,9 @@
     "fix2": "tsx scripts/fix2_partial_close.ts",
     "fix6": "tsx scripts/fix6_conversion_costs.ts",
     "uom": "tsx scripts/qa_uom_conversion.ts",
-    "partialclose": "tsx scripts/qa_partial_closure.ts"
+    "partialclose": "tsx scripts/qa_partial_closure.ts",
+    "qa:withholding": "tsx scripts/qa_withholding_income_tax.ts",
+    "qa:settings": "tsx scripts/qa_company_settings.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

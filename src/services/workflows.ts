@@ -13,6 +13,7 @@ import { InventoryEngine } from './inventory';
 import { AccountingEngine } from './accounting';
 import { AuthorizationService } from './authorization';
 import { isChannelCustomerMismatch } from './pricing';
+import { isWithholdingReversalAllowed } from './reversal-withholding';
 
 interface JLine {
   id: string;
@@ -74,6 +75,17 @@ function qualityDestinationRouting(destination: string): { warehouseId: string; 
 }
 
 export class WorkflowService {
+  /**
+   * F-WH helper: effective withholding-income-tax receivable account id for a
+   * domestic customer receipt. The mapping points to the local trade receivable
+   * account in the current chart of accounts — see the implementation note in
+   * src/services/db.ts. Do NOT create a new account id blindly.
+   */
+  private static withholdingReceivableAccId(db: ReturnType<typeof erpDb.getSnapshot>): string {
+    // F-WH fix: dedicated asset account (1114), never trade receivables (1105).
+    return AccountingEngine.getMappedAccountId('withholding_tax_receivable', 'acc-1114');
+  }
+
   /**
    * 1. Create and Post Purchase Invoice (Material Receipt)
    */
@@ -648,6 +660,33 @@ export class WorkflowService {
       }
     }
 
+    // F-WH: optional withholding income tax at source preview for DOMESTIC EGP
+    // invoices only. It is an INFORMATIONAL preview stored with the invoice and
+    // shown on the view/print. It does NOT touch subtotal, totalAmount, vatAmount,
+    // revenue, COGS, or the customer receivable at issuance. When absent or zero
+    // it means the feature is not applicable to this transaction.
+    let withholdingPreviewAmount = 0;
+    let withholdingPreviewRate = 0;
+    let withholdingPreviewReason = '';
+    if (
+      params.currency === 'EGP' &&
+      params.channel !== 'export' &&
+      params.paymentMethod === 'credit' &&
+      customer.customerType === 'retail' &&
+      params.taxTreatment !== 'exempt'
+    ) {
+      // Default configuration: 1% of the invoice subtotal (before VAT) as a
+      // withholding-at-source preview where applicable. This is a business-policy
+      // default that must be overridable/configurable in a real rollout; until a
+      // settings field exists, the rate and applicability live here and are
+      // surfaced on the invoice so the user can edit/confirm or waive it at the
+      // UI level before printing/issuing.
+      const rate = 0.01;
+      withholdingPreviewRate = rate;
+      withholdingPreviewAmount = Math.round(subtotal * rate * 100) / 100;
+      withholdingPreviewReason = 'خصم تحت حساب ضريبة الدخل (خصم من المنبع)';
+    }
+
     let createdInvoice: SalesInvoice | undefined;
 
     erpDb.mutate(draft => {
@@ -683,6 +722,10 @@ export class WorkflowService {
         custodyId: custody?.id,
         bonusQuantity,
         cashAmount: params.paymentMethod === 'cash' ? totalAmountEGP : 0,
+        // F-WH: informational-only withholding preview. Does NOT reduce revenue / totalAmount / receivable.
+        withholdingAmount: withholdingPreviewAmount,
+        withholdingRate: withholdingPreviewRate,
+        withholdingReason: withholdingPreviewReason,
       };
 
       draft.salesInvoices.push(createdInvoice);
@@ -728,6 +771,12 @@ export class WorkflowService {
           vatAmount: lVat,
           totalBeforeVat: lSub,
           netTotal: lSub + lVat,
+          // F-WH: per-line withholding preview allocated pro-rata to line subtotal
+          // so the UI can break it down by line without weakening the invoice-level
+          // totals. It remains an informational preview only.
+          withholdingAmount: withholdingPreviewAmount > 0
+            ? Math.round((lSub / subtotal) * withholdingPreviewAmount * 100) / 100
+            : undefined,
         });
       });
 
@@ -764,6 +813,18 @@ export class WorkflowService {
     reference: string;
     notes?: string;
     allocatedInvoiceIds?: string[];
+    /**
+     * F-WH: when a customer receipt settles a domestic invoice that declared a
+     * withholding-at-source preview, the ACTUAL withheld amount may be documented
+     * here separately from cash received. When provided, the journal debits the
+     * withholding tax receivable asset for it and the cash leg is only the cash
+     * actually received.
+     */
+    withholdingAmountEGP?: number;
+    withholdingCertificateNo?: string;
+    withholdingDocumentDate?: string;
+    /** F-WH fix: the sales invoice this documented withholding belongs to. */
+    withholdingInvoiceId?: string;
     userId?: string;
     userName?: string;
     isTest?: boolean;
@@ -777,33 +838,129 @@ export class WorkflowService {
     const customer = db.customers.find(c => c.id === params.customerId);
     if (!customer) return { success: false, error: 'العميل غير مسجل' };
 
+    // F-WH: if a withholding amount is documented, the cash/bank receipt must be
+    // AT LEAST the documented withholding; the receivable side still credits the
+    // full settled amount (cash received + documented withholding).
+    const documentedWithholding = (
+      params.withholdingAmountEGP !== undefined && params.withholdingAmountEGP > 0
+        ? Math.round(Number(params.withholdingAmountEGP) * 100) / 100
+        : 0
+    );
+    const cashAmountEGP = params.amount * (params.currency === 'USD' ? params.exchangeRate : 1);
+    const totalSettledEGP = cashAmountEGP + documentedWithholding;
+
+    // F-WH fix — withholding-at-source is EGP-only and must be DOCUMENTED: an
+    // undocumented amount can never be parked in an asset account.
+    if (documentedWithholding > 0 && params.currency !== 'EGP') {
+      return { success: false, error: 'الخصم الموثق تحت حساب ضريبة الدخل يُسجّل بالجنيه المصري فقط — لا يمكن إضافته لسند بعملة أجنبية' };
+    }
+    if (documentedWithholding > 0 && !String(params.withholdingCertificateNo || '').trim()) {
+      return { success: false, error: 'الخصم الموثق يتطلب رقم شهادة/مرجع خصم صريحًا — لا يُسجّل خصم بدون مستند' };
+    }
+
+    // F-WH fix — duplicate settlement guard. A re-sent request must never post a
+    // second journal/receivable/asset. Uniqueness is scoped to the CUSTOMER and
+    // keyed on the document reference and the withholding certificate; amounts
+    // are deliberately NOT used, so two legitimate different receipts with the
+    // same value are still accepted.
+    const normalizeKey = (value?: string) => String(value || '').trim().toLowerCase();
+    const referenceKey = normalizeKey(params.reference);
+    const certificateKey = normalizeKey(params.withholdingCertificateNo);
+    // The receipt modal's default label is not a document number; treating it as
+    // one would block every legitimate second receipt.
+    const PLACEHOLDER_REFERENCES = new Set(['سند تحصيل عميل', 'سند تحصيل', '']);
+    const existingReceipts = db.payments.filter(
+      p => p.paymentType === 'customer_receipt' && p.partyId === params.customerId
+    );
+    if (referenceKey && !PLACEHOLDER_REFERENCES.has(referenceKey)
+      && existingReceipts.some(p => normalizeKey(p.reference) === referenceKey)) {
+      return { success: false, error: `رقم مرجع السند (${params.reference}) مسجل بالفعل لهذا العميل — تم تجاهل الإرسال المكرر لمنع تكرار القيد والأرصدة` };
+    }
+    if (certificateKey && existingReceipts.some(p => normalizeKey(p.withholdingCertificateNo) === certificateKey)) {
+      return { success: false, error: `شهادة/مرجع الخصم (${params.withholdingCertificateNo}) مسجلة بالفعل لهذا العميل — لا يمكن خصم نفس المستند مرتين` };
+    }
+
+    // F-WH fix — resolve the ORIGINAL invoice so a later return can reverse the
+    // documented withholding. An explicit id wins; a single allocated invoice or
+    // a single withholding-bearing invoice is linked automatically. Ambiguity is
+    // left UNLINKED (no automatic reversal) instead of guessing.
+    let withholdingInvoiceId = (params.withholdingInvoiceId || '').trim() || undefined;
+    if (documentedWithholding > 0) {
+      if (withholdingInvoiceId) {
+        const invoice = db.salesInvoices.find(i => i.id === withholdingInvoiceId);
+        if (!invoice) return { success: false, error: 'الفاتورة المرتبطة بالخصم غير موجودة' };
+        if (invoice.customerId !== params.customerId) return { success: false, error: 'الفاتورة المرتبطة بالخصم لا تخص هذا العميل' };
+        if (invoice.status !== 'posted') return { success: false, error: 'الفاتورة المرتبطة بالخصم غير مرحّلة' };
+      } else {
+        const withholdingInvoices = db.salesInvoices.filter(
+          i => i.customerId === params.customerId && i.status === 'posted' && Number(i.withholdingAmount) > 0
+        );
+        const allocated = params.allocatedInvoiceIds && params.allocatedInvoiceIds.length === 1
+          ? params.allocatedInvoiceIds[0]
+          : undefined;
+        if (allocated && withholdingInvoices.some(i => i.id === allocated)) {
+          withholdingInvoiceId = allocated;
+        } else if (withholdingInvoices.length === 1) {
+          withholdingInvoiceId = withholdingInvoices[0].id;
+        }
+      }
+    }
+
+    // Prevent a document that is entirely withholding with no cash leg unless the
+    // payment method is still meaningful to the user; the journal itself stays
+    // balanced because the receivable is credited for totalSettledEGP.
+    if (totalSettledEGP <= 0) {
+      return { success: false, error: 'مبلغ التحصيل (في-cash + الخصم الموثق) يجب أن يكون أكبر من صفر' };
+    }
+
     const paymentNumber = nextDocNumber(db as unknown as Record<string, unknown>, 'payments', 'RCPT', 5, 'paymentNumber');
     const paymentId = generateErpId('pmt');
-    const amountEGP = params.amount * (params.currency === 'USD' ? params.exchangeRate : 1);
 
     // Double Entry:
-    // Debit: Cash / Bank / Cheques Under Collection
-    // Credit: Customer Receivable
-    let debitAcc = 'acc-1101'; // cash
-    if (params.paymentMethod === 'bank') debitAcc = 'acc-1102';
-    if (params.paymentMethod === 'cheque') debitAcc = 'acc-1104';
+    // Debit: Cash / Bank / Cheques Under Collection        (cash/bank actually received)
+    // Debit: Withholding Tax Receivable (asset)            (only when documented)
+    // Credit: Customer Receivable / Export Receivable      (full settled amount)
+    //
+    // IMPORTANT (F-WH): the customer balance and receivable at invoice time were
+    // never reduced by the withholding preview, so the receivable credit here is
+    // the total settlement (cash + documented withholding). The withholding is a
+    // SEPARATE asset leg, not a VAT account and not a sales discount.
+    let debitCashAcc = 'acc-1101'; // cash
+    if (params.paymentMethod === 'bank') debitCashAcc = 'acc-1102';
+    if (params.paymentMethod === 'cheque') debitCashAcc = 'acc-1104';
 
     const creditAcc = customer.currency === 'USD' ? 'acc-1106' : 'acc-1105';
 
-    const journalLines = [
+    const paymentJournalLines: JLine[] = [
+      // Cash / bank / cheque leg (only what is actually received)
       {
         id: '',
         journalEntryId: '',
-        accountId: debitAcc,
-        accountCode: debitAcc === 'acc-1101' ? '1101' : debitAcc === 'acc-1102' ? '1102' : '1104',
-        accountNameAr: debitAcc === 'acc-1101' ? 'الخزينة الرئيسية' : debitAcc === 'acc-1102' ? 'البنك' : 'شيكات تحت التحصيل',
-        debit: amountEGP,
+        accountId: debitCashAcc,
+        accountCode: debitCashAcc === 'acc-1101' ? '1101' : debitCashAcc === 'acc-1102' ? '1102' : '1104',
+        accountNameAr: debitCashAcc === 'acc-1101' ? 'الخزينة الرئيسية' : debitCashAcc === 'acc-1102' ? 'البنك' : 'شيكات تحت التحصيل',
+        debit: cashAmountEGP,
         credit: 0,
         currency: params.currency,
         originalAmount: params.amount,
         exchangeRate: params.exchangeRate,
-        description: `سند تحصيل ${paymentNumber} من العميل ${customer.name}`,
+        description: `سند تحصيل ${paymentNumber} (الخصم النقدي/البنكي) من العميل ${customer.name}`,
       },
+      // Withholding asset leg (only when documented)
+      ...(documentedWithholding > 0 ? [{
+        id: '',
+        journalEntryId: '',
+        accountId: WorkflowService.withholdingReceivableAccId(db),
+        accountCode: db.accounts.find(a => a.id === WorkflowService.withholdingReceivableAccId(db))?.code || '1105',
+        accountNameAr: `خصم تحت حساب ضريبة الدخل (خصم من المنبع) - العميل ${customer.name}`,
+        debit: documentedWithholding,
+        credit: 0,
+        currency: 'EGP' as const,
+        originalAmount: documentedWithholding,
+        exchangeRate: 1,
+        description: `خصم تحت حساب ضريبة الدخل (خصم من المنبع) المُوثَّق في سند ${paymentNumber}${params.withholdingCertificateNo ? ` (شهادة/مرجع ${params.withholdingCertificateNo})` : ''}${params.withholdingDocumentDate ? ` بتاريخ ${params.withholdingDocumentDate}` : ''}`,
+      }] : []),
+      // Receivable credit: full settled amount
       {
         id: '',
         journalEntryId: '',
@@ -811,21 +968,21 @@ export class WorkflowService {
         accountCode: customer.currency === 'USD' ? '1106' : '1105',
         accountNameAr: `العميل: ${customer.name}`,
         debit: 0,
-        credit: amountEGP,
+        credit: totalSettledEGP,
         currency: params.currency,
         originalAmount: params.amount,
         exchangeRate: params.exchangeRate,
-        description: `سداد جزئي/كلي لحساب العميل ${customer.name}`,
-      }
+        description: `سدادجزئي/كلي لحساب العميل ${customer.name}${documentedWithholding > 0 ? ' (بالإضافة إلى الخصم الموثق)' : ''}`,
+      },
     ];
 
     const jvResult = AccountingEngine.postJournal({
       date: params.date,
       reference: params.reference || paymentNumber,
-      description: `سند قبض نقدي/بنكي/شيك رقم ${paymentNumber} من العميل ${customer.name}`,
+      description: `سند تحصيل ${paymentNumber} من العميل ${customer.name}${documentedWithholding > 0 ? ' (يتضمن خصم ضريبة دخل موثق)' : ''}`,
       sourceDocumentType: 'customer_payment',
       sourceDocumentId: paymentId,
-      lines: journalLines,
+      lines: paymentJournalLines,
     }, params.userId, params.userName);
 
     if (!jvResult.success) return { success: false, error: jvResult.error };
@@ -835,7 +992,16 @@ export class WorkflowService {
     erpDb.mutate(draft => {
       // Update customer balance
       const cust = draft.customers.find(c => c.id === params.customerId);
-      if (cust) cust.currentBalance = (cust.currentBalance || 0) - params.amount;
+      if (cust) {
+        // F-WH fix — the customer is settled by the CASH actually received PLUS
+        // the documented withholding (which is a real settlement leg). Previously
+        // only the cash leg reduced the card while the journal credited the full
+        // settlement, so the subledger overstated the balance by every documented
+        // withholding. The EGP settlement is already computed; USD receipts have
+        // no documented withholding (rejected above).
+        const settlementInCustomerCurrency = params.currency === 'USD' ? params.amount : totalSettledEGP;
+        cust.currentBalance = (cust.currentBalance || 0) - settlementInCustomerCurrency;
+      }
 
       // If bank payment, update bank account
       if (params.paymentMethod === 'bank' && params.bankAccountId) {
@@ -883,26 +1049,35 @@ export class WorkflowService {
         amount: params.amount,
         currency: params.currency,
         exchangeRate: params.exchangeRate,
-        amountEGP,
+        amountEGP: cashAmountEGP,
         reference: params.reference,
         notes: params.notes,
         journalEntryId: jvResult.entry?.id,
+        // F-WH: persist the ACTUAL documented withholding on the payment record too
+        // so the receipt view/print can show the full settlement breakdown.
+        withholdingAmountEGP: documentedWithholding || undefined,
+        withholdingCertificateNo: params.withholdingCertificateNo || undefined,
+        withholdingDocumentDate: params.withholdingDocumentDate || undefined,
+        withholdingInvoiceId,
+        withholdingReversedAmountEGP: documentedWithholding > 0 ? 0 : undefined,
       };
 
       draft.payments.push(createdPayment);
 
       // F29: the cash leg of a customer receipt belongs in the treasury ledger too
-      // (the journal above already moved GL 1101/1102).
-      if (params.paymentMethod === 'cash' && amountEGP > 0) {
+      // (the journal above already moved GL 1101/1102). Withholding is a receivable
+      // asset, not a treasury cash movement, so the treasury doc reflects only cash.
+      if (params.paymentMethod === 'cash' && cashAmountEGP > 0) {
+        const cashAccId = params.paymentMethod === 'cash' ? 'acc-1101' : debitCashAcc;
         draft.treasuryTransactions.push({
           id: generateErpId('ctx'),
           receiptNumber: nextDocNumber(draft as unknown as Record<string, unknown>, 'treasuryTransactions', 'CSH', 4, 'receiptNumber'),
           type: 'cash_receipt',
-          amount: amountEGP,
+          amount: cashAmountEGP,
           partyName: customer.name,
           date: params.date,
-          description: `تحصيل نقدي من العميل - سند ${paymentNumber}`,
-          glAccountId: debitAcc,
+          description: `تحصيل نقدي من العميل - سند ${paymentNumber}${documentedWithholding > 0 ? ` (بعد خصم ${documentedWithholding.toFixed(2)} ج.م ضريبة دخل موثقة)` : ''}`,
+          glAccountId: cashAccId,
           documentType: 'customer_payment',
           journalEntryId: jvResult.entry?.id,
           isTest: params.isTest,
@@ -929,7 +1104,10 @@ export class WorkflowService {
         module: 'الخزينة والمقبوضات',
         action: 'create',
         recordId: paymentId,
-        description: `تسجيل سند تحصيل ${paymentNumber} بقيمة ${params.amount.toLocaleString('ar-EG')} ${params.currency} من ${customer.name}`,
+        description: `تسجيل سند تحصيل ${paymentNumber} بقيمة ${params.amount.toLocaleString('ar-EG')} ${params.currency} من ${customer.name}`
+          + (documentedWithholding > 0
+            ? ` — إجمالي التسوية ${totalSettledEGP.toLocaleString('ar-EG')} ج.م (نقد ${cashAmountEGP.toLocaleString('ar-EG')} + خصم موثق ${documentedWithholding.toLocaleString('ar-EG')}${withholdingInvoiceId ? ` مرتبط بالفاتورة ${db.salesInvoices.find(i => i.id === withholdingInvoiceId)?.invoiceNumber || withholdingInvoiceId}` : ' بدون ربط بفاتورة'})`
+            : ''),
       });
     });
 
@@ -1508,9 +1686,32 @@ export class WorkflowService {
     // A linked return inherits the original invoice's historical rate (never
     // the current company rate — that would revalue posted history). The
     // exception path must be handed an explicit rate for a USD customer.
+    //
+    // Currency integrity rule (regression guard): the EGP legs of a return must
+    // never be multiplied by a foreign rate. If the source invoice is EGP, the
+    // rate is 1 and any caller-supplied rate is ignored — an EGP return must not
+    // become 100 * 52.70 just because a USD rate was passed or stored.
     let exchangeRate = 1;
+    let returnCurrency: 'EGP' | 'USD' = customer.currency === 'USD' ? 'USD' : 'EGP';
     if (params.invoiceId) {
-      exchangeRate = db.salesInvoices.find(i => i.id === params.invoiceId)?.exchangeRate || 1;
+      const invoice = db.salesInvoices.find(i => i.id === params.invoiceId);
+      if (!invoice) return { success: false, error: 'فاتورة البيع الأصلية غير موجودة' };
+      if (invoice.currency === 'USD' && customer.currency !== 'USD') {
+        return {
+          success: false,
+          error: 'لا يمكن ربط مرتجع عميل بالجنيه بفاتورة بالدولار — العملتان يجب أن تتطابقان',
+        };
+      }
+      if (invoice.currency === 'EGP') {
+        // EGP-denominated sales are posted at rate 1 and their EGP legs must stay
+        // EGP. Force the rate to 1 so a stored/mis-typed USD rate on an EGP invoice
+        // can never turn an EGP return into 100 x 52.70.
+        returnCurrency = 'EGP';
+        exchangeRate = 1;
+      } else {
+        // USD invoice for a USD customer: inherit the invoice's rate for the EGP legs.
+        exchangeRate = invoice.exchangeRate || 1;
+      }
     } else if (customer.currency === 'USD') {
       const given = Number(params.exchangeRate);
       if (!(given > 0)) {
@@ -1693,6 +1894,118 @@ export class WorkflowService {
       if (!mv.success) return { success: false, error: `فشل استلام مرتجع المبيعات: ${mv.error}` };
     }
 
+    // ---------------------------------------------------------------------
+    // F-WH fix — reverse the DOCUMENTED withholding attributable to the returned
+    // goods. The original receipt is never edited and the withholding asset is
+    // never mixed with trade receivables:
+    //
+    //   Dr customer receivable (the customer keeps the tax credit)
+    //   Cr withholding tax receivable 1114 (the asset stops being recoverable)
+    //
+    // The amount is the invoice's withholding preview pro-rated to the returned
+    // net value, capped by the still-unreversed documented amount of the receipts
+    // linked to that invoice. A return with no linked documented withholding does
+    // nothing (nothing to reverse), and a partially reversed receipt can never be
+    // fully reversed twice.
+    // ---------------------------------------------------------------------
+    let withholdingReversalEGP = 0;
+    const withholdingReversalParts: Array<{ paymentId: string; amount: number; before: number }> = [];
+    if (params.invoiceId) {
+      const invoice = db.salesInvoices.find(i => i.id === params.invoiceId);
+      const invoiceSubtotal = Number(invoice?.subtotal) || 0;
+      const invoiceWithholding = Number(invoice?.withholdingAmount) || 0;
+      if (invoice && invoiceSubtotal > 0 && invoiceWithholding > 0 && revenueNet > 0) {
+        const linkedReceipts = db.payments.filter(
+          p => p.paymentType === 'customer_receipt'
+            && p.partyId === params.customerId
+            && p.withholdingInvoiceId === invoice.id
+            && Number(p.withholdingAmountEGP) > 0
+        );
+        const documentedTotal = Math.round(linkedReceipts.reduce((s, p) => s + Number(p.withholdingAmountEGP || 0), 0) * 100) / 100;
+        const alreadyReversed = Math.round(linkedReceipts.reduce((s, p) => s + Number(p.withholdingReversedAmountEGP || 0), 0) * 100) / 100;
+        const remaining = Math.round((documentedTotal - alreadyReversed) * 100) / 100;
+        const attributable = Math.round(invoiceWithholding * (revenueNet / invoiceSubtotal) * 100) / 100;
+        const reversalAmount = Math.max(0, Math.min(attributable, remaining));
+
+        // The shared helper encodes the policy: reversal is allowed only when a
+        // documented withholding exists AND it belongs to a real settlement cycle
+        // (a receipt linked to this invoice).
+        if (isWithholdingReversalAllowed(documentedTotal > 0, linkedReceipts.length > 0)
+          && reversalAmount > 0.004) {
+          // Distribute across the linked receipts (oldest first), never exceeding
+          // each receipt's own unreversed documented amount.
+          let left = reversalAmount;
+          for (const p of linkedReceipts) {
+            if (left <= 0.004) break;
+            const before = Number(p.withholdingReversedAmountEGP || 0);
+            const available = Math.round((Number(p.withholdingAmountEGP || 0) - before) * 100) / 100;
+            const take = Math.round(Math.min(available, left) * 100) / 100;
+            if (take <= 0) continue;
+            withholdingReversalParts.push({ paymentId: p.id, amount: take, before });
+            left = Math.round((left - take) * 100) / 100;
+          }
+          const distributed = Math.round(withholdingReversalParts.reduce((s, p) => s + p.amount, 0) * 100) / 100;
+
+          if (distributed > 0.004) {
+            const adjustmentId = generateErpId('wha');
+            const adjustmentNumber = nextDocNumber(
+              erpDb.getSnapshot() as unknown as Record<string, unknown>,
+              'withholdingAdjustments', 'WHA', 5, 'adjustmentNumber'
+            );
+            const assetAcc = WorkflowService.withholdingReceivableAccId(db);
+            const adjJv = AccountingEngine.postJournal({
+              date: params.date,
+              reference: adjustmentNumber,
+              description: `تسوية خصم ضريبة دخل موثق مرتبط بمرتجع ${returnNumber} — استبعاد الجزء المرتجع فقط`,
+              sourceDocumentType: 'withholding_adjustment',
+              sourceDocumentId: adjustmentId,
+              lines: [
+                jl(recvAcc, distributed, 0, distributed, 1, 'EGP', `مرتجع ${returnNumber} — رد الجزء المرتجع من الخصم الموثق لرصيد العميل ${customer.name}`),
+                jl(assetAcc, 0, distributed, distributed, 1, 'EGP', `عكس أصل ضريبة الخصم من المنبع المرتبط بالفاتورة ${invoice.invoiceNumber}`),
+              ],
+            }, params.userId, params.userName, params.isTest);
+            if (!adjJv.success) return { success: false, error: `تعذّر عكس الخصم الموثق للمرتجع: ${adjJv.error}` };
+
+            withholdingReversalEGP = distributed;
+            const firstPart = withholdingReversalParts[0];
+            erpDb.mutate(draft => {
+              draft.withholdingAdjustments.push({
+                id: adjustmentId,
+                adjustmentNumber,
+                type: 'return_reversal',
+                adjustmentDate: params.date,
+                paymentId: firstPart.paymentId,
+                invoiceId: invoice.id,
+                salesReturnId: returnId,
+                amountEGP: distributed,
+                journalEntryId: adjJv.entry?.id,
+                reason: `عكس خصم موثق مرتبط بمرتجع ${returnNumber} (${linkedReceipts.length} سند تحصيل)`,
+                isTest: params.isTest,
+              });
+              for (const part of withholdingReversalParts) {
+                const pmt = draft.payments.find(p => p.id === part.paymentId);
+                if (pmt) {
+                  pmt.withholdingReversedAmountEGP = Math.round((Number(pmt.withholdingReversedAmountEGP || 0) + part.amount) * 100) / 100;
+                }
+              }
+              draft.auditLogs.push({
+                id: generateErpId('aud'),
+                timestamp: new Date().toISOString(),
+                userId: params.userId || 'usr-admin',
+                userName: params.userName || 'مدير المبيعات',
+                module: 'ضريبة الخصم - تسويات المرتجعات',
+                action: 'post',
+                recordId: adjustmentId,
+                previousValue: JSON.stringify(withholdingReversalParts.map(p => ({ paymentId: p.paymentId, reversedBefore: p.before }))),
+                newValue: JSON.stringify({ adjustmentNumber, amountEGP: distributed, salesReturnId: returnId, invoiceId: invoice.id }),
+                description: `تسوية خصم منبع موثق ${adjustmentNumber} بمبلغ ${distributed.toLocaleString('ar-EG')} ج.م للمرتجع ${returnNumber} — لم يُعدّل أي سند تحصيل أصلي`,
+              });
+            });
+          }
+        }
+      }
+    }
+
     let created: SalesReturn | undefined;
     // The customer card is denormalised in the CUSTOMER's own currency (an
     // invoice adds `totalAmount`, which is already in that currency), so the
@@ -1710,6 +2023,7 @@ export class WorkflowService {
         totalVat: vatTotal,
         status: 'posted',
         journalEntryId: revJvId || cogsJv.entry?.id,
+        withholdingReversedAmountEGP: withholdingReversalEGP > 0 ? withholdingReversalEGP : undefined,
         isTest: params.isTest,
       };
       draft.salesReturns.push(created);
@@ -1734,7 +2048,16 @@ export class WorkflowService {
 
       // Reduce customer balance (they owe less)
       const cust = draft.customers.find(c => c.id === params.customerId);
-      if (cust) cust.currentBalance = (cust.currentBalance || 0) - totalAmount;
+      if (cust) {
+        cust.currentBalance = (cust.currentBalance || 0) - totalAmount;
+        // F-WH fix — the withheld portion is NOT refunded in cash by us: it stays
+        // with the tax authority as the customer's credit, so the reversal debits
+        // the customer again. The card must follow the same single movement as
+        // the GL receivable, never a second one.
+        if (withholdingReversalEGP > 0) {
+          cust.currentBalance = Math.round((cust.currentBalance + withholdingReversalEGP) * 100) / 100;
+        }
+      }
 
       draft.auditLogs.push({
         id: generateErpId('aud'),
