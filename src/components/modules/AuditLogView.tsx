@@ -5,6 +5,16 @@ import {
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 
+/** Render an audit snapshot (JSON) readably; falls back to the raw string. */
+function prettyValue(value?: string): string {
+  if (!value) return '—';
+  try {
+    return JSON.stringify(JSON.parse(value), null, 1);
+  } catch {
+    return value;
+  }
+}
+
 export const AuditLogView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,7 +90,8 @@ export const AuditLogView: React.FC = () => {
               </tr>
             ) : (
               filteredLogs.slice().reverse().map(log => (
-                <tr key={log.id} className="hover:bg-slate-50">
+                <React.Fragment key={log.id}>
+                <tr className="hover:bg-slate-50">
                   <td className="p-3.5 font-mono text-slate-600">
                     {new Date(log.timestamp).toLocaleString('ar-EG')}
                   </td>
@@ -103,6 +114,23 @@ export const AuditLogView: React.FC = () => {
                   <td className="p-3.5 font-mono text-slate-600">{log.recordId}</td>
                   <td className="p-3.5 text-slate-800">{log.description}</td>
                 </tr>
+                {(log.previousValue || log.newValue) && (
+                  <tr className="bg-slate-50/70">
+                    <td colSpan={6} className="px-3.5 pb-3 pt-0">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                        <div className="rounded-lg border border-rose-200 bg-rose-50/60 p-2">
+                          <span className="font-black text-rose-800 block mb-1">القيمة السابقة</span>
+                          <pre className="whitespace-pre-wrap break-all font-mono text-[10px] text-rose-900" dir="ltr">{prettyValue(log.previousValue)}</pre>
+                        </div>
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2">
+                          <span className="font-black text-emerald-800 block mb-1">القيمة الجديدة</span>
+                          <pre className="whitespace-pre-wrap break-all font-mono text-[10px] text-emerald-900" dir="ltr">{prettyValue(log.newValue)}</pre>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))
             )}
           </tbody>

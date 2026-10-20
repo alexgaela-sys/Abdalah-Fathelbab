@@ -34,6 +34,13 @@ export interface User {
    * the role matrix governs. Super Admin is never overridable.
    */
   permissions?: Record<string, PermissionAction[]>;
+  /**
+   * Storekeeper ↔ warehouse linkage (ITEM: company settings screen).
+   * Warehouse staff are ordinary users with a warehouse role; this list is the
+   * set of warehouses they are responsible for. Disabling the user keeps this
+   * linkage and every historical record: nothing is deleted.
+   */
+  warehouseIds?: string[];
   createdAt: string;
   lastLogin?: string;
   isTest?: boolean;
@@ -51,6 +58,12 @@ export interface Company {
   baseCurrency: 'EGP';
   exportCurrency: 'USD';
   currentUsdExchangeRate: number; // e.g. 48.50
+  /** Optional company identity/contact fields added for the settings screen. */
+  logoDataUrl?: string;   // data:image/...;base64 — stored in the database
+  email?: string;
+  website?: string;
+  contactName?: string;
+  contactPhone?: string;
 }
 
 export type WarehouseType = 
@@ -67,6 +80,10 @@ export interface Warehouse {
   type: WarehouseType;
   location: string;
   managerName?: string;
+  /** The storekeeper (user) responsible for this warehouse, when linked. */
+  managerUserId?: string;
+  /** Audit note recorded when the warehouse was disabled. */
+  disabledReason?: string;
   active: boolean;
 }
 
@@ -417,6 +434,16 @@ export interface SalesInvoice {
   bonusQuantity?: number;
   /** F25: cash actually collected at posting time (0 for credit sales). */
   cashAmount?: number;
+  /**
+   * F-WH: withholding income tax at source preview, populated at invoice creation.
+   * Optional and explicit — absent or zero means the feature is not applicable to
+   * this invoice. Does NOT reduce subtotal / totalAmount / revenue / receivable.
+   */
+  withholdingAmount?: number;
+  /** F-WH: human-readable applicability reason stored with the preview (Arabic). */
+  withholdingReason?: string;
+  /** F-WH: configured withholding rate used for the preview (fraction, e.g. 0.01). */
+  withholdingRate?: number;
   isTest?: boolean;
 }
 
@@ -434,6 +461,13 @@ export interface SalesInvoiceLine {
   vatAmount: number;
   totalBeforeVat: number;
   netTotal: number;
+  /**
+   * F-WH: optional per-line withholding income tax preview amount (EGP). When
+   * populated, it is a shrinkage of the CASH/SETTLEMENT basis only — it does NOT
+   * change the line netTotal used for revenue or receivable and is only an
+   * informational preview of a later actual withholding event.
+   */
+  withholdingAmount?: number;
 }
 
 export interface SalesReturn {
@@ -447,6 +481,28 @@ export interface SalesReturn {
   totalVat: number;
   status: 'pending_inspection' | 'inspected' | 'posted' | 'cancelled';
   journalEntryId?: string;
+  /** F-WH fix: documented withholding reversed through this return (EGP). */
+  withholdingReversedAmountEGP?: number;
+  isTest?: boolean;
+}
+
+/**
+ * F-WH fix — independent settlement document for a documented withholding that
+ * is reversed by a sales return. It never edits the original receipt: it posts
+ * Dr customer receivable / Cr withholding tax receivable and is limited to the
+ * still-unreversed documented amount of the linked receipt.
+ */
+export interface WithholdingAdjustment {
+  id: string;
+  adjustmentNumber: string;
+  type: 'return_reversal';
+  adjustmentDate: string;
+  paymentId: string;
+  invoiceId?: string;
+  salesReturnId?: string;
+  amountEGP: number;
+  journalEntryId?: string;
+  reason: string;
   isTest?: boolean;
 }
 
@@ -616,6 +672,28 @@ export interface Payment {
   notes?: string;
   journalEntryId?: string;
   isTest?: boolean;
+  /**
+   * F-WH: for customer receipts settled against a domestic sales invoice that
+   * carried a withholding-at-source preview, this is the ACTUAL EGP amount
+   * withheld and documented at the time of collection. It is recorded SEPARATELY
+   * from the cash/bank received and posted to the withholding tax receivable
+   * asset account when documented. Absent or zero means no withholding was
+   * documented on this receipt.
+   */
+  withholdingAmountEGP?: number;
+  /** F-WH: certificate/reference number of the withholding document (Arabic/optional). */
+  withholdingCertificateNo?: string;
+  /** F-WH: date of the withholding document (ISO). */
+  withholdingDocumentDate?: string;
+  /**
+   * F-WH fix: the original sales invoice this documented withholding settles.
+   * Required to reverse the withholding when goods are returned; a receipt with
+   * one open withholding invoice is linked automatically, otherwise the caller
+   * must pass it explicitly. Undefined = no automatic reversal (documented).
+   */
+  withholdingInvoiceId?: string;
+  /** F-WH fix: cumulative EGP already reversed by sales returns (prevents double reversal). */
+  withholdingReversedAmountEGP?: number;
 }
 
 export interface PaymentAllocation {
@@ -940,9 +1018,43 @@ export interface ScrapSaleDocument {
 }
 
 /** ITEM 13 — application settings stored in the database schema. */
+export type InvoiceAlignment = 'right' | 'center' | 'left';
+
+/**
+ * Printable invoice design (stored with the company settings in the database).
+ * Every field here is presentation-only: totals, VAT, withholding and all
+ * accounting/inventory logic remain untouched by the template.
+ */
+export interface InvoiceTemplateSettings {
+  showLogo: boolean;
+  logoDataUrl?: string;
+  headerTextAr: string;
+  headerTextEn: string;
+  footerText: string;
+  showTaxNumber: boolean;
+  showAddress: boolean;
+  showPhone: boolean;
+  showEmail: boolean;
+  showCustomerTax: boolean;
+  showWarehouse: boolean;
+  showWithholding: boolean;
+  /** Highlight the net amount due after taxes and documented deductions. */
+  showNetDue: boolean;
+  netDueLabel: string;
+  accentColor: string;
+  textColor: string;
+  titleFontSize: number;
+  bodyFontSize: number;
+  tableFontSize: number;
+  alignment: InvoiceAlignment;
+  showAccentBar: boolean;
+}
+
 export interface AppSettings {
   /** Days-before-expiry threshold for the "near expiry" bucket (default 10). */
   expiryWarningDays: number;
+  /** Printable invoice design (optional for legacy databases; defaults apply). */
+  invoiceTemplate?: InvoiceTemplateSettings;
 }
 
 export interface AccountMapping {

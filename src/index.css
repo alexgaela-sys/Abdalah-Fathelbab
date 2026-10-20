@@ -375,6 +375,21 @@ div.fixed.inset-0.z-50 > div {
     -webkit-print-color-adjust: exact;
   }
 
+  /* An administrator-designed invoice keeps its own colors in print instead of
+     the blanket black rule above. The template sets --invoice-text/--invoice-accent
+     on .invoice-tpl (inline styles would otherwise lose to !important). */
+  .print-area .invoice-tpl {
+    color: var(--invoice-text, #000) !important;
+  }
+  .print-area .invoice-tpl * {
+    color: inherit !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .print-area .invoice-tpl .invoice-keep-color {
+    color: var(--invoice-accent, #000) !important;
+  }
+
   /* Avoid blank pages / page-breaks inside the document. */
   .print-area table,
   .print-area .print-doc {

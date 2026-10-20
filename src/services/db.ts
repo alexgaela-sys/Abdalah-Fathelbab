@@ -9,6 +9,7 @@ import {
   TreasuryTransaction, Expense, CostCenter, Account, JournalEntry, AccountingPeriod, 
   StandardCostRate, SalesForecast, AccountMapping, AuditLog, User, ExportShipment,
   ProductFamily, ProductionPayrollDistribution, ScrapSaleDocument, AppSettings,
+  InvoiceTemplateSettings, WithholdingAdjustment,
   isDebitNatureCategory
 } from '../types/erp';
 
@@ -106,13 +107,44 @@ export interface ERPDatabaseSchema {
   payrollDistributions: ProductionPayrollDistribution[];
   /** ITEM 12 — internal scrap-sale documents. */
   scrapSales: ScrapSaleDocument[];
+  /** F-WH fix — documented withholding reversed by sales returns. */
+  withholdingAdjustments: WithholdingAdjustment[];
   /** ITEM 13 — application settings (expiry warning threshold, …). */
   settings: AppSettings;
 }
 
+/**
+ * Default printable-invoice design. Presentation only — it never changes any
+ * total, tax, withholding, accounting or inventory calculation.
+ */
+export const DEFAULT_INVOICE_TEMPLATE: InvoiceTemplateSettings = {
+  showLogo: true,
+  logoDataUrl: '',
+  headerTextAr: '',
+  headerTextEn: '',
+  footerText: 'شكرًا لتعاملكم معنا — هذه الفاتورة صادرة إلكترونيًا من نظام الحسابات.',
+  showTaxNumber: true,
+  showAddress: true,
+  showPhone: true,
+  showEmail: false,
+  showCustomerTax: true,
+  showWarehouse: true,
+  showWithholding: true,
+  showNetDue: true,
+  netDueLabel: 'صافي المستحق بعد الضرائب والاستقطاعات',
+  accentColor: '#0f172a',
+  textColor: '#0f172a',
+  titleFontSize: 20,
+  bodyFontSize: 12,
+  tableFontSize: 12,
+  alignment: 'center',
+  showAccentBar: true,
+};
+
 /** ITEM 13 — default settings; the expiry threshold is adjustable and must stay positive. */
 export const INITIAL_SETTINGS: AppSettings = {
   expiryWarningDays: 10,
+  invoiceTemplate: { ...DEFAULT_INVOICE_TEMPLATE },
 };
 
 const STORAGE_KEY = 'abdullah_erp_db_v1';
@@ -129,6 +161,12 @@ export const INITIAL_COMPANY: Company = {
   baseCurrency: 'EGP',
   exportCurrency: 'USD',
   currentUsdExchangeRate: 48.50,
+  // Optional contact/identity fields — empty until the administrator supplies them.
+  logoDataUrl: '',
+  email: '',
+  website: '',
+  contactName: '',
+  contactPhone: '',
 };
 
 export const INITIAL_WAREHOUSES: Warehouse[] = [
@@ -247,6 +285,9 @@ export const INITIAL_ACCOUNTS: Account[] = [
   { id: 'acc-1111', code: '1111', nameAr: 'مخزون التوالف والمعيب', nameEn: 'Damaged Goods Inventory', category: 'Assets', isHeader: false, parentId: 'acc-11', level: 3, currentBalance: 0 },
   { id: 'acc-1112', code: '1112', nameAr: 'مخزون الهالك والسكراب', nameEn: 'Scrap Inventory', category: 'Assets', isHeader: false, parentId: 'acc-11', level: 3, currentBalance: 0 },
   { id: 'acc-1113', code: '1113', nameAr: 'ضريبة القيمة المضافة - مدخلات ومشتريات', nameEn: 'VAT Input Tax', category: 'Assets', isHeader: false, parentId: 'acc-11', level: 3, currentBalance: 0 },
+  // F-WH fix — a DEDICATED asset for income tax withheld at source. It must never
+  // be mixed with trade receivables (1105); existing 1105 balances are not moved.
+  { id: 'acc-1114', code: '1114', nameAr: 'أصل ضريبة الخصم والتحصيل من المنبع', nameEn: 'Withholding Tax Receivable', category: 'Assets', isHeader: false, parentId: 'acc-11', level: 3, currentBalance: 0 },
 
   // 2 الخصوم (Liabilities)
   { id: 'acc-2', code: '2', nameAr: 'الالتزامات والخصوم', nameEn: 'Liabilities', category: 'Liabilities', isHeader: true, level: 1, currentBalance: 0 },
@@ -328,6 +369,12 @@ export const INITIAL_ACCOUNT_MAPPINGS: Record<string, string> = {
   bank_usd: 'acc-1103',
   cheques_under_collection: 'acc-1104',
   cheques_payable: 'acc-2102',
+
+  // F-WH: withholding income tax at source (only an informational preview at
+  // invoice time; the receivable asset is posted only when the actual withholding
+  // is documented at settlement/receipt). Does NOT reduce revenue or receivable.
+  // F-WH fix — posted to a DEDICATED asset account, never to trade receivables.
+  withholding_tax_receivable: 'acc-1114',
 
   // Production & Inventory
   inventory_damaged: 'acc-1111',
@@ -1195,22 +1242,26 @@ export const INITIAL_BANK_ACCOUNTS: BankAccount[] = [
 
 // Clean Database initialization with configuration / master data only
 export function createEmptyDatabase(): ERPDatabaseSchema {
+  // SEED IMMUTABILITY: every seeded record is copied, never shared by reference.
+  // A live database (and `resetToClean`) must never mutate the INITIAL_* constants —
+  // otherwise editing company data would rewrite the "factory default" fallback
+  // and a later reset would silently keep the edited values.
   const fresh: ERPDatabaseSchema = {
-    company: INITIAL_COMPANY,
-    warehouses: INITIAL_WAREHOUSES,
-    items: INITIAL_PRODUCTION_ITEMS, // Pre-configured with the 11 Snack products & raw materials
-    units: INITIAL_UNITS,
-    unitConversions: INITIAL_UNIT_CONVERSIONS,
+    company: { ...INITIAL_COMPANY },
+    warehouses: INITIAL_WAREHOUSES.map(w => ({ ...w })),
+    items: INITIAL_PRODUCTION_ITEMS.map(i => ({ ...i })), // Pre-configured with the 11 Snack products & raw materials
+    units: INITIAL_UNITS.map(u => ({ ...u })),
+    unitConversions: INITIAL_UNIT_CONVERSIONS.map(c => ({ ...c })),
     batches: [],
-    boms: INITIAL_PRODUCTION_BOMS.boms,
-    bomLines: INITIAL_PRODUCTION_BOMS.bomLines,
+    boms: INITIAL_PRODUCTION_BOMS.boms.map(b => ({ ...b })),
+    bomLines: INITIAL_PRODUCTION_BOMS.bomLines.map(l => ({ ...l })),
     productionOrders: [],
     productionConsumptions: [],
     productionWastes: [],
     qualityInspections: [],
     customers: [],
-    suppliers: [...INITIAL_SUPPLIERS],
-    salesReps: [...INITIAL_SALES_REPS],
+    suppliers: INITIAL_SUPPLIERS.map(s => ({ ...s })),
+    salesReps: INITIAL_SALES_REPS.map(r => ({ ...r })),
     representativeCustodies: [],
     custodyMovements: [],
     salesInvoices: [],
@@ -1226,23 +1277,27 @@ export function createEmptyDatabase(): ERPDatabaseSchema {
     payments: [],
     paymentAllocations: [],
     cheques: [],
-    bankAccounts: INITIAL_BANK_ACCOUNTS,
+    bankAccounts: INITIAL_BANK_ACCOUNTS.map(b => ({ ...b })),
     bankTransactions: [],
     treasuryTransactions: [],
     expenses: [],
-    costCenters: INITIAL_COST_CENTERS,
-    accounts: INITIAL_ACCOUNTS,
+    costCenters: INITIAL_COST_CENTERS.map(c => ({ ...c })),
+    accounts: INITIAL_ACCOUNTS.map(a => ({ ...a })),
     journalEntries: [],
-    accountingPeriods: INITIAL_PERIODS,
-    standardCostRates: INITIAL_STANDARD_COST_RATES,
+    accountingPeriods: INITIAL_PERIODS.map(p => ({ ...p })),
+    standardCostRates: INITIAL_STANDARD_COST_RATES.map(r => ({ ...r })),
     forecasts: [],
-    accountMappings: INITIAL_ACCOUNT_MAPPINGS,
-  users: INITIAL_USERS,
+    accountMappings: { ...INITIAL_ACCOUNT_MAPPINGS },
+  users: INITIAL_USERS.map(u => ({ ...u })),
   auditLogs: [],
   exportShipments: [],
   payrollDistributions: [],
   scrapSales: [],
-  settings: { ...INITIAL_SETTINGS },
+  withholdingAdjustments: [],
+  settings: {
+    ...INITIAL_SETTINGS,
+    invoiceTemplate: { ...(INITIAL_SETTINGS.invoiceTemplate || DEFAULT_INVOICE_TEMPLATE) },
+  },
 };
 
   // ISSUE 1 FIX — a FRESH install must produce the CURRENT master data
@@ -1253,7 +1308,44 @@ export function createEmptyDatabase(): ERPDatabaseSchema {
   // paths converge on identical master data, with one single source of truth
   // (the migrations) instead of names duplicated across the seed and the
   // migration — which is what let the two drift apart.
-  return applyUomMigration(applyMasterDataMigration(fresh));
+  return applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(fresh)));
+}
+
+/**
+ * F-WH fix — ADDITIVE, NON-DESTRUCTIVE migration for the withholding asset.
+ *
+ *  1. Ensures the dedicated asset account 1114 exists (it is added, never moved).
+ *  2. Points the `withholding_tax_receivable` mapping at it ONLY when the mapping
+ *     is absent or still the old shared default (1105). A mapping deliberately
+ *     configured to another account is respected.
+ *
+ * It NEVER reclassifies or rewrites an existing balance or journal entry: the
+ * historical amounts already posted to 1105 stay exactly where they were posted.
+ */
+export function applyWithholdingAccountMigration(db: ERPDatabaseSchema): ERPDatabaseSchema {
+  const accounts = Array.isArray(db.accounts) ? db.accounts : [];
+  if (!accounts.some(a => a.id === 'acc-1114')) {
+    accounts.push({
+      id: 'acc-1114',
+      code: '1114',
+      nameAr: 'أصل ضريبة الخصم والتحصيل من المنبع',
+      nameEn: 'Withholding Tax Receivable',
+      category: 'Assets',
+      isHeader: false,
+      parentId: 'acc-11',
+      level: 3,
+      currentBalance: 0,
+    });
+  }
+  db.accounts = accounts;
+
+  const mappings = db.accountMappings || {};
+  const current = mappings.withholding_tax_receivable;
+  if (!current || current === 'acc-1105') {
+    mappings.withholding_tax_receivable = 'acc-1114';
+  }
+  db.accountMappings = mappings;
+  return db;
 }
 
 /**
@@ -1547,6 +1639,14 @@ class ERPDatabaseService {
           settings: {
             ...INITIAL_SETTINGS,
             ...(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}),
+            // Nested template is merged field-by-field so an older/partial save
+            // never loses the shipped defaults.
+            invoiceTemplate: {
+              ...DEFAULT_INVOICE_TEMPLATE,
+              ...(parsed.settings && typeof parsed.settings === 'object' && parsed.settings.invoiceTemplate
+                ? parsed.settings.invoiceTemplate
+                : {}),
+            },
           },
           company: parsed.company || INITIAL_COMPANY,
           warehouses: parsed.warehouses?.length ? parsed.warehouses : INITIAL_WAREHOUSES,
@@ -1560,8 +1660,9 @@ class ERPDatabaseService {
           users: loadedUsers,
         };
 
-        this.saveToStorage(applyUomMigration(applyMasterDataMigration(merged)));
-        return applyUomMigration(applyMasterDataMigration(merged));
+        const migrated = applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(merged)));
+        this.saveToStorage(migrated);
+        return migrated;
       }
       }
     } catch (e) {

@@ -11,7 +11,9 @@
 // the application are hidden.
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { erpDb } from '../../services/db';
+import { CompanySettingsService } from '../../services/companySettings';
 import { printDocument } from '../printUtils';
+import { InvoiceFooter, InvoiceHeader, InvoiceDocStyle, NetDueHighlight } from '../invoiceTemplate';
 import { SalesInvoice, SalesInvoiceLine, PurchaseInvoice, PurchaseInvoiceLine } from '../../types/erp';
 import { Printer, X } from 'lucide-react';
 
@@ -30,6 +32,8 @@ const InvoicePrint: React.FC<{
   onClose: () => void;
 }> = ({ invoiceId, purchaseInvoiceId, onClose }) => {
   const db = erpDb.getSnapshot();
+  // Saved invoice design (header/footer/logo/visible fields/fonts/colors).
+  const template = CompanySettingsService.getInvoiceTemplate();
 
   // F19 — print action owned by the preview itself.
   const [printHint, setPrintHint] = useState<string | null>(null);
@@ -126,21 +130,17 @@ const InvoicePrint: React.FC<{
       )}
 
       {/* ---------- DOCUMENT ---------- */}
-      <div className="print-doc max-w-3xl mx-auto bg-white p-6 shadow-xl border border-slate-200">
-        <div className="text-center border-b-4 border-slate-900 pb-3">
-          <div className="text-2xl font-black">{db.company.nameAr}</div>
-          <div className="text-sm">{db.company.nameEn}</div>
-          <div className="text-xs mt-1">
-            {db.company.address}
-            {db.company.phone ? ` · هاتف: ${db.company.phone}` : ''}
-          </div>
-          <div className="text-xs">
-            الرقم الضريبي: {db.company.taxNumber || '—'}
-            {db.company.commercialRegister ? ` · السجل التجاري: ${db.company.commercialRegister}` : ''}
-          </div>
-        </div>
+      <div
+        className="print-doc invoice-tpl max-w-3xl mx-auto bg-white p-6 shadow-xl border border-slate-200"
+        style={InvoiceDocStyle(template)}
+        dir="rtl"
+      >
+        <InvoiceHeader company={db.company} template={template} />
 
-        <div className="flex justify-between items-end py-3 border-b border-slate-400">
+        <div
+          className="flex justify-between items-end py-3 border-b"
+          style={{ borderColor: template.accentColor }}
+        >
           <div className="text-lg font-black">
             {isPurchase ? 'فاتورة مشتريات' : 'فاتورة مبيعات'}
             {sales?.channel ? ` — ${CHANNEL_AR[sales.channel] || ''}` : ''}
@@ -151,6 +151,8 @@ const InvoicePrint: React.FC<{
         </div>
 
         {children}
+
+        <InvoiceFooter company={db.company} template={template} />
       </div>
 
     </div>
@@ -175,9 +177,9 @@ const InvoicePrint: React.FC<{
           <div>طريقة الدفع: {PAYMENT_AR[purchase.paymentMethod] || purchase.paymentMethod}</div>
           <div>العملة: {purchase.currency}</div>
         </div>
-        <table className="w-full text-xs border-collapse">
+        <table className="w-full border-collapse" style={{ fontSize: template.tableFontSize }}>
           <thead>
-            <tr className="border-b-2 border-slate-800">
+            <tr className="border-b-2" style={{ borderColor: template.accentColor }}>
               <th className="py-1.5 text-right">الصنف</th>
               <th className="py-1.5 text-center">الكمية</th>
               <th className="py-1.5 text-center">الوحدة</th>
@@ -201,7 +203,7 @@ const InvoicePrint: React.FC<{
             ))}
           </tbody>
         </table>
-        <div className="mt-3 text-xs space-y-1">
+        <div className="mt-3 space-y-1" style={{ fontSize: template.bodyFontSize }}>
           <div>الإجمالي قبل الضريبة: {fmt(purchase.subtotal)} {purchase.currency}</div>
           <div>ضريبة القيمة المضافة: {fmt(purchase.vatAmount)} {purchase.currency}</div>
           <div className="text-base font-black">الإجمالي النهائي: {fmt(purchase.totalAmount)} {purchase.currency}</div>
@@ -227,21 +229,22 @@ const InvoicePrint: React.FC<{
     : 'PCS';
 
   return wrap(
-    <>
-      <div className="grid grid-cols-2 gap-2 text-xs py-2">
-        <div>العميل: <b>{customer?.name || '—'}</b></div>
-        <div>تاريخ الفاتورة: <b>{s.date}</b></div>
-        <div>الرقم الضريبي للعميل: {customer?.taxNumber || '—'}</div>
-        <div>القناة البيعية: <b>{CHANNEL_AR[s.channel] || s.channel}</b></div>
-        <div>
-          مصدر الصرف: <b>{s.stockSource === 'rep_custody' ? `عهدة مندوب${rep ? ` (${rep.name})` : ''}${custody ? ` — ${custody.custodyNumber}` : ''}` : `مستودع — ${warehouse?.nameAr || s.warehouseId}`}</b>
+    <>        <div className="grid grid-cols-2 gap-2 py-2" style={{ fontSize: template.bodyFontSize }}>
+          <div>العميل: <b>{customer?.name || '—'}</b></div>
+          <div>تاريخ الفاتورة: <b>{s.date}</b></div>
+          {template.showCustomerTax && <div>الرقم الضريبي للعميل: {customer?.taxNumber || '—'}</div>}
+          <div>القناة البيعية: <b>{CHANNEL_AR[s.channel] || s.channel}</b></div>
+          {(template.showWarehouse || s.stockSource === 'rep_custody') && (
+            <div>
+              مصدر الصرف: <b>{s.stockSource === 'rep_custody' ? `عهدة مندوب${rep ? ` (${rep.name})` : ''}${custody ? ` — ${custody.custodyNumber}` : ''}` : `مستودع — ${warehouse?.nameAr || s.warehouseId}`}</b>
+            </div>
+          )}
+          <div>طريقة الدفع: <b>{PAYMENT_AR[s.paymentMethod] || s.paymentMethod}</b> · العملة: <b>{s.currency}</b></div>
         </div>
-        <div>طريقة الدفع: <b>{PAYMENT_AR[s.paymentMethod] || s.paymentMethod}</b> · العملة: <b>{s.currency}</b></div>
-      </div>
 
-      <table className="w-full text-xs border-collapse">
+      <table className="w-full border-collapse" style={{ fontSize: template.tableFontSize }}>
         <thead>
-          <tr className="border-b-2 border-slate-800">
+          <tr className="border-b-2" style={{ borderColor: template.accentColor }}>
             <th className="py-1.5 text-right">الصنف</th>
             <th className="py-1.5 text-center">الكمية</th>
             <th className="py-1.5 text-center">بونص مجاني</th>
@@ -291,15 +294,34 @@ const InvoicePrint: React.FC<{
         </tbody>
       </table>
 
-      <div className="mt-3 text-xs space-y-1">
+      <div className="mt-3 space-y-1" style={{ fontSize: template.bodyFontSize }}>
         <div>الإجمالي قبل الضريبة: <b>{fmt(s.subtotal)}</b> {s.currency}</div>
-        <div>بونص مجاني — {bonusTotal} {bonusUnitAr} — {fmt(bonusValue)} {s.currency === 'USD' ? 'USD' : 'EGP'} (قيمة صفر — لا يضاف للإيراد)</div>
+        <div>بونص مجاني — {bonusTotal} {bonusUnitAr} — {fmt(bonusValue)} {s.currency === 'USD' ? 'USD' : 'EGP'} (قيمة صفر — لا يُضاف للإيراد)</div>
         <div>الخصم: {fmt(s.discountAmount || 0)} {s.currency}</div>
         <div>ضريبة القيمة المضافة ({Math.round((s.vatAmount && s.subtotal ? (s.vatAmount / s.subtotal) * 100 : 0))}%): {fmt(s.vatAmount)} {s.currency}</div>
         {s.currency === 'USD' && (
           <div>سعر الصرف: {s.exchangeRate} · الإجمالي بالجنيه: {fmt(s.totalAmountEGP)} ج.م</div>
         )}
-        <div className="text-base font-black">الإجمالي النهائي: {fmt(s.totalAmount)} {s.currency === 'USD' ? 'USD' : 'EGP'}</div>
+        {/* F-WH: withholding preview is shown SEPARATELY so it is clear this is NOT
+            VAT and does NOT reduce the invoice gross total or the customer receivable
+            at issuance. */}
+        {template.showWithholding && Number.isFinite(Number(s.withholdingAmount)) && Number(s.withholdingAmount) > 0 && (
+          <>
+            <div>
+              خصم تحت حساب ضريبة الدخل (خصم من المنبع){s.withholdingRate ? ` بنسبة ${(Number(s.withholdingRate) * 100).toFixed(2)}%` : ''}:
+              {' '}<b>{fmt(Number(s.withholdingAmount))} {s.currency === 'USD' ? 'USD' : 'EGP'}</b>
+              {' '}({s.withholdingReason || 'تقديري'})
+            </div>
+          </>
+        )}
+        <div className="text-base font-black">الإجمالي النهائي (قبل خصم المنبع): {fmt(s.totalAmount)} {s.currency === 'USD' ? 'USD' : 'EGP'}</div>
+        <NetDueHighlight
+          template={template}
+          totalAmount={Number(s.totalAmount)}
+          withholdingAmount={template.showWithholding ? Number(s.withholdingAmount) || 0 : 0}
+          currency={s.currency === 'USD' ? 'USD' : 'EGP'}
+          format={fmt}
+        />
         {s.notes ? <div className="pt-1">ملاحظات: {s.notes}</div> : null}
       </div>
     </>

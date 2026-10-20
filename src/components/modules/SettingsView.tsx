@@ -2,11 +2,17 @@ import React, { useState } from 'react';
 import { 
   Settings, Building2, Boxes, Package, 
   Layers, RefreshCw, Download, Upload, Check, Plus,
-  Trash2, Sparkles, ShieldCheck, AlertTriangle
+  Trash2, Sparkles, ShieldCheck, AlertTriangle, FileText, UserCheck, Lock
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
-import { Item, ProductFamily, Warehouse } from '../../types/erp';
+import { ProductFamily } from '../../types/erp';
 import { MasterDataService } from '../../services/masterData';
+import { AuthService } from '../../services/auth';
+import { PermissionService } from '../../services/permissions';
+import { CompanySettingsSection } from './settings/CompanySettingsSection';
+import { WarehousesSection } from './settings/WarehousesSection';
+import { StorekeepersSection } from './settings/StorekeepersSection';
+import { InvoiceDesignSection } from './settings/InvoiceDesignSection';
 
 interface SettingsViewProps {
   openTestRunner?: () => void;
@@ -14,14 +20,14 @@ interface SettingsViewProps {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) => {
   const db = erpDb.getSnapshot();
-  const [activeTab, setActiveTab] = useState<'products' | 'company' | 'warehouses' | 'mappings' | 'data'>('products');
+  const [activeTab, setActiveTab] = useState<'company' | 'warehouses' | 'storekeepers' | 'invoice' | 'products' | 'mappings' | 'data'>('company');
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [dataMessage, setDataMessage] = useState<string | null>(null);
 
-  // Company state
-  const [companyNameAr, setCompanyNameAr] = useState(db.company.nameAr);
-  const [taxNumber, setTaxNumber] = useState(db.company.taxNumber);
-  const [usdRate, setUsdRate] = useState(db.company.currentUsdExchangeRate);
+  const currentUser = AuthService.getCurrentSession()?.user;
+  const canManageSettings = currentUser
+    ? currentUser.role === 'Super Admin' || PermissionService.hasPermissionForUser(currentUser, 'settings', 'edit')
+    : false;
 
   // New Product form state (Product Master for Administrator)
   const [prodCode, setProdCode] = useState(`SNK-00${db.items.filter(i => i.itemType === 'finished_product').length + 1}`);
@@ -36,22 +42,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
   const [vatRate, setVatRate] = useState(0.14);
 
   const finishedProducts = db.items.filter(i => i.itemType === 'finished_product');
-
-  const handleSaveCompany = () => {
-    // F15: guarded service write.
-    const res = MasterDataService.updateCompanySettings({
-      nameAr: companyNameAr,
-      taxNumber,
-      currentUsdExchangeRate: Number(usdRate),
-      userId: 'usr-admin',
-      userName: 'المشرف العام (Admin)',
-    });
-    if (!res.success) {
-      alert(res.error || 'تعذر حفظ إعدادات الشركة');
-      return;
-    }
-    alert('تم حفظ إعدادات الشركة وسعر الصرف بنجاح');
-  };
 
   const handleSaveProduct = () => {
     if (!prodNameAr.trim()) {
@@ -150,9 +140,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-black text-slate-900">إعدادات النظام والبيانات الأساسية (Master Data & Config)</h2>
+          <h2 className="text-xl font-black text-slate-900">إعدادات الشركة والتخصيص</h2>
           <p className="text-xs text-slate-500 mt-1">
-            سجل المنتجات الـ 11 (سناكس عائلات Single و Duo)، بيانات الشركة، المستودعات، ربط الحسابات، وإدارة بيانات الاختبار
+            بيانات الشركة والشعار، المستودعات، أمناء المخازن والصلاحيات، تصميم الفواتير، والبيانات الأساسية — للمشرف العام فقط
           </p>
         </div>
 
@@ -175,49 +165,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
       )}
 
       {/* Tabs */}
+      {!canManageSettings && (
+        <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold flex items-center gap-2">
+          <Lock className="w-4 h-4 shrink-0" />
+          <span>هذه الشاشة مخصصة للمشرف العام فقط — العرض للقراءة، وأي حفظ سيُرفض من طبقة الصلاحيات.</span>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-        <button
-          onClick={() => setActiveTab('products')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-            activeTab === 'products' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          سجل المنتجات التامة الـ 11 ({finishedProducts.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('company')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-            activeTab === 'company' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          بيانات الشركة والعملات
-        </button>
-        <button
-          onClick={() => setActiveTab('warehouses')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-            activeTab === 'warehouses' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          المستودعات الخمسة المعتمدة
-        </button>
-        <button
-          onClick={() => setActiveTab('mappings')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-            activeTab === 'mappings' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          ربط وتوجيه الحسابات (Account Mappings)
-        </button>
-        {/* Requirement 11: System & Test Data Tab */}
-        <button
-          onClick={() => setActiveTab('data')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-            activeTab === 'data' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          إدارة بيانات الاختبار والنسخ الاحتياطي
-        </button>
+        {([
+          ['company', 'بيانات الشركة', Building2],
+          ['warehouses', `المستودعات (${db.warehouses.length})`, Boxes],
+          ['storekeepers', 'أمناء المخازن', UserCheck],
+          ['invoice', 'تصميم الفواتير', FileText],
+          ['products', `سجل المنتجات (${finishedProducts.length})`, Package],
+          ['mappings', 'ربط الحسابات', Layers],
+          ['data', 'البيانات والنسخ الاحتياطي', ShieldCheck],
+        ] as Array<[typeof activeTab, string, React.ComponentType<{ className?: string }>]>).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeTab === id ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {label}
+          </button>
+        ))}
       </div>
+
+      {activeTab === 'company' && <CompanySettingsSection />}
+      {activeTab === 'warehouses' && <WarehousesSection />}
+      {activeTab === 'storekeepers' && <StorekeepersSection />}
+      {activeTab === 'invoice' && <InvoiceDesignSection />}
 
       {/* 1. Products Master */}
       {activeTab === 'products' && (
@@ -287,92 +268,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
               </tbody>
             </table>
           </div>
-        </div>
-      )}
-
-      {/* 2. Company Settings */}
-      {activeTab === 'company' && (
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs max-w-2xl space-y-4">
-          <h3 className="font-bold text-sm text-slate-900 pb-2 border-b border-slate-100">
-            بيانات المنشأة والعملات وأسعار الصرف
-          </h3>
-
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">اسم الشركة القانوني</label>
-              <input
-                type="text"
-                value={companyNameAr}
-                onChange={(e) => setCompanyNameAr(e.target.value)}
-                className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">الرقم الضريبي للمنشأة</label>
-                <input
-                  type="text"
-                  value={taxNumber}
-                  onChange={(e) => setTaxNumber(e.target.value)}
-                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">سعر صرف الدولار المعتمد (ج.م / $)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={usdRate}
-                  onChange={(e) => setUsdRate(Number(e.target.value))}
-                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono font-bold"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-2">
-            <button
-              onClick={handleSaveCompany}
-              className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md cursor-pointer"
-            >
-              حفظ التعديلات
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 3. Warehouses */}
-      {activeTab === 'warehouses' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-4 bg-slate-50 border-b border-slate-200">
-            <h3 className="font-bold text-xs text-slate-800">المستودعات الخمسة المعتمدة في النظام</h3>
-            <p className="text-[11px] text-slate-500">فصل محكم بين مستودعات الخامات، الإنتاج التام، التصدير، التوالف، والهالك</p>
-          </div>
-
-          <table className="w-full text-right text-xs">
-            <thead className="bg-slate-100 text-slate-700 font-bold">
-              <tr>
-                <th className="p-3.5">الكود</th>
-                <th className="p-3.5">اسم المستودع</th>
-                <th className="p-3.5">النوع والتخصص</th>
-                <th className="p-3.5">الموقع والعنبر</th>
-                <th className="p-3.5">أمين المستودع</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {db.warehouses.map(wh => (
-                <tr key={wh.id} className="hover:bg-slate-50">
-                  <td className="p-3.5 font-mono font-bold text-slate-900">{wh.code}</td>
-                  <td className="p-3.5 font-bold text-slate-800">{wh.nameAr}</td>
-                  <td className="p-3.5 text-slate-600 font-mono text-[11px]">{wh.type}</td>
-                  <td className="p-3.5 text-slate-600">{wh.location}</td>
-                  <td className="p-3.5 text-slate-800 font-semibold">{wh.managerName}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
 
