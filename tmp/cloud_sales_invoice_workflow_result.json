@@ -1,0 +1,21 @@
+{
+  "prepared": true,
+  "configured": true,
+  "authOk": true,
+  "tableAvailable": true,
+  "salesInvoicesRpcPresent": true,
+  "postSalesInvoiceRpcPresent": false,
+  "invoiceInserted": false,
+  "invoiceReadBack": false,
+  "journalInserted": false,
+  "journalReadBack": false,
+  "journalBalanceVerified": false,
+  "invoiceJournalLinkVerified": false,
+  "idempotentDuplicateHandled": false,
+  "invalidInputRejected": false,
+  "failedWriteLeftNoRows": false,
+  "cleanupInvoiceRemoved": false,
+  "cleanupJournalRemoved": false,
+  "crossSessionReadBack": false,
+  "detail": "post_sales_invoice RPC not callable"
+}

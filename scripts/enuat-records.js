@@ -1,0 +1,2 @@
+// Records placeholder
+module.exports = [];

@@ -1,0 +1,2 @@
+// Goals placeholder
+module.exports = [];

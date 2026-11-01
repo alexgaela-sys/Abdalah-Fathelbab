@@ -4,23 +4,52 @@ import {
   AlertCircle, ArrowLeft, Building2, Factory
 } from 'lucide-react';
 import { AuthService } from '../../services/auth';
+import { submitCloudGate } from '../../services/cloudAuthGate';
+import type { CloudAuthFailure } from '../../services/cloudAuth';
+import type { CloudAuthFailure as CloudGateFailure } from '../../services/cloudAuthGate';
 import { User } from '../../types/erp';
 
 interface LoginViewProps {
   onLoginSuccess: (user: User) => void;
+  /** 'cloud' = Supabase Auth only (no local password fallback). Default 'local'. */
+  mode?: 'local' | 'cloud';
+  /** Failure carried over from a previous cloud attempt (e.g. page-load restore). */
+  initialFailure?: CloudGateFailure | null;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
+export const LoginView: React.FC<LoginViewProps> = ({
+  onLoginSuccess,
+  mode = 'local',
+  initialFailure = null,
+}) => {
+  const isCloud = mode === 'cloud';
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(initialFailure?.messageAr ?? null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setIsLoading(true);
+
+    if (isCloud) {
+      // Cloud mode: Supabase Auth is the ONLY provider. A failure is shown as-is;
+      // there is deliberately no fallback to AuthService/localStorage here.
+      const state = await submitCloudGate(username, password);
+      setIsLoading(false);
+      if (state.kind === 'signed-in') {
+        onLoginSuccess(state.user);
+        return;
+      }
+      if (state.kind === 'signed-out') {
+        setErrorMsg(state.failure?.messageAr ?? 'تعذر تسجيل الدخول السحابي');
+        return;
+      }
+      setErrorMsg('وضع السحابة غير مهيأ — لا يوجد دخول محلي بديل');
+      return;
+    }
 
     setTimeout(() => {
       const result = AuthService.login(username, password);
@@ -66,7 +95,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-cream-300 text-xs text-emerald-700 font-bold shadow-xs">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>النسخة الرئيسية المعتمدة — Production Release</span>
+            <span>
+              {isCloud
+                ? 'دخول سحابي — Supabase Auth (بدون دخول محلي)'
+                : 'النسخة الرئيسية المعتمدة — Production Release'}
+            </span>
           </div>
         </div>
 
@@ -93,15 +126,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Username */}
+            {/* Identifier: email in cloud mode, username in local mode */}
             <div className="space-y-1.5">
-              <label className="field-label">اسم المستخدم (Username)</label>
+              <label className="field-label">
+                {isCloud ? 'البريد الإلكتروني (Email)' : 'اسم المستخدم (Username)'}
+              </label>
               <div className="relative">
                 <input
-                  type="text"
+                  type={isCloud ? 'email' : 'text'}
+                  dir={isCloud ? 'ltr' : undefined}
+                  autoComplete={isCloud ? 'email' : 'username'}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="أدخل اسم المستخدم"
+                  placeholder={isCloud ? 'name@company.com' : 'أدخل اسم المستخدم'}
                   required
                   className="field-input pl-3 pr-10 font-mono"
                 />

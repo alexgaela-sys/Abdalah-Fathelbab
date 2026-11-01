@@ -1,0 +1,2 @@
+// Applications placeholder
+module.exports = [];

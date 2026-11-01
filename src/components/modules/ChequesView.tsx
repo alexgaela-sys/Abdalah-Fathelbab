@@ -8,8 +8,10 @@ import { erpDb } from '../../services/db';
 import { Cheque, ChequeType, ChequeStatus } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
 import { printDocument } from '../printUtils';
+import { resolveDataMode } from '../../data/mode';
+import { CloudChequesPanel } from './cloud/CloudFinanceReadPanels';
 
-export const ChequesView: React.FC = () => {
+const LocalChequesView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [activeTab, setActiveTab] = useState<'incoming' | 'outgoing'>('incoming');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -638,3 +640,7 @@ export const ChequesView: React.FC = () => {
     </div>
   );
 };
+
+/** Cloud mode reads cheques from Supabase (read-only); local unchanged. */
+export const ChequesView: React.FC = () =>
+  resolveDataMode() === 'cloud' ? <CloudChequesPanel /> : <LocalChequesView />;

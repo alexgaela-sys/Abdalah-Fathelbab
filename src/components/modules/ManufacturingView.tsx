@@ -23,7 +23,10 @@ import { AuthService } from '../../services/auth';
 import { PermissionService } from '../../services/permissions';
 import { ProductionOrder, ProductionOrderStatus } from '../../types/erp';
 
-export const ManufacturingView: React.FC = () => {
+import { resolveDataMode } from '../../data/mode';
+import { CloudProductionPanel } from './cloud/CloudOperationsPanels';
+
+const LocalManufacturingView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showCreateModal, setShowCreateModal] = useState(false);
   // QA-25: UI permission affordance (service authorization stays the real wall).
@@ -1657,3 +1660,7 @@ export const ManufacturingView: React.FC = () => {
     </div>
   );
 };
+
+/** Cloud mode reads production orders from Supabase (read-only); local unchanged. */
+export const ManufacturingView: React.FC = () =>
+  resolveDataMode() === 'cloud' ? <CloudProductionPanel /> : <LocalManufacturingView />;

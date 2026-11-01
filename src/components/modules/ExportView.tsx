@@ -8,8 +8,10 @@ import { WorkflowService } from '../../services/workflows';
 import { AuthService } from '../../services/auth';
 import { PermissionService } from '../../services/permissions';
 import { ExportShipment } from '../../types/erp';
+import { resolveDataMode } from '../../data/mode';
+import { CloudExportPanel } from './cloud/CloudFinanceReadPanels';
 
-export const ExportView: React.FC = () => {
+const LocalExportView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedShipment, setSelectedShipment] = useState<ExportShipment | null>(null);
@@ -548,3 +550,7 @@ export const ExportView: React.FC = () => {
     </div>
   );
 };
+
+/** Cloud mode reads export shipments from Supabase (read-only); local unchanged. */
+export const ExportView: React.FC = () =>
+  resolveDataMode() === 'cloud' ? <CloudExportPanel /> : <LocalExportView />;

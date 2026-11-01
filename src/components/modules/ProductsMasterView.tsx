@@ -6,11 +6,22 @@ import {
   Layers, Barcode, Calendar, Boxes, Check, FileText
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
+import { resolveDataMode } from '../../data/mode';
+import { CloudItemsPanel } from './cloud/CloudItemsPanel';
 import { Item, ProductFamily, ItemType } from '../../types/erp';
 import { MasterDataService } from '../../services/masterData';
 import { InventoryEngine } from '../../services/inventory';
 
-export const ProductsMasterView: React.FC = () => {
+// Cloud mode replaces the WHOLE items screen: BOM/production/publication panels
+// are not mounted, so no local read/write can happen in cloud mode. The cloud
+// rendering is strictly read-only (core.items via the allowlisted bridge) and is
+// opened explicitly with ?cloud=1&screen=items; the default stays local.
+export const ProductsMasterView: React.FC<{ mode?: 'local' | 'cloud' }> = ({ mode = 'local' }) =>
+  mode === 'cloud' || resolveDataMode() === 'cloud'
+    ? <CloudItemsPanel />
+    : <LocalProductsMasterView />;
+
+const LocalProductsMasterView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [searchQuery, setSearchQuery] = useState('');
   const [familyFilter, setFamilyFilter] = useState<string>('all');

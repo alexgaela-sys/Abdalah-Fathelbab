@@ -1,0 +1,2 @@
+// Reports placeholder
+module.exports = [];

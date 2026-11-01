@@ -1,0 +1,343 @@
+[
+  {
+    "screen": "sales",
+    "ms": 2879,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_sales_returns",
+      "rpc/list_sales_invoices"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 1079
+  },
+  {
+    "screen": "inventory",
+    "ms": 1807,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_inventory_transactions",
+      "rpc/list_inventory_batches",
+      "rpc/stock_on_hand",
+      "rpc/erp_core_master_read"
+    ],
+    "tables": [],
+    "coreBridge": true,
+    "masterDirect": [],
+    "textLen": 1305
+  },
+  {
+    "screen": "purchasing",
+    "ms": 1809,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_purchasing_invoices",
+      "rpc/list_purchase_returns"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 893
+  },
+  {
+    "screen": "manufacturing",
+    "ms": 1782,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_production_orders",
+      "rpc/erp_core_master_read",
+      "rpc/erp_user_can"
+    ],
+    "tables": [],
+    "coreBridge": true,
+    "masterDirect": [],
+    "textLen": 1265
+  },
+  {
+    "screen": "quality",
+    "ms": 40537,
+    "classification": "غير مكتملة (بلا نداء)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 517
+  },
+  {
+    "screen": "costing",
+    "ms": 40568,
+    "classification": "غير مكتملة (بلا نداء)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 517
+  },
+  {
+    "screen": "accounting",
+    "ms": 1829,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_journal_entries",
+      "rpc/trial_balance"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 834
+  },
+  {
+    "screen": "reports",
+    "ms": 1860,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/profit_and_loss",
+      "rpc/trial_balance",
+      "rpc/inventory_movement_report"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 968
+  },
+  {
+    "screen": "items",
+    "ms": 1975,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/erp_core_master_read"
+    ],
+    "tables": [],
+    "coreBridge": true,
+    "masterDirect": [],
+    "textLen": 893
+  },
+  {
+    "screen": "customers",
+    "ms": 1430,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/erp_core_master_read"
+    ],
+    "tables": [],
+    "coreBridge": true,
+    "masterDirect": [],
+    "textLen": 574
+  },
+  {
+    "screen": "suppliers",
+    "ms": 1826,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/erp_core_master_read"
+    ],
+    "tables": [],
+    "coreBridge": true,
+    "masterDirect": [],
+    "textLen": 602
+  },
+  {
+    "screen": "warehouses",
+    "ms": 1845,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/erp_core_master_read"
+    ],
+    "tables": [],
+    "coreBridge": true,
+    "masterDirect": [],
+    "textLen": 628
+  },
+  {
+    "screen": "treasury",
+    "ms": 1856,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_payments",
+      "rpc/list_cheques"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 843
+  },
+  {
+    "screen": "banks",
+    "ms": 1368,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_bank_accounts",
+      "rpc/list_bank_transactions"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 797
+  },
+  {
+    "screen": "cheques",
+    "ms": 1829,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_cheques"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 589
+  },
+  {
+    "screen": "expenses",
+    "ms": 1807,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_expenses"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 597
+  },
+  {
+    "screen": "representatives",
+    "ms": 1817,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_representative_custodies",
+      "rpc/list_custody_movements"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 987
+  },
+  {
+    "screen": "export",
+    "ms": 1826,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_export_shipments"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 715
+  },
+  {
+    "screen": "users",
+    "ms": 1868,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/list_app_profiles",
+      "rpc/erp_user_can"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 459
+  },
+  {
+    "screen": "audit",
+    "ms": 40523,
+    "classification": "غير مكتملة (بلا نداء)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 517
+  },
+  {
+    "screen": "settings",
+    "ms": 2365,
+    "classification": "RPC فقط (قراءة)",
+    "error": "",
+    "writeUi": [],
+    "observedWrites": [],
+    "reads": [
+      "rpc/current_erp_role",
+      "rpc/get_cloud_settings"
+    ],
+    "tables": [],
+    "coreBridge": false,
+    "masterDirect": [],
+    "textLen": 372
+  }
+]

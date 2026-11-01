@@ -1,0 +1,2 @@
+// Holidays placeholder
+module.exports = [];

@@ -1,0 +1,244 @@
+# SnakDip TEST — integrated sales posting: review of the three QA artifacts
+
+Scope of this review: `sql/snakdip_test_apply.sql`,
+`scripts/qa_snakdip_invoice_receipt_harness.sql`, and this report, compared
+literally against `supabase/116_sales_invoice_integrated_POST.sql`,
+`supabase/114_sales_inventory_fifo_issue.sql`, `supabase/115_sales_inventory_fifo_issue_qa.sql`,
+`scripts/qa_integrated_sales_posting.sql`, `scripts/qa_post_sales_invoice_harness.sql`,
+and the cloud sales client/test code.
+
+No SQL was executed. No row, account, mapping, period, grant, environment
+variable, deployment, or localStorage value was created, changed, or deleted by
+this review. Nothing here is a claim that the TEST database has been exercised.
+
+---
+
+## 1. What is actually in the repository (and what is not)
+
+| Object | Defined in this repository? | Evidence |
+|---|---|---|
+| `public.post_sales_invoice_integrated(...)` | YES, authoritative | `supabase/116_sales_invoice_integrated_POST.sql` |
+| `public.post_sales_inventory_issue(text,text,text)` | YES, authoritative | `supabase/114_sales_inventory_fifo_issue.sql` |
+| `public.post_sales_invoice` | **NO definition** | only referenced by 116 and by the TS/RPC callers; `supabase/98_post_sales_invoice.sql` is an explicit "NO-OP verifier" |
+| `fin.post_sales_invoice` | **NO definition** | referenced only by `scripts/qa_post_sales_invoice_harness.sql` and by comments |
+| `fin.post_journal` | **NO definition** | called by 114; only `erp_post_journal_entry` exists in `supabase/design/123_atomic_documents_DRAFT.sql` (a draft, different name) |
+| `fin.rpc_idempotency` | **NO CREATE TABLE** | only created opportunistically inside `scripts/qa_post_sales_invoice_harness.sql` |
+
+Consequences, stated plainly:
+
+- The applied wrapper cannot be proven compatible with the deployed
+  `public.post_sales_invoice` from repository files alone. Its call uses
+  `p_is_test => true` and `p_idempotency_key => v_idem`; the cloud client
+  (`src/services/cloudSalesInvoice.ts`) calls the same RPC without `p_is_test`,
+  so the deployed function must have that parameter with a default.
+- The COGS journal cannot be proven to carry `source_document_id` from
+  repository files: the two existing harnesses disagree
+  (`qa_integrated_sales_posting.sql` expects `source_document_id IS NULL`,
+  `qa_wholesale_invoice_integrated.sql` inserts `source_document_id = invoice id`).
+  Both agree on `reference = invoice_number`.
+- Therefore the repository now treats **reference/source_document_id either way**
+  as the COGS link and verifies the entry by its returned `entry_number`, not by
+  an assumed column value.
+
+The previous version of this report claimed "the repository body explicitly
+re-verifies the sales-side journal linkage before it proceeds" (true) and treated
+the apply pack as reviewable DDL without noticing that both of its declared
+function bodies were **empty**. The apply pack now applies the source files
+verbatim instead of copying bodies.
+
+---
+
+## 2. Real defects found and fixed
+
+### 2.1 `supabase/116_sales_invoice_integrated_POST.sql`
+
+1. **Undeclared variable (compile/runtime failure).** The read-back selected
+   `i.journal_entry_id` `into ... v_ceil_je_id`, but `v_ceil_je_id` was never
+   declared. Every call would fail with
+   `"v_ceil_je_id" is not a known variable`. Now declared.
+2. **NULL-safe guards were not fail-closed.** `if v_ceil_status <> 'posted'`
+   and `if v_ceil_stock <> 'warehouse'` evaluate to NULL (i.e. do not raise) when
+   the column is NULL. Changed to `is distinct from`.
+3. **Placeholder journal could pass.** The wrapper only checked that
+   `journal_entry_id` and `entry_number` were non-null. A zero-line or unposted
+   entry (the `p_is_test` placeholder path) would pass. The wrapper now proves
+   the entry is `is_posted`, balanced, and its debit equals the invoice EGP total
+   before touching inventory.
+4. **Retry short-circuited to success.** If the idempotency key existed, the
+   wrapper returned `already_posted` without ever proving the inventory issue or
+   the COGS journal. A retry now continues into the companion, which is
+   idempotent by natural movement guard and its own derived key; success still
+   requires the COGS proof.
+5. **`out_journal_number` was unverified and could be the sales journal.** The
+   wrapper returned whatever the companion reported (and fell back to the sales
+   entry number). It now requires the number to resolve to a **posted, balanced
+   entry linked to the invoice** (by `reference` or `source_document_id`), and
+   rejects it if it resolves to the same entry as the sales journal.
+6. **`%s` inside `raise exception`.** `format()` uses `%s`; `raise ... using`
+   uses `%`. The mixed message would print a literal `%s`. Fixed.
+
+### 2.2 `supabase/114_sales_inventory_fifo_issue.sql`
+
+1. **`sales.invoices.journal_entry_id` was overwritten with the COGS entry.**
+   That column is the invoice's link to its SALES journal; the cloud read path
+   (`cloudSalesRead.ts`, `cloud_sales_invoice_workflow_test.ts` step 7) expects
+   it to be the sales journal. Overwriting it made the invoice point at COGS and
+   made later retries/reports read the wrong entry. The update was removed; the
+   COGS entry is linked by `reference = invoice_number` /
+   `source_document_id = invoice id`.
+2. **`already_posted` returned the wrong journal.** It returned the entry that
+   `journal_entry_id` pointed at (the sales entry, or the COGS entry under the
+   old overwrite). It now returns the COGS entry that carries the invoice
+   reference and is distinct from the sales entry.
+3. **Idempotency row stored a journal id as `invoice_id`.** `values (v_idem,
+   v_journal_id)` wrote the COGS entry id into `fin.rpc_idempotency.invoice_id`.
+   Fixed to `v_inv.id`.
+4. **Mapped account existence/header not checked.** `cogs_*` /
+   `inventory_finished_*` were only checked for mapping presence, then used.
+   The companion now resolves the account, verifies it exists and is not a
+   header, and fails with the offending key before any stock row is touched.
+5. **Zero-cost issuance could return `issued` with no COGS journal.** A guard now
+   refuses a resolved total of `<= 0` instead of returning a journal-less success.
+6. **`fin.post_journal` result was trusted.** After posting, the companion now
+   re-reads the entry: it must exist, be `is_posted`, be linked to the invoice,
+   and balance to the issued cost. Otherwise it raises and the whole issuance
+   rolls back.
+7. **NULL-safe status/stock guards** changed to `is distinct from`.
+
+### 2.3 `sql/snakdip_test_apply.sql`
+
+1. **The file could never apply anything.** Both `create or replace function`
+   statements had bodies containing only comments inside `$function$` — invalid
+   PL/pgSQL; `psql` would abort at the first one. The file now applies
+   `supabase/114_...sql` and `supabase/116_...sql` with `\ir` includes, so the
+   applied function is literally the reviewed file (and its own revoke/grant
+   block), with no copied body to drift.
+2. **No dependency check.** It silently assumed
+   `public.post_sales_invoice`, `fin.post_journal`, `fin.rpc_idempotency`, all
+   tables, and every column exist. It now preflights tables, function
+   signatures (`p_is_test`, `p_idempotency_key`, return columns), and the column
+   shapes actually used, and aborts **before any DDL** with the missing list.
+3. **Broken transaction layout.** `commit;` was followed by verification queries
+   and then `rollback;` (a no-op warning). Now the preflight, DDL, grants and
+   verification all run inside one transaction, verification failures raise, and
+   the last statement is `commit`.
+4. The header's claim that the body "lives in that migration file and must stay
+   identical in behavior" was replaced by an include that makes identity
+   structural.
+
+### 2.4 `scripts/qa_snakdip_invoice_receipt_harness.sql`
+
+1. **The "no stock" leg created stock before testing it.** A 10-unit FIFO layer
+   was inserted in section 0; section 1 then called the wrapper with quantity 5
+   and expected a failure. It would succeed, marking the check FAIL and consuming
+   stock, after which the happy path (needs 6 of the remaining 5) would fail too.
+   The layer is now created only in the happy-path section, after the fail-closed
+   section.
+2. **The repeat leg looked up an invoice by idempotency key.**
+   `where id = 'qa-snakdip-key-success'` returns no row, so movement counts were
+   `0 = 0` and the check passed vacuously. The harness now stores the invoice
+   number/id and both journal ids in `qa_ctx` and asserts against them.
+3. **Synthetic chart-of-accounts collision.** It inserted accounts with codes
+   `5101` / `1109` and `on conflict (id)`, which does not protect a unique
+   `code` (those codes exist in the real chart per `supabase/sql-prep`). It
+   inserted `cogs_local` / `inventory_finished_local` with new ids and
+   `on conflict (id)`, which fails when the key already exists (the known TEST
+   state has `cogs_local -> qa-fifo-acc-cogs`). The harness no longer invents
+   accounts or mappings at all: it **verifies** each required key resolves to an
+   existing non-header account and aborts before the first write.
+4. **The known cash defect was invisible.** `cash_treasury` pointing at the
+   receivables account keeps every journal balanced, so the old happy path would
+   pass while debiting AR instead of cash. The preflight now refuses that state
+   and names the account id.
+5. **Missing base unit would have failed deep inside the RPC.** The preflight now
+   checks `core.items.base_unit_id` for `qa-e2e-item-01` and reports the exact
+   missing unit before any write.
+6. **COGS read-back assumed `source_document_id IS NULL`.** Contradicted by
+   `qa_wholesale_invoice_integrated.sql`. It now matches on `reference` or
+   `source_document_id`, requires the entry to be distinct from the sales entry,
+   and asserts the returned `out_journal_number` equals it.
+7. **No proof that the sales link survives COGS.** New checks: the sales journal
+   is the one `sales.invoices.journal_entry_id` points at, posted and balanced at
+   570, and the invoice still points at it after the COGS step.
+8. **Forced post-sales failure added.** A 1000-unit line exhausts the layer after
+   the sales-side write; the harness asserts the raise, unchanged row counts for
+   invoices/lines/journals/movements/idempotency, stock still 4, and the earlier
+   successful invoice intact.
+9. `grant all on table qa_res to authenticated` removed (temp table, no client
+   role is used by this harness).
+
+---
+
+## 3. Known TEST state versus what the harness now requires
+
+Evidence used: previous TEST results in this conversation (`cogs_local` maps to
+`qa-fifo-acc-cogs`; `cash_treasury` points at the receivables account; no FIFO
+batch and no base unit were found for the QA item). Nothing below was
+re-queried in this review.
+
+| Requirement | Known to exist? | Evidence | Blocker if absent |
+|---|---|---|---|
+| `cogs_local -> qa-fifo-acc-cogs` | yes (prior TEST result) | prior read-only TEST check | — (account must still be non-header and exist; preflight checks) |
+| `inventory_finished_local` mapping | **unproven** | not in prior results | preflight names the key; no mapping is invented |
+| `customer_receivable_local`, `sales_retail_revenue`, `sales_vat_output` | unproven in this review | prior note says TEST carries these keys | preflight names the missing key |
+| `cash_treasury` valid cash account | **NO — points at the receivables account** | prior TEST result | **blocks the happy path**: a cash invoice would debit AR; fix the mapping first |
+| base unit for `qa-e2e-item-01` | **NO** | prior TEST result | **blocks any invoice post**: `core.items.base_unit_id` must reference a `core.units` row |
+| FIFO layer for the QA item | no | prior TEST result; harness creates one in-transaction | none (synthetic, rolled back) |
+| open period covering 2026-10-25 | unproven | — | preflight names the date |
+| `public.post_sales_invoice(...)` with `p_is_test` | unproven | not defined in repo | apply pack preflight aborts with the required signature |
+| `fin.post_journal`, `fin.rpc_idempotency` | unproven | not defined in repo | apply pack preflight aborts with the object name |
+| mappings/period/fixtures created by the harness | **never** | by design | — |
+
+Required TEST records/keys to fix before the harness can reach its happy path:
+
+1. `core.account_mappings.cash_treasury` must point at a real treasury/cash
+   detail account, **not** at the account used by
+   `customer_receivable_local`.
+2. `core.items.base_unit_id` for `qa-e2e-item-01` must reference an existing
+   `core.units` row (and the item must be active).
+3. The remaining mapping keys listed above must resolve to existing non-header
+   accounts.
+4. An open `core.accounting_periods` row covering 2026-10-25 must exist.
+
+---
+
+## 4. Run order
+
+```bash
+# 1) Apply the two functions and their grants on TEST only.
+#    Requires psql: the file uses \ir includes and is not a SQL-editor script.
+psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f sql/snakdip_test_apply.sql
+
+# 2) Run the isolated harness. It preflights read-only, then writes only inside
+#    one transaction and ends with ROLLBACK.
+psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -f scripts/qa_snakdip_invoice_receipt_harness.sql
+```
+
+If step 1 aborts, nothing was applied; the error lists the missing dependency.
+If step 2 aborts in the preflight, nothing was written; the error lists the exact
+missing key/account/unit/period.
+
+---
+
+## 5. What remains unproven without executing on TEST
+
+- That the deployed `public.post_sales_invoice` has the `p_is_test` /
+  `p_idempotency_key` signature the wrapper calls.
+- That `fin.post_journal` writes `reference` (or `source_document_id`) such that
+  the COGS entry resolves to the invoice. The code accepts either; if TEST writes
+  neither, the companion now raises instead of claiming success.
+- That the deployed TEST schema has every column the preflight probes
+  (`total_amount_egp`, `cogs_total`, `stock_source`, `free_quantity`,
+  `unit_cost`, `document_number`, `movement_type`, `is_posted`, `reference`,
+  `source_document_type`, `source_document_id`, `entry_number`,
+  `rpc_idempotency.invoice_id`).
+- That the sales journal really totals the invoice EGP amount on TEST (570 for the
+  harness payload). The wrapper now rejects it if it does not.
+- That PostgreSQL's rollback behaviour on TEST matches the design. The harness
+  asserts unchanged counts, but that assertion only means something when the
+  harness is actually executed.
+
+No success is claimed for the integrated invoice path. The blocked items are the
+invalid `cash_treasury` mapping and the missing base unit for the QA item; both
+must be resolved on TEST before the harness can produce a meaningful verdict.

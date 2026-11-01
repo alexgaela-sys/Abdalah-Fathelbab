@@ -1,0 +1,41 @@
+{
+  "prepared": true,
+  "configured": true,
+  "isTestUrl": true,
+  "signInOk": true,
+  "tableAvailable": true,
+  "inserted": true,
+  "readBack": true,
+  "verified": true,
+  "deleted": true,
+  "detail": "الاختبار نجح: تم الكتابة والقراءة والتحقق والحذف داخل نفس حدود الاختبار، دون لمس accounts أو journal أو inventory أو بيانات QA.",
+  "records": [
+    {
+      "id": "erp_slice_01_1792945689438_df8tvu",
+      "owner_id": "cd8ae590-5f86-4f01-87df-fb5a5b640383",
+      "run_at": "2026-10-25T16:28:11.035Z",
+      "status": "written",
+      "note": "سجل اختبار First Cloud Slice — ERP Cloud PoC"
+    },
+    {
+      "id": "erp_slice_01_1792945689438_df8tvu",
+      "owner_id": "cd8ae590-5f86-4f01-87df-fb5a5b640383",
+      "run_at": "2026-10-25T16:28:11.035+00:00",
+      "status": "written",
+      "note": "سجل اختبار First Cloud Slice — ERP Cloud PoC"
+    },
+    {
+      "id": "erp_slice_01_1792945689438_df8tvu",
+      "owner_id": "cd8ae590-5f86-4f01-87df-fb5a5b640383",
+      "run_at": "2026-10-25T16:28:11.035+00:00",
+      "status": "verified",
+      "note": "تم التحقق من القراءة والكتابة والمعرف والبيانات."
+    },
+    {
+      "id": "erp_slice_01_1792945689438_df8tvu",
+      "run_at": "2026-10-25T16:28:11.035+00:00",
+      "status": "deleted",
+      "note": "تم حذف سجل الاختبار الذي أنشأه الاختبار فقط."
+    }
+  ]
+}

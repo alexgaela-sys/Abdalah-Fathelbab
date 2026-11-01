@@ -1,0 +1,8 @@
+{
+  "prepared": true,
+  "configured": true,
+  "authOk": false,
+  "paths": [],
+  "detail": "Authentication failed: TypeError: Cannot read properties of undefined (reading 'VITE_SUPABASE_URL')",
+  "exitCode": 1
+}

@@ -6,6 +6,8 @@ import {
   Calendar, Printer, Download, Filter, CheckCircle2, RefreshCw, Undo2
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
+import { resolveDataMode } from '../../data/mode';
+import { CloudMasterReadPanel } from './cloud/CloudMasterReadPanel';
 import { Customer, QualityDestination } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
 import { MasterDataService } from '../../services/masterData';
@@ -13,7 +15,17 @@ import { LedgerService } from '../../services/ledger';
 import { channelForCustomerType } from '../../services/pricing';
 import { printDocument } from '../printUtils';
 
-export const CustomersView: React.FC = () => {
+// Cloud mode replaces the whole customers screen with the repository-backed one:
+// the local tabs (statement / returns / payments / invoices) are NOT shown, so no
+// local data can be read or written while cloud mode is on.
+export const CustomersView: React.FC<{ mode?: 'local' | 'cloud' }> = ({ mode = 'local' }) =>
+  mode === 'cloud' || resolveDataMode() === 'cloud' ? (
+    <CloudMasterReadPanel entity="customers" title="إدارة العملاء" schemaTable="core.customers" />
+  ) : (
+    <LocalCustomersView />
+  );
+
+const LocalCustomersView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [activeTab, setActiveTab] = useState<'list' | 'statement' | 'returns'>('list');
   const [searchQuery, setSearchQuery] = useState('');

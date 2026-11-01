@@ -6,8 +6,10 @@ import {
 import { erpDb } from '../../services/db';
 import { WorkflowService } from '../../services/workflows';
 import { Expense } from '../../types/erp';
+import { resolveDataMode } from '../../data/mode';
+import { CloudExpensesPanel } from './cloud/CloudFinanceReadPanels';
 
-export const ExpensesView: React.FC = () => {
+const LocalExpensesView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -270,3 +272,7 @@ export const ExpensesView: React.FC = () => {
     </div>
   );
 };
+
+/** Cloud mode reads expenses from Supabase (read-only); local unchanged. */
+export const ExpensesView: React.FC = () =>
+  resolveDataMode() === 'cloud' ? <CloudExpensesPanel /> : <LocalExpensesView />;

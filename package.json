@@ -23,10 +23,16 @@
     "partialclose": "tsx scripts/qa_partial_closure.ts",
     "qa:withholding": "tsx scripts/qa_withholding_income_tax.ts",
     "qa:cancel": "tsx scripts/qa_sales_cancel_isolation.ts",
-    "qa:settings": "tsx scripts/qa_company_settings.ts"
+    "qa:settings": "tsx scripts/qa_company_settings.ts",
+    "qa:cloud": "node scripts/qa_supabase_browser.mjs cloud",
+    "qa:cloud:strict": "node scripts/qa_supabase_browser.mjs cloud --require-cloud",
+    "qa:cloud:live": "node scripts/qa_cloud_live.mjs",
+    "qa:auth": "node scripts/qa_supabase_browser.mjs auth",
+    "qa:preview": "node scripts/qa_supabase_browser.mjs preview"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
+    "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "lucide-react": "^0.546.0",

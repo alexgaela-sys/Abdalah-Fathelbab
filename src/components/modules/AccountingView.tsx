@@ -8,8 +8,10 @@ import { erpDb } from '../../services/db';
 import { AccountingEngine } from '../../services/accounting';
 import { JournalEntry, Account, AccountingPeriod, isDebitNatureCategory } from '../../types/erp';
 import { printDocument } from '../printUtils';
+import { resolveDataMode } from '../../data/mode';
+import { CloudLedgerPanel } from './cloud/CloudLedgerPanel';
 
-export const AccountingView: React.FC = () => {
+const LocalAccountingView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [activeTab, setActiveTab] = useState<'journals' | 'ledger' | 'chart' | 'periods'>('journals');
   const [showAddJvModal, setShowAddJvModal] = useState(false);
@@ -963,3 +965,7 @@ export const AccountingView: React.FC = () => {
     </div>
   );
 };
+
+/** Cloud mode reads posted journals from Supabase (read-only); local unchanged. */
+export const AccountingView: React.FC = () =>
+  resolveDataMode() === 'cloud' ? <CloudLedgerPanel /> : <LocalAccountingView />;

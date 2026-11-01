@@ -1,0 +1,2 @@
+// Departments placeholder
+module.exports = [];

@@ -12,8 +12,14 @@ import { AuthService } from '../../services/auth';
 import InvoicePrint from './InvoicePrint';
 import { SalesInvoiceDetails } from '../salesInvoiceDetails';
 import { WithholdingSummary } from '../withholdingSummary';
+import { CloudSalesReadPanel } from './cloud/CloudSalesReadPanel';
 
-export const SalesView: React.FC = () => {
+// Cloud mode renders a READ-ONLY sales screen backed by the existing
+// public.list_sales_invoices RPC; the local implementation below is untouched.
+export const SalesView: React.FC<{ mode?: 'local' | 'cloud' }> = ({ mode = 'local' }) =>
+  mode === 'cloud' ? <CloudSalesReadPanel /> : <LocalSalesView />;
+
+const LocalSalesView: React.FC = () => {
   const db = erpDb.getSnapshot();
   // F15: UI gating — the service (AuthorizationService) remains the real boundary.
   const sessionRole = AuthService.getCurrentSession()?.user.role || 'Viewer';

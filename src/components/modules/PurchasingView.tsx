@@ -7,8 +7,10 @@ import {
 import { erpDb } from '../../services/db';
 import { WorkflowService } from '../../services/workflows';
 import { PaymentMethod } from '../../types/erp';
+import { resolveDataMode } from '../../data/mode';
+import { CloudPurchasingPanel } from './cloud/CloudPurchasingPanel';
 
-export const PurchasingView: React.FC = () => {
+const LocalPurchasingView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showCreateModal, setShowCreateModal] = useState(false);
   // QA-25: UI permission affordance (service authorization stays the real wall).
@@ -851,3 +853,7 @@ export const PurchasingView: React.FC = () => {
     </div>
   );
 };
+
+/** Cloud mode lists purchasing invoices from Supabase (read-only); local unchanged. */
+export const PurchasingView: React.FC = () =>
+  resolveDataMode() === 'cloud' ? <CloudPurchasingPanel /> : <LocalPurchasingView />;

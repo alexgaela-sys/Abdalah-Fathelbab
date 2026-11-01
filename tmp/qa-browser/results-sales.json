@@ -1,0 +1,212 @@
+[
+  {
+    "name": "config: target is TEST project",
+    "status": "PASS",
+    "detail": "project_ref=xrqksgjtqzddzqcwfnaj",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:17.313Z"
+  },
+  {
+    "name": "config: TEST account credentials present",
+    "status": "PASS",
+    "detail": "approved TEST account env keys present",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:17.315Z"
+  },
+  {
+    "name": "browser: chromium available",
+    "status": "PASS",
+    "detail": "chrome-linux64",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:17.577Z"
+  },
+  {
+    "name": "sales: write form offered to Super Admin",
+    "status": "PASS",
+    "detail": "post_sales_invoice_integrated form rendered",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:24.671Z"
+  },
+  {
+    "name": "sales: UI posts an invoice",
+    "status": "PASS",
+    "detail": "SINV-2026-00160 · COGS  · ",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:25.494Z"
+  },
+  {
+    "name": "db: invoice row is posted",
+    "status": "PASS",
+    "detail": "status=posted",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:26.565Z"
+  },
+  {
+    "name": "db: invoice has a linked journal entry",
+    "status": "PASS",
+    "detail": "journal_entry_id=jv-4265221e-a",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:26.565Z"
+  },
+  {
+    "name": "db: invoice warehouse is the picked one",
+    "status": "PASS",
+    "detail": "warehouse=qa-e2e-wh-01",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:26.566Z"
+  },
+  {
+    "name": "db: COGS recorded on the invoice",
+    "status": "PASS",
+    "detail": "cogs_total=352",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:26.566Z"
+  },
+  {
+    "name": "db: sales + COGS journals exist for the invoice",
+    "status": "PASS",
+    "detail": "count=2",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:27.625Z"
+  },
+  {
+    "name": "db: both journals posted and debit = credit",
+    "status": "PASS",
+    "detail": "JV-2026-00168|true|1094.40|1094.40 ; JV-2026-00169|true|352.00|352.00",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:27.625Z"
+  },
+  {
+    "name": "db: journal hits revenue / VAT / settlement / COGS / inventory",
+    "status": "PASS",
+    "detail": "accounts=[1105 QA, 1109, 2103 QA, 4101 QA, 5101]",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:28.685Z"
+  },
+  {
+    "name": "db: FIFO stock issue rows created",
+    "status": "PASS",
+    "detail": "rows=1 issued=32",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:29.711Z"
+  },
+  {
+    "name": "db: issued quantity matches the invoice line",
+    "status": "PASS",
+    "detail": "issued=32 expected=32",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:29.711Z"
+  },
+  {
+    "name": "db: FIFO plan matched the batch movement exactly",
+    "status": "PASS",
+    "detail": "plan=QA-B01-B×32@11 cost=352",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:30.775Z"
+  },
+  {
+    "name": "db: invoice COGS equals the FIFO layer cost",
+    "status": "PASS",
+    "detail": "cogs=352 fifoCost=352",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:30.776Z"
+  },
+  {
+    "name": "db: invoice line unit cost is the FIFO weighted cost",
+    "status": "PASS",
+    "detail": "line unit_cost=11 expected=11.000000",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:31.806Z"
+  },
+  {
+    "name": "db: movement row points at the first consumed FIFO layer",
+    "status": "PASS",
+    "detail": "row batch=QA-B01-B first layer=QA-B01-B",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:31.806Z"
+  },
+  {
+    "name": "db: one movement row per invoice line (documented aggregation)",
+    "status": "PASS",
+    "detail": "rows=1 fifo layers=1 — SQL documents \"one movement row per line, primary batch = first consumed layer, unit cost = weighted actual cost\"",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:31.807Z"
+  },
+  {
+    "name": "db: batch balances reduced",
+    "status": "PASS",
+    "detail": "before=[QA-B01-A:0, QA-B01-B:55] after=[QA-B01-A:0, QA-B01-B:23]",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:32.835Z"
+  },
+  {
+    "name": "db: no newer batch stocked while an older layer still holds stock",
+    "status": "FAIL",
+    "detail": "violations=0",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:33.869Z"
+  },
+  {
+    "name": "db: trial balance still balanced",
+    "status": "PASS",
+    "detail": "debit=21574.40 credit=21574.40",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:34.909Z"
+  },
+  {
+    "name": "db: ledger grew by the invoice and stayed balanced",
+    "status": "PASS",
+    "detail": "Δdebit=1446.40 Δcredit=1446.40",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:34.909Z"
+  },
+  {
+    "name": "db: exactly one new invoice created",
+    "status": "PASS",
+    "detail": "37 -> 38",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:35.941Z"
+  },
+  {
+    "name": "ui: replaying the same idempotency key returns the same invoice",
+    "status": "PASS",
+    "detail": "first=SINV-2026-00160 replay=SINV-2026-00160",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:37.544Z"
+  },
+  {
+    "name": "db: replay created no second invoice",
+    "status": "PASS",
+    "detail": "38 -> 38",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:37.544Z"
+  },
+  {
+    "name": "ui: double click posts exactly one invoice",
+    "status": "PASS",
+    "detail": "invoices 38 -> 39 · SINV-2026-00161",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:39.067Z"
+  },
+  {
+    "name": "net: sales screen writes through post_sales_invoice_integrated",
+    "status": "PASS",
+    "detail": "rpcs=[rpc/current_erp_role, rpc/list_sales_returns, rpc/list_sales_invoices, rpc/erp_core_master_read, rpc/post_sales_invoice_integrated]",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:39.069Z"
+  },
+  {
+    "name": "net: sales screen reads core.* through the approved bridge",
+    "status": "PASS",
+    "detail": "core bridge calls=6",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:39.069Z"
+  },
+  {
+    "name": "net: sales screen never touches public.erp_master_records",
+    "status": "PASS",
+    "detail": "no direct table read",
+    "cmd": "sales",
+    "at": "2026-10-27T09:56:39.069Z"
+  }
+]

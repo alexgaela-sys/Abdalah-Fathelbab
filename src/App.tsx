@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { erpDb } from './services/db';
-import { AuthService, AuthSession } from './services/auth';
-import { RoleName, User } from './types/erp';
+import { AuthService } from './services/auth';
+import type { RoleName, User } from './types/erp';
 import { PermissionService } from './services/permissions';
 import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
@@ -31,6 +31,10 @@ import { SettingsView } from './components/modules/SettingsView';
 import { AuditLogView } from './components/modules/AuditLogView';
 import { TestRunnerModal } from './components/modules/TestRunnerModal';
 
+// The LOCAL ERP (localStorage). This module is the default entry only when the
+// cloud project is not configured, or when the user explicitly asks for it with
+// ?local=1 — the cloud shell in components/modules/cloud/CloudApp.tsx is the
+// other entry point and never imports this file.
 export function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const session = AuthService.getCurrentSession();

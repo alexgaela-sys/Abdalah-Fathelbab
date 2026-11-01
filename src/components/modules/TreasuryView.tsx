@@ -10,7 +10,10 @@ import { WorkflowService } from '../../services/workflows';
 import { TreasuryLedgerService } from '../../services/ledger';
 import { printDocument } from '../printUtils';
 
-export const TreasuryView: React.FC = () => {
+import { resolveDataMode } from '../../data/mode';
+import { CloudPaymentsPanel } from './cloud/CloudOperationsPanels';
+
+const LocalTreasuryView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showAddModal, setShowAddModal] = useState(false);
   // QA-25: UI permission affordance (service authorization stays the real wall).
@@ -476,3 +479,7 @@ export const TreasuryView: React.FC = () => {
     </div>
   );
 };
+
+/** Cloud mode reads payments/receipts from Supabase (read-only); local unchanged. */
+export const TreasuryView: React.FC = () =>
+  resolveDataMode() === 'cloud' ? <CloudPaymentsPanel /> : <LocalTreasuryView />;

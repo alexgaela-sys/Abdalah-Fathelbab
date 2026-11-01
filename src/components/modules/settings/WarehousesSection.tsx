@@ -4,13 +4,21 @@ import React, { useState } from 'react';
 import { Boxes, Plus, Power, Save, Trash2 } from 'lucide-react';
 import { erpDb } from '../../../services/db';
 import {
-  CompanySettingsService, WAREHOUSE_TYPE_LABELS_AR, STOREKEEPER_ROLES,
+  CompanySettingsService,
+  WAREHOUSE_TYPE_LABELS_AR,
+  STOREKEEPER_ROLES,
 } from '../../../services/companySettings';
-import { Warehouse, WarehouseType } from '../../../types/erp';
+import { Warehouse, WarehouseType, User } from '../../../types/erp';
 import { SectionCard } from '../../ui';
+import { WarehousesCloudTestPanel } from './WarehousesCloudTestPanel';
 
 const EMPTY_FORM = {
-  code: '', nameAr: '', type: 'raw_materials' as WarehouseType, location: '', managerUserId: '', managerName: '',
+  code: '',
+  nameAr: '',
+  type: 'raw_materials' as WarehouseType,
+  location: '',
+  managerUserId: '',
+  managerName: '',
 };
 
 export const WarehousesSection: React.FC = () => {
@@ -21,7 +29,8 @@ export const WarehousesSection: React.FC = () => {
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
   const keepers = db.users.filter(u => STOREKEEPER_ROLES.includes(u.role));
-  const input = 'w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-slate-300';
+  const input =
+    'w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-slate-300';
 
   const openCreate = () => {
     setEditing(null);
@@ -32,176 +41,271 @@ export const WarehousesSection: React.FC = () => {
   const openEdit = (wh: Warehouse) => {
     setEditing(wh);
     setForm({
-      code: wh.code, nameAr: wh.nameAr, type: wh.type, location: wh.location || '',
-      managerUserId: wh.managerUserId || '', managerName: wh.managerName || '',
+      code: wh.code,
+      nameAr: wh.nameAr,
+      type: wh.type,
+      location: wh.location || '',
+      managerUserId: wh.managerUserId || '',
+      managerName: wh.managerName || '',
     });
     setShowForm(true);
   };
 
   const handleSave = () => {
-    const keeper = keepers.find(k => k.id === form.managerUserId);
+    if (!form.code.trim() || !form.nameAr.trim()) {
+      setMessage({ tone: 'error', text: 'الكود والاسم مطلوبان' });
+      return;
+    }
+    const keeper = keepers.find(k => k.id === (form.managerUserId || ''));
     const payload = {
-      code: form.code,
-      nameAr: form.nameAr,
+      code: form.code.trim(),
+      nameAr: form.nameAr.trim(),
       type: form.type,
-      location: form.location,
+      location: form.location.trim(),
       managerUserId: form.managerUserId || '',
-      managerName: keeper?.name || form.managerName,
+      managerName: keeper?.name || form.managerName || '',
     };
-    const res = editing
-      ? CompanySettingsService.updateWarehouse(editing.id, payload)
-      : CompanySettingsService.createWarehouse(payload);
+
+    if (editing) {
+      const res = CompanySettingsService.updateWarehouse(editing.id, payload);
+      if (!res.success) {
+        setMessage({ tone: 'error', text: res.error || 'تعذّر تعديل المستودع.' });
+        return;
+      }
+      setMessage({ tone: 'ok', text: 'تم تعديل المستودع بنجاح.' });
+      setEditing(null);
+      setShowForm(false);
+      return;
+    }
+
+    const res = CompanySettingsService.createWarehouse(payload);
     if (!res.success) {
-      setMessage({ tone: 'error', text: res.error || 'تعذر حفظ المستودع' });
+      setMessage({ tone: 'error', text: res.error || 'تعذّر إضافة المستودع.' });
       return;
     }
+    setMessage({ tone: 'ok', text: 'تم إضافة المستودع بنجاح.' });
     setShowForm(false);
+  };
+
+  const handleDiscard = () => {
     setEditing(null);
-    setMessage({ tone: 'ok', text: 'تم حفظ المستودع. الحركات والأرصدة التاريخية لم تتغير.' });
+    setShowForm(false);
+    setForm({ ...EMPTY_FORM });
+    setMessage(null);
   };
 
-  const handleToggle = (wh: Warehouse) => {
-    const reason = wh.active
-      ? window.prompt('سبب تعطيل المستودع (اختياري) — لن تُحذف أي حركة تاريخية:', 'تعطيل مؤقت')
-      : '';
-    if (wh.active && reason === null) return;
-    const res = CompanySettingsService.setWarehouseActive(wh.id, !wh.active, { reason: reason || undefined });
-    setMessage(res.success
-      ? { tone: 'ok', text: wh.active ? 'تم تعطيل المستودع — السجلات التاريخية محفوظة كما هي.' : 'تم تنشيط المستودع.' }
-      : { tone: 'error', text: res.error || 'تعذر تغيير حالة المستودع' });
-  };
-
-  const handleDelete = (wh: Warehouse) => {
-    const usage = CompanySettingsService.getWarehouseUsage(wh.id);
-    if (usage.total > 0 || usage.stockQuantity > 0) {
-      setMessage({
-        tone: 'error',
-        text: `لا يمكن حذف (${wh.code}): يوجد ${usage.batches} دفعة/صنف و${usage.inventoryTransactions} حركة مخزنية و${usage.salesInvoices} فاتورة بيع مرتبطة به. استخدم التعطيل.`,
-      });
+  const confirmDelete = (wh: Warehouse) => {
+    if (!confirm(`حذف المستودع ${wh.code} (${wh.nameAr})؟ لا يمكن التراجع.`)) return;
+    const res = CompanySettingsService.deleteWarehouse(wh.id);
+    if (!res.success) {
+      alert(res.error);
       return;
     }
-    if (!window.confirm(`حذف المستودع (${wh.code}) نهائيًا؟ لا توجد أي حركات مرتبطة به.`)) return;
-    const res = CompanySettingsService.deleteWarehouse(wh.id);
-    setMessage(res.success
-      ? { tone: 'ok', text: 'تم حذف المستودع غير المستخدم.' }
-      : { tone: 'error', text: res.error || 'تعذر حذف المستودع' });
+    setMessage({ tone: 'ok', text: `تم حذف المستودع ${wh.code}.` });
   };
+
+  function keeperOption(k: User) {
+    return (
+      <option key={k.id} value={k.id}>
+        {k.name} ({k.role === 'Warehouse Manager' ? 'مدير مخازن' : 'أمين مخزن'})
+      </option>
+    );
+  }
 
   return (
-    <SectionCard
-      title="المستودعات"
-      hint="تعديل الاسم المعروض، إضافة مستودعات، تعطيل غير المستخدم، ومنع الحذف عند وجود حركات"
-      icon={Boxes}
-      headerAction={
-        <button onClick={openCreate} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs cursor-pointer">
-          <Plus className="w-3.5 h-3.5" /> إضافة مستودع
-        </button>
-      }
-    >
+    <SectionCard title="المستودعات">
       {message && (
-        <div className={`mb-4 p-3 rounded-xl text-xs font-bold border ${message.tone === 'ok' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
+        <div
+          className={`mb-4 p-3 rounded-xl text-xs font-bold ${
+            message.tone === 'ok'
+              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+              : 'bg-rose-50 text-rose-800 border border-rose-200'
+          }`}
+        >
           {message.text}
         </div>
       )}
-
-      <div className="overflow-x-auto rounded-xl border border-slate-200">
-        <table className="w-full text-right text-xs min-w-[760px]">
-          <thead className="bg-slate-100 text-slate-700 font-bold">
-            <tr>
-              <th className="p-3">الكود</th>
-              <th className="p-3">الاسم المعروض</th>
-              <th className="p-3">النوع</th>
-              <th className="p-3">الموقع</th>
-              <th className="p-3">أمين المستودع</th>
-              <th className="p-3 text-center">الحركات</th>
-              <th className="p-3 text-center">الحالة</th>
-              <th className="p-3 text-center">إجراءات</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {db.warehouses.map(wh => {
-              const usage = CompanySettingsService.getWarehouseUsage(wh.id);
-              return (
-                <tr key={wh.id} className={wh.active ? 'hover:bg-slate-50' : 'bg-slate-50/60 text-slate-400'}>
-                  <td className="p-3 font-mono font-black text-slate-900">{wh.code}</td>
-                  <td className="p-3 font-bold text-slate-800">{wh.nameAr}</td>
-                  <td className="p-3">{WAREHOUSE_TYPE_LABELS_AR[wh.type] || wh.type}</td>
-                  <td className="p-3">{wh.location || '—'}</td>
-                  <td className="p-3">{wh.managerName || '—'}</td>
-                  <td className="p-3 text-center font-mono text-[11px]">{usage.total}</td>
-                  <td className="p-3 text-center">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${wh.active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
-                      {wh.active ? 'نشط' : 'معطل'}
-                    </span>
-                  </td>
-                  <td className="p-3">
-                    <div className="flex items-center justify-center gap-1">
-                      <button onClick={() => openEdit(wh)} className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer">تعديل</button>
-                      <button onClick={() => handleToggle(wh)} className={`px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer ${wh.active ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
-                        {wh.active ? 'تعطيل' : 'تنشيط'}
-                      </button>
-                      <button onClick={() => handleDelete(wh)} className="px-2 py-1 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 text-[10px] font-bold cursor-pointer">حذف</button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="text-xs text-slate-500">
+          <span className="text-slate-400">وضع محلي — تُدار المستودعات من قاعدة البيانات المحلية</span>
+        </div>
+        <button
+          onClick={openCreate}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold hover:bg-slate-800 transition cursor-pointer"
+        >
+          <Plus className="w-3.5 h-3.5" /> إضافة مستودع
+        </button>
       </div>
 
-      <p className="mt-3 text-[11px] text-slate-500 leading-relaxed">
-        تغيير الاسم أو الكود لا يعيد كتابة أي فاتورة أو حركة سابقة — المستندات تحتفظ بمعرّف المستودع الأصلي.
-        الحذف متاح فقط للمستودعات التي لا تحتوي أي دفعات أو حركات أو فواتير أو أوامر إنتاج، وإلا فيجب التعطيل.
-      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {db.warehouses.map((wh) => (
+          <WarehouseCard
+            key={wh.id}
+            warehouse={wh}
+            editing={editing?.id === wh.id}
+            onEdit={() => openEdit(wh)}
+            onDiscard={handleDiscard}
+            onSave={handleSave}
+            onDelete={() => confirmDelete(wh)}
+            input={input}
+            form={form}
+            setForm={setForm}
+            keepers={keepers}
+            keeperOption={keeperOption}
+          />
+        ))}
+      </div>
 
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg p-6 text-right space-y-3">
-            <h3 className="font-black text-sm text-slate-900 pb-2 border-b border-slate-200">
-              {editing ? `تعديل المستودع ${editing.code}` : 'إضافة مستودع جديد'}
-            </h3>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">الكود *</label>
-                <input className={input} dir="ltr" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 mb-1">النوع</label>
-                <select className={input} value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as WarehouseType }))}>
-                  {(Object.keys(WAREHOUSE_TYPE_LABELS_AR) as WarehouseType[]).map(t => (
-                    <option key={t} value={t}>{WAREHOUSE_TYPE_LABELS_AR[t]}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">الاسم المعروض *</label>
-              <input className={input} value={form.nameAr} onChange={e => setForm(f => ({ ...f, nameAr: e.target.value }))} />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">الموقع</label>
-              <input className={input} value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">أمين المستودع</label>
-              <select className={input} value={form.managerUserId} onChange={e => setForm(f => ({ ...f, managerUserId: e.target.value }))}>
-                <option value="">— بدون ربط —</option>
-                {keepers.map(k => (
-                  <option key={k.id} value={k.id}>{k.name} ({k.role === 'Warehouse Manager' ? 'مدير مخازن' : 'أمين مخزن'})</option>
-                ))}
-              </select>
-              {keepers.length === 0 && <p className="text-[10px] text-amber-700 mt-1">أضف أمناء المخازن من تبويب «أمناء المخازن» لربطهم هنا.</p>}
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setShowForm(false)} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-bold text-xs cursor-pointer">إلغاء</button>
-              <button onClick={handleSave} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs cursor-pointer">
-                <Save className="w-3.5 h-3.5" /> حفظ
-              </button>
-            </div>
-          </div>
+      {db.warehouses.length === 0 && (
+        <div className="p-6 text-center text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl">
+          لم تُضاف مستودعات بعد.
         </div>
       )}
+
+      {/* Cloud TEST mode: reads/writes Supabase TEST only. It never uploads,
+          replaces or merges the local warehouses rendered above. */}
+      <WarehousesCloudTestPanel localCount={db.warehouses.length} />
     </SectionCard>
   );
 };
+
+type WarehouseCardProps = {
+  warehouse: Warehouse;
+  editing: boolean;
+  onEdit: () => void;
+  onDiscard: () => void;
+  onSave: () => void;
+  onDelete: () => void;
+  input: string;
+  form: typeof EMPTY_FORM;
+  setForm: React.Dispatch<React.SetStateAction<typeof EMPTY_FORM>>;
+  keepers: User[];
+  keeperOption: (k: User) => React.ReactElement;
+};
+
+export function WarehouseCard({
+  warehouse,
+  editing,
+  onEdit,
+  onDiscard,
+  onSave,
+  onDelete,
+  input,
+  form,
+  setForm,
+  keepers,
+  keeperOption,
+}: WarehouseCardProps) {
+  const selectedKeeperId = form.managerUserId || '';
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+      {editing ? (
+        <div className="p-3 space-y-2 border-b border-slate-200">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">كود المستودع</label>
+              <input
+                type="text"
+                value={form.code}
+                onChange={(e) => setForm({ ...form, code: e.target.value })}
+                className={input}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-600 mb-1">نوع المستودع</label>
+              <select
+                value={form.type}
+                onChange={(e) => setForm({ ...form, type: e.target.value as WarehouseType })}
+                className={input}
+              >
+                {Object.entries(WAREHOUSE_TYPE_LABELS_AR).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-600 mb-1">أمين المستودع</label>
+            <select
+              value={selectedKeeperId}
+              onChange={(e) => setForm({ ...form, managerUserId: e.target.value })}
+              className={input}
+            >
+              <option value="">— بدون ربط —</option>
+              {keepers.length === 0 ? (
+                <option disabled>— لا يوجد أمناء —</option>
+              ) : (
+                keepers.map(keeperOption)
+              )}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-600 mb-1">الاسم بالعربية</label>
+            <input
+              type="text"
+              value={form.nameAr}
+              onChange={(e) => setForm({ ...form, nameAr: e.target.value })}
+              className={input}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-slate-600 mb-1">الموقع</label>
+            <input
+              type="text"
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+              className={input}
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onDiscard}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+            >
+              إلغاء
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer"
+            >
+              <Save className="w-3 h-3 inline mr-1" /> حفظ
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="p-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Boxes className="w-4 h-4 text-slate-500 shrink-0" />
+              <span className="font-bold text-xs text-slate-900">{warehouse.code}</span>
+              <span className="text-[10px] text-slate-500">{warehouse.nameAr}</span>
+            </div>
+            <div className="text-[10px] text-slate-500 mt-0.5">
+              {warehouse.location && `${warehouse.location} — `}
+              {WAREHOUSE_TYPE_LABELS_AR[warehouse.type] || warehouse.type}
+            </div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={onEdit}
+              className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 text-xs transition cursor-pointer"
+              title="تعديل"
+            >
+              <Power className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onDelete}
+              className="p-1.5 rounded-lg text-slate-500 hover:bg-rose-50 text-xs transition cursor-pointer"
+              title="حذف"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

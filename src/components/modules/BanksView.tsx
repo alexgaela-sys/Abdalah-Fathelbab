@@ -9,8 +9,10 @@ import { BankAccount } from '../../types/erp';
 import { AccountingEngine } from '../../services/accounting';
 import { WorkflowService } from '../../services/workflows';
 import { printDocument } from '../printUtils';
+import { resolveDataMode } from '../../data/mode';
+import { CloudBanksPanel } from './cloud/CloudFinanceReadPanels';
 
-export const BanksView: React.FC = () => {
+const LocalBanksView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [selectedBankId, setSelectedBankId] = useState<string>(db.bankAccounts[0]?.id || '');
   const [showAddTxModal, setShowAddTxModal] = useState(false);
@@ -684,3 +686,7 @@ export const BanksView: React.FC = () => {
     </div>
   );
 };
+
+/** Cloud mode reads bank accounts/transactions from Supabase (read-only); local unchanged. */
+export const BanksView: React.FC = () =>
+  resolveDataMode() === 'cloud' ? <CloudBanksPanel /> : <LocalBanksView />;

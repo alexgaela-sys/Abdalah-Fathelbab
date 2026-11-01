@@ -1,0 +1,11 @@
+{
+  "prepared": true,
+  "configured": true,
+  "table_available": false,
+  "inserted": false,
+  "read_back": false,
+  "verified": false,
+  "deleted": false,
+  "detail": "مانع حقيقي: لا يمكن إنشاء جدول الاختبار أو الوصول إليه: فشل إنشاء جدول الاختبار: Could not find the function public.erp_cloud_create_test_table(p_table_name) in the schema cache",
+  "records": []
+}

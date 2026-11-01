@@ -1,0 +1,2 @@
+// Vacancies placeholder
+module.exports = [];

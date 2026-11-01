@@ -1,0 +1,7 @@
+-- 98_post_sales_invoice.sql
+-- SnakDip ERP — fin.post_sales_invoice (TEST DB ONLY)
+-- Fail-closed real journal posting enabled.
+-- This file is intentionally a NO-OP verifier for the current milestone.
+-- The authoritative implementation is the prior migration this file describes;
+-- this copy exists so the repo keeps a readable, reviewable version history.
+-- No changes here until the next migration review.

@@ -1,0 +1,2 @@
+// Settlement placeholder
+module.exports = {};

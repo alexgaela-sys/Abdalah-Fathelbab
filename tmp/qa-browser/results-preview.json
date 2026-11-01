@@ -1,0 +1,16 @@
+[
+  {
+    "name": "preview: server responds",
+    "status": "PASS",
+    "detail": "GET / -> 200",
+    "cmd": "preview",
+    "at": "2026-10-27T19:23:48.545Z"
+  },
+  {
+    "name": "preview: app module served",
+    "status": "PASS",
+    "detail": "GET /src/main.tsx -> 200",
+    "cmd": "preview",
+    "at": "2026-10-27T19:23:48.548Z"
+  }
+]

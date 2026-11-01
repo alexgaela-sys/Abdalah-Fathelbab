@@ -1,0 +1,2 @@
+// Presets placeholder
+module.exports = {};

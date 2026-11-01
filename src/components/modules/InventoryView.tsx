@@ -9,10 +9,12 @@ import { InventoryEngine } from '../../services/inventory';
 import { WorkflowService } from '../../services/workflows';
 import ItemCardReport from './ItemCardReport';
 import { printDocument } from '../printUtils';
+import { resolveDataMode } from '../../data/mode';
+import { CloudInventoryPanel } from './cloud/CloudInventoryPanel';
 
 type InventoryTab = 'balances' | 'ledger' | 'item_card' | 'transfers' | 'physical_count' | 'scrap_sales';
 
-export const InventoryView: React.FC<{
+const LocalInventoryView: React.FC<{
   initialTab?: InventoryTab;
   initialWarehouseId?: string;
 }> = ({ initialTab, initialWarehouseId }) => {
@@ -845,3 +847,9 @@ export const InventoryView: React.FC<{
     </div>
   );
 };
+
+/** Cloud mode reads stock/movements/batches from Supabase (read-only); local unchanged. */
+export const InventoryView: React.FC<{
+  initialTab?: InventoryTab;
+  initialWarehouseId?: string;
+}> = () => (resolveDataMode() === 'cloud' ? <CloudInventoryPanel /> : <LocalInventoryView />);

@@ -13,6 +13,12 @@ import { CompanySettingsSection } from './settings/CompanySettingsSection';
 import { WarehousesSection } from './settings/WarehousesSection';
 import { StorekeepersSection } from './settings/StorekeepersSection';
 import { InvoiceDesignSection } from './settings/InvoiceDesignSection';
+import { CloudDataStatus } from './CloudDataStatus';
+import { CompanyCloudPanel } from './cloud/CompanyCloudPanel';
+import { WarehousesCloudPanel } from './cloud/WarehousesCloudPanel';
+import { AccountMappingsCloudPanel } from './cloud/AccountMappingsCloudPanel';
+import { resolveDataMode } from '../../data/mode';
+import { CloudUnavailablePanel } from './cloud/CloudUnavailablePanel';
 
 interface SettingsViewProps {
   openTestRunner?: () => void;
@@ -195,13 +201,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
         ))}
       </div>
 
-      {activeTab === 'company' && <CompanySettingsSection />}
-      {activeTab === 'warehouses' && <WarehousesSection />}
-      {activeTab === 'storekeepers' && <StorekeepersSection />}
-      {activeTab === 'invoice' && <InvoiceDesignSection />}
+      {activeTab === 'company' && (resolveDataMode() === 'cloud' ? <CompanyCloudPanel /> : <CompanySettingsSection />)}
+      {activeTab === 'warehouses' && (resolveDataMode() === 'cloud' ? <WarehousesCloudPanel /> : <WarehousesSection />)}
+      {resolveDataMode() === 'cloud' &&
+        ['storekeepers', 'invoice', 'products', 'data'].includes(activeTab) && (
+          <CloudUnavailablePanel tab={activeTab} />
+        )}
+      {activeTab === 'storekeepers' && resolveDataMode() !== 'cloud' && <StorekeepersSection />}
+      {activeTab === 'invoice' && resolveDataMode() !== 'cloud' && <InvoiceDesignSection />}
 
       {/* 1. Products Master */}
-      {activeTab === 'products' && (
+      {activeTab === 'products' && resolveDataMode() !== 'cloud' && (
         <div className="space-y-4">
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex justify-between items-center">
             <div>
@@ -272,7 +282,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
       )}
 
       {/* 4. Account Mappings */}
-      {activeTab === 'mappings' && (
+      {activeTab === 'mappings' && (resolveDataMode() === 'cloud' ? <AccountMappingsCloudPanel /> : (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-4 bg-slate-50 border-b border-slate-200">
             <h3 className="font-bold text-xs text-slate-800">ربط وتوجيه الحسابات الآلية (Account Mappings)</h3>
@@ -299,7 +309,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
                         value={accId}
                         onChange={(e) => {
                           const newAccId = e.target.value;
-                          // F15: guarded service write.
                           const res = MasterDataService.updateAccountMapping(key, newAccId, {
                             userId: 'usr-admin', userName: 'المشرف العام (Admin)',
                           });
@@ -321,11 +330,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ openTestRunner }) =>
             </tbody>
           </table>
         </div>
-      )}
+      ))}
 
       {/* 5. Requirement 11: Test Data & System Backup Management */}
-      {activeTab === 'data' && (
+      {activeTab === 'data' && resolveDataMode() !== 'cloud' && (
         <div className="space-y-5 max-w-3xl">
+          {/* Data source proof: repository layer (local vs cloud) */}
+          <CloudDataStatus />
+
           {/* Clear Test Data Card */}
           <div className="bg-white p-6 rounded-2xl border border-amber-200 shadow-xs space-y-3">
             <div className="flex items-center gap-3 pb-3 border-b border-slate-100">

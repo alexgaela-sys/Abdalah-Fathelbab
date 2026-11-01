@@ -1,0 +1,2 @@
+// Contracts placeholder
+module.exports = [];

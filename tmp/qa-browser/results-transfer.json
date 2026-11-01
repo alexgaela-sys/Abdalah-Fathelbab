@@ -1,0 +1,93 @@
+[
+  {
+    "name": "config: target is TEST project",
+    "status": "PASS",
+    "detail": "project_ref=xrqksgjtqzddzqcwfnaj",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:23.513Z"
+  },
+  {
+    "name": "config: TEST account credentials present",
+    "status": "PASS",
+    "detail": "approved TEST account env keys present",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:23.515Z"
+  },
+  {
+    "name": "browser: chromium available",
+    "status": "PASS",
+    "detail": "chrome-linux64",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:23.778Z"
+  },
+  {
+    "name": "transfer: form offered to Super Admin",
+    "status": "PASS",
+    "detail": "form rendered",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:29.778Z"
+  },
+  {
+    "name": "ui: transfer posted from the screen",
+    "status": "PASS",
+    "detail": "تم التحويل على الخادم — رقم المستند TRF-20261027-000011",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:30.375Z"
+  },
+  {
+    "name": "db: source balance decreased by 4",
+    "status": "PASS",
+    "detail": "30 -> 26",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:32.476Z"
+  },
+  {
+    "name": "db: target balance holds the received qty",
+    "status": "PASS",
+    "detail": "QA-WHS-02=4",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:32.476Z"
+  },
+  {
+    "name": "db: transfer wrote an out row and an in row",
+    "status": "PASS",
+    "detail": "qa-e2e-wh-01|0|4 ; qa-e2e-wh-02|4|0",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:33.521Z"
+  },
+  {
+    "name": "db: transfer rows are balanced",
+    "status": "PASS",
+    "detail": "out=4 in=4",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:33.522Z"
+  },
+  {
+    "name": "db: exactly two new movement rows",
+    "status": "PASS",
+    "detail": "16 -> 18",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:34.569Z"
+  },
+  {
+    "name": "db: transfer recorded an idempotency key",
+    "status": "PASS",
+    "detail": "rows=1",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:35.610Z"
+  },
+  {
+    "name": "db: trial balance untouched/balanced after transfer",
+    "status": "PASS",
+    "detail": "debit=21710.00 credit=21710.00",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:36.668Z"
+  },
+  {
+    "name": "net: transfer writes through post_inventory_transfer",
+    "status": "PASS",
+    "detail": "rpcs=[rpc/current_erp_role, rpc/list_inventory_transactions, rpc/list_inventory_batches, rpc/stock_on_hand, rpc/erp_core_master_read, rpc/post_inventory_transfer]",
+    "cmd": "transfer",
+    "at": "2026-10-27T09:59:36.669Z"
+  }
+]

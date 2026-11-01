@@ -1,0 +1,2 @@
+// Jobs placeholder
+module.exports = [];

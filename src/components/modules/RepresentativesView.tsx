@@ -42,7 +42,10 @@ export function custodyUnitLabel(
   return names.length > 0 ? names.join(' / ') : 'قطعة';
 }
 
-export const RepresentativesView: React.FC = () => {
+import { resolveDataMode } from '../../data/mode';
+import { CloudCustodyPanel } from './cloud/CloudOperationsPanels';
+
+const LocalRepresentativesView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [activeTab, setActiveTab] = useState<'custody' | 'profitability' | 'reps'>('custody');
   const [showOpenCustodyModal, setShowOpenCustodyModal] = useState(false);
@@ -826,3 +829,7 @@ export const RepresentativesView: React.FC = () => {
     </div>
   );
 };
+
+/** Cloud mode reads custody documents from Supabase (read-only); local unchanged. */
+export const RepresentativesView: React.FC = () =>
+  resolveDataMode() === 'cloud' ? <CloudCustodyPanel /> : <LocalRepresentativesView />;

@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Menu, Bell, ChevronDown,
   Calendar, LogOut, Check, UserCheck, Settings
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { InventoryEngine } from '../../services/inventory';
+import { resolveDataMode } from '../../data/mode';
+import { repositories } from '../../data/repositories';
 import { RoleName, User } from '../../types/erp';
 import { UserProfileModal } from '../auth/UserProfileModal';
 
@@ -29,9 +31,40 @@ export const Header: React.FC<HeaderProps> = ({
   const [showRoleMenu, setShowRoleMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
 
+  // Header chrome must not show the local snapshot in cloud data mode.
+  const dataModeCloud = resolveDataMode() === 'cloud';
   const db = erpDb.getSnapshot();
-  const expiringBatches = InventoryEngine.getExpiringBatches(10);
+  const [cloudCompany, setCloudCompany] = useState<{ nameAr: string; usdRate: number } | null>(null);
+  const [cloudPeriodName, setCloudPeriodName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!dataModeCloud) return;
+    let alive = true;
+    void repositories().getCompany().then((result) => {
+      if (!alive) return;
+      if (result.ok && result.data) {
+        setCloudCompany({ nameAr: result.data.nameAr, usdRate: result.data.usdRate });
+      }
+    });
+    void repositories().listAccountingPeriods().then((result) => {
+      if (!alive) return;
+      if (result.ok) {
+        const open = result.data.find((p) => !p.isClosed);
+        setCloudPeriodName(open ? open.nameAr : 'لا توجد فترة مفتوحة');
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [dataModeCloud]);
+
+  const expiringBatches = dataModeCloud ? [] : InventoryEngine.getExpiringBatches(10);
   const currentPeriod = db.accountingPeriods.find(p => !p.isClosed);
+  const companyNameAr = dataModeCloud ? (cloudCompany?.nameAr ?? '—') : db.company.nameAr;
+  const usdRate = dataModeCloud ? cloudCompany?.usdRate : db.company.currentUsdExchangeRate;
+  const periodName = dataModeCloud
+    ? (cloudPeriodName ?? '—')
+    : currentPeriod ? currentPeriod.nameAr : 'لا توجد فترة مفتوحة';
 
   const roles: RoleName[] = [
     'Super Admin',
@@ -63,10 +96,10 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           </div>
           <span className="text-sm font-black text-ink-900 truncate">
-            {db.company.nameAr}
+            {companyNameAr}
           </span>
           <span className="hidden xl:inline-flex text-[11px] px-2.5 py-1 rounded-full bg-cream-100 text-cream-800 border border-cream-300 font-bold">
-            سعر الصرف: {db.company.currentUsdExchangeRate.toFixed(2)} ج.م / USD
+            سعر الصرف: {usdRate === undefined ? '—' : usdRate.toFixed(2)} ج.م / USD
           </span>
         </div>
       </div>
@@ -78,7 +111,7 @@ export const Header: React.FC<HeaderProps> = ({
           <Calendar className="w-3.5 h-3.5 text-brand-600" />
           <span className="text-cream-700">الفترة المحاسبية:</span>
           <span className="font-black text-emerald-700">
-            {currentPeriod ? currentPeriod.nameAr : 'لا توجد فترة مفتوحة'}
+            {periodName}
           </span>
         </div>
 

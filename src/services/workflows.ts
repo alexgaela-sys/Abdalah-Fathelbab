@@ -2,6 +2,7 @@
 // Every workflow is atomic: all validation happens BEFORE any mutation, and each posted
 // document produces balanced accounting via AccountingEngine (AccountMapping-driven).
 import { erpDb, generateErpId, nextDocNumber, getUnitConversion } from './db';
+import { resolveDataMode } from '../data/mode';
 import { 
   PurchaseInvoice, PurchaseInvoiceLine, SalesInvoice, SalesInvoiceLine, 
   Payment, Cheque, ChequeStatus, QualityInspection, InventoryCount, InventoryCountLine, 
@@ -355,6 +356,13 @@ export class WorkflowService {
     userName?: string;
     isTest?: boolean;
   }): { success: boolean; invoice?: SalesInvoice; creditWarning?: string; error?: string } {
+    // In cloud mode, the UI route is through postSalesInvoice (the cloud RPC
+    // wrapper) which calls fin.post_sales_invoice. The local app store path
+    // below is preserved exactly for the non-cloud / Preview paths and must not
+    // be reused by cloud code paths.
+    if (resolveDataMode() === 'cloud') {
+      return { success: false, error: 'Cloud invoice submission is handled by the cloud RPC path.' };
+    }
     // RBAC: creating sales invoices requires 'create' on sales
     const guard = AuthorizationService.enforce('sales', 'create', { userId: params.userId, userName: params.userName, isTest: params.isTest });
     if (!guard.allowed) return { success: false, error: guard.error };

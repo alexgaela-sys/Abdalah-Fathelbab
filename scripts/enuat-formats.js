@@ -1,0 +1,2 @@
+// Formats placeholder
+module.exports = {};

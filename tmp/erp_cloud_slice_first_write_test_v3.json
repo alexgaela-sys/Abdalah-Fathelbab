@@ -1,0 +1,11 @@
+{
+  "prepared": true,
+  "configured": true,
+  "table_available": false,
+  "inserted": false,
+  "read_back": false,
+  "verified": false,
+  "deleted": false,
+  "detail": "مانع حقيقي: فشل فحص/إنشاء جدول الاختبار: فشل فحص وجود الجدول: Could not find the table 'public.information_schema.tables' in the schema cache",
+  "records": []
+}

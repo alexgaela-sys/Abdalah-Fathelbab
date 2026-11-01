@@ -1,0 +1,65 @@
+[
+  {
+    "name": "config: target is TEST project",
+    "status": "PASS",
+    "detail": "project_ref=xrqksgjtqzddzqcwfnaj",
+    "cmd": "screens",
+    "at": "2026-10-27T11:43:48.816Z"
+  },
+  {
+    "name": "config: TEST account credentials present",
+    "status": "PASS",
+    "detail": "approved TEST account env keys present",
+    "cmd": "screens",
+    "at": "2026-10-27T11:43:48.817Z"
+  },
+  {
+    "name": "browser: chromium available",
+    "status": "PASS",
+    "detail": "chrome-linux64",
+    "cmd": "screens",
+    "at": "2026-10-27T11:43:49.057Z"
+  },
+  {
+    "name": "screens: local localStorage fingerprint captured in this context",
+    "status": "PASS",
+    "detail": "keys=2 bytes=52243 hash=5f39eadc",
+    "cmd": "screens",
+    "at": "2026-10-27T11:43:52.239Z"
+  },
+  {
+    "name": "screens: navigation list read from main.tsx",
+    "status": "PASS",
+    "detail": "21 screens",
+    "cmd": "screens",
+    "at": "2026-10-27T11:43:52.239Z"
+  },
+  {
+    "name": "screens: every cloud screen loads for the approved account",
+    "status": "PASS",
+    "detail": "21/21 rendered",
+    "cmd": "screens",
+    "at": "2026-10-27T11:46:29.099Z"
+  },
+  {
+    "name": "screens: no cloud screen reads public.erp_master_records directly",
+    "status": "PASS",
+    "detail": "none",
+    "cmd": "screens",
+    "at": "2026-10-27T11:46:29.100Z"
+  },
+  {
+    "name": "screens: master pickers go through erp_core_master_read",
+    "status": "FAIL",
+    "detail": "no bridge on: sales",
+    "cmd": "screens",
+    "at": "2026-10-27T11:46:29.100Z"
+  },
+  {
+    "name": "screens: screens exposing a write form",
+    "status": "FAIL",
+    "detail": "none",
+    "cmd": "screens",
+    "at": "2026-10-27T11:46:29.100Z"
+  }
+]

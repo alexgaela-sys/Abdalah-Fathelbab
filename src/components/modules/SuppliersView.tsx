@@ -1,17 +1,26 @@
 import React, { useState, useMemo } from 'react';
 import { useModuleWriteAccess } from '../../hooks/usePermissions';
-import { 
-  Truck, Plus, Search, FileText, Phone, 
+import {
+  Truck, Plus, Search, FileText, Phone,
   MapPin, DollarSign, ArrowUpRight, ArrowDownLeft,
   Calendar, Printer, Download, Filter, CheckCircle2, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import { erpDb } from '../../services/db';
+import { resolveDataMode } from '../../data/mode';
+import { CloudMasterReadPanel } from './cloud/CloudMasterReadPanel';
 import { Supplier } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
 import { MasterDataService } from '../../services/masterData';
 import { printDocument } from '../printUtils';
 
-export const SuppliersView: React.FC = () => {
+export const SuppliersView: React.FC<{ mode?: 'local' | 'cloud' }> = ({ mode = 'local' }) =>
+  mode === 'cloud' || resolveDataMode() === 'cloud' ? (
+    <CloudMasterReadPanel entity="suppliers" title="إدارة الموردين" schemaTable="core.suppliers" />
+  ) : (
+    <LocalSuppliersView />
+  );
+
+const LocalSuppliersView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [activeTab, setActiveTab] = useState<'list' | 'statement'>('list');
   const [searchQuery, setSearchQuery] = useState('');

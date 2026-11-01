@@ -1,0 +1,114 @@
+[
+  {
+    "name": "config: target is TEST project",
+    "status": "PASS",
+    "detail": "project_ref=xrqksgjtqzddzqcwfnaj",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:07.873Z"
+  },
+  {
+    "name": "config: TEST account credentials present",
+    "status": "PASS",
+    "detail": "approved TEST account env keys present",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:07.875Z"
+  },
+  {
+    "name": "browser: chromium available",
+    "status": "PASS",
+    "detail": "chrome-linux64",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:08.127Z"
+  },
+  {
+    "name": "reject: quantity beyond available stock refused",
+    "status": "PASS",
+    "detail": "لم تُرحَّل الفاتورة — تراجع الخادم بالكامل تعذّر ترحيل الفاتورة سحابيًا: الرصيد المتاح من الصنف (qa-item-02) في المستودع هو 0 ولا يكفي لصرف 99999 (نقص 99973) — لم يتم أي تعديل (الرصيد المتاح من الصنف (qa-item-02) في المستودع هو 0 ولا يكفي لصرف 99999 (نقص 99973",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:15.834Z"
+  },
+  {
+    "name": "reject: oversell wrote no invoice",
+    "status": "PASS",
+    "detail": "39 -> 39",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:15.834Z"
+  },
+  {
+    "name": "reject: closed accounting period refused",
+    "status": "PASS",
+    "detail": "لم تُرحَّل الفاتورة — تراجع الخادم بالكامل تعذّر ترحيل الفاتورة سحابيًا: the accounting period covering 2026-09-15 is closed — invoice SINV-2026-00167 was not posted and nothing was written (the accounting period covering 2026-09-15 is closed — invoice SINV-20",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:18.947Z"
+  },
+  {
+    "name": "reject: closed-period posting wrote nothing",
+    "status": "PASS",
+    "detail": "invoices=39 septRows=0",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:18.947Z"
+  },
+  {
+    "name": "guard: QA-2026-09-CLOSED is still closed",
+    "status": "PASS",
+    "detail": "is_closed rows=1",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:20.050Z"
+  },
+  {
+    "name": "fixture: TEST profile read as Viewer for this session",
+    "status": "PASS",
+    "detail": "role=Viewer",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:23.151Z"
+  },
+  {
+    "name": "reject: TEST account signs in for the Viewer session",
+    "status": "PASS",
+    "detail": "session acquired",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:26.020Z"
+  },
+  {
+    "name": "reject: role resolves to Viewer",
+    "status": "PASS",
+    "detail": "role=Viewer",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:28.525Z"
+  },
+  {
+    "name": "reject: sales write form NOT offered to Viewer",
+    "status": "PASS",
+    "detail": "submit buttons=0",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:28.537Z"
+  },
+  {
+    "name": "reject: Viewer sees the explicit authorization message",
+    "status": "PASS",
+    "detail": "message=1",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:28.541Z"
+  },
+  {
+    "name": "reject: SERVER refuses the integrated sales posting for Viewer",
+    "status": "PASS",
+    "detail": "rpc 200 [{\"out_invoice_number\":null,\"out_cogs\":null,\"out_journal_number\":null,\"out_status\":\"error\",\"out_success\":false,\"out_error\":\"unauthorized: ERP role for this user may not post sales journals\"}]",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:29.200Z"
+  },
+  {
+    "name": "reject: Viewer session left the ledger untouched",
+    "status": "PASS",
+    "detail": "invoices=39 -> 39",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:30.235Z"
+  },
+  {
+    "name": "guard: TEST profile role restored to Super Admin",
+    "status": "PASS",
+    "detail": "role=Super Admin",
+    "cmd": "reject",
+    "at": "2026-10-27T10:15:32.395Z"
+  }
+]
