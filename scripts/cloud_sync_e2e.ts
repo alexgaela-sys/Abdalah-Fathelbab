@@ -148,8 +148,10 @@ check('import is resumable: running it again inserts nothing', imp2.inserted ===
 const again = await A.connect();
 check('connect after import is not empty', again.empty === false);
 const d1 = diffDbs(erpDb.getSnapshot(), seed);
-check('loaded data equals what was imported (all collections except users — users stay device-local; the server has 0 users records while the local seed has 1, which is expected because users are not synced)', d1.content.length === 1 && d1.content[0] === 'users: 0 vs 1 records', 'all diff: ' + d1.content.join('; '));
-console.log('E2E Section 1 PASSED: import + reload verified (users list diff is expected and checked)');
+const onlyUsers = d1.content.every((l: string) => l.startsWith('users:'));
+check('loaded data equals what was imported (users are device-local and never uploaded)', onlyUsers, 'diff: ' + d1.content.join('; '));
+check('device-local users survive a reload (not wiped, so in-app login keeps working)', (erpDb.getSnapshot() as any).users.length >= 1);
+console.log('E2E Section 1 PASSED: import + reload verified');
 check('list order preserved after the round-trip', d1.order.length === 0, d1.order.join(','));
 
 // ======================================================= 2. real workload ===

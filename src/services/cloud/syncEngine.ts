@@ -216,6 +216,12 @@ export class CloudSync {
     for (const k of Object.keys(fresh)) {
       if (Array.isArray(fresh[k])) fresh[k] = [];
     }
+    // Device-local collections (users) are never uploaded, so the server cannot
+    // refill them: keep what this device already has instead of wiping it.
+    const current = this.host.getDb();
+    for (const name of SENSITIVE_COLLECTIONS) {
+      if (Array.isArray(current[name])) fresh[name] = current[name];
+    }
     const versions = new Map<string, number>();
     const shadow = new Map<string, string>();
 
