@@ -23,7 +23,10 @@
     "partialclose": "tsx scripts/qa_partial_closure.ts",
     "qa:withholding": "tsx scripts/qa_withholding_income_tax.ts",
     "qa:cancel": "tsx scripts/qa_sales_cancel_isolation.ts",
-    "qa:settings": "tsx scripts/qa_company_settings.ts"
+    "qa:settings": "tsx scripts/qa_company_settings.ts",
+    "qa:cloud-sql": "bash supabase/cloud-store/tests/run_selftest.sh",
+    "qa:cloud-sync": "bash scripts/cloud_sync_e2e.sh",
+    "qa:cloud-http": "bun scripts/cloud_http_selftest.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
