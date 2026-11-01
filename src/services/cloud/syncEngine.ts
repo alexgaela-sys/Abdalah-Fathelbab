@@ -31,6 +31,15 @@ import {
 export const SINGLETON_COLLECTION = '__singletons';
 export const SINGLETON_KEYS: readonly string[] = ['company', 'settings', 'accountMappings'];
 
+/**
+ * Collections that are never uploaded to the cloud and never overwritten by
+ * a reload. The local `users` list carries login credentials in plaintext;
+ * uploading it would expose those credentials to every approved member via
+ * erp_load_page(). The cloud sign-in path is Supabase Auth (CloudGate →
+ * /auth/v1/token), so these records stay device-local.
+ */
+export const SENSITIVE_COLLECTIONS: ReadonlySet<string> = new Set(['users']);
+
 export type SyncState = 'disconnected' | 'connecting' | 'idle' | 'saving' | 'offline' | 'error';
 
 /** Shown to the user until they dismiss it; independent of the connection state. */
@@ -239,6 +248,7 @@ export class CloudSync {
 
   private *rows(db: Record<string, any>): Generator<Row> {
     for (const [name, value] of Object.entries(db)) {
+      if (SENSITIVE_COLLECTIONS.has(name)) continue; // never leaves the device
       if (Array.isArray(value)) {
         for (const rec of value) {
           if (!rec || typeof rec.id !== 'string' || !rec.id) {

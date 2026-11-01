@@ -23,7 +23,7 @@ PSQL=(psql -h 127.0.0.1 -p "$PORT" -U postgres -v ON_ERROR_STOP=1 -q)
 "${PSQL[@]}" -d postgres -c "create database erp_e2e" >/dev/null
 "${PSQL[@]}" -d erp_e2e -f "$ROOT/supabase/cloud-store/tests/00_shim_supabase.sql" >/dev/null
 "${PSQL[@]}" -d erp_e2e -f "$ROOT/supabase/cloud-store/001_erp_store.sql" >/dev/null 2>&1
-"${PSQL[@]}" -d erp_e2e -c "insert into auth.users values ('$USER_ID','e2e@example.test'); insert into public.erp_members(user_id, note) values ('$USER_ID','e2e');" >/dev/null
+"${PSQL[@]}" -d erp_e2e -c "insert into auth.users values ('$USER_ID','e2e@example.test'); insert into public.erp_members(user_id, note, status, role) values ('$USER_ID','e2e','approved','admin');" >/dev/null
 
 cd "$ROOT"
 ERP_TEST_PG_URL="postgres://postgres@127.0.0.1:$PORT/erp_e2e" ERP_TEST_USER_ID="$USER_ID" bun scripts/cloud_sync_e2e.ts

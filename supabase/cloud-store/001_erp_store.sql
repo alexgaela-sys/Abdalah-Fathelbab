@@ -32,6 +32,65 @@ create table if not exists public.erp_members (
 
 alter table public.erp_members enable row level security;
 
+-- 1b) Roles + approval -----------------------------------------------------------
+-- Permissions are decided INSIDE the database, from the caller's Auth identity
+-- (auth.uid()) and the row erp_members holds for it. Nothing the browser sends
+-- can change the answer, so hiding a screen is never part of the security.
+--
+-- TWO independent gates, both required before anything at all is readable or
+-- writable:
+--
+--   status = 'approved'   an operator approved this member, AND
+--   role   is not null    an operator assigned a role.
+--
+-- A row that has neither is inert: erp_role() answers NULL, so erp_can() is
+-- false for every collection, every SELECT policy filters the row away, and
+-- every RPC returns 'forbidden'. Creating a member row therefore grants
+-- NOTHING by itself — approval and a role must be set deliberately.
+--
+-- role has NO default and is nullable on purpose. It is never 'admin' unless an
+-- operator writes that value.
+alter table public.erp_members
+  add column if not exists role text;
+
+alter table public.erp_members
+  alter column role drop default;
+alter table public.erp_members
+  alter column role drop not null;
+
+alter table public.erp_members
+  drop constraint if exists erp_members_role_chk;
+alter table public.erp_members
+  add constraint erp_members_role_chk
+    check (role is null or role in ('admin', 'accountant', 'warehouse'));
+
+-- Approval state. Added inside a DO block so the one-time backfill below runs
+-- exactly once: members that existed BEFORE this rule already had access, so
+-- approving them preserves today's behaviour, while re-running this file must
+-- NOT re-approve a member an operator has since put back to 'pending'.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public'
+       and table_name   = 'erp_members'
+       and column_name  = 'status'
+  ) then
+    alter table public.erp_members add column status text not null default 'pending';
+    -- One-time backfill: these accounts could already use the store.
+    update public.erp_members set status = 'approved';
+  end if;
+end $$;
+
+alter table public.erp_members
+  drop constraint if exists erp_members_status_chk;
+alter table public.erp_members
+  add constraint erp_members_status_chk
+    check (status in ('pending', 'approved'));
+
+-- The gate every read and write path uses. An approved member WITHOUT a role,
+-- or a member WITH a role who is not approved, is treated exactly like a
+-- stranger.
 create or replace function public.erp_is_member()
 returns boolean
 language sql
@@ -40,8 +99,172 @@ security definer
 set search_path = public, pg_temp
 as $$
   select exists (
-    select 1 from public.erp_members m where m.user_id = (select auth.uid())
+    select 1 from public.erp_members m
+     where m.user_id = (select auth.uid())
+       and m.status = 'approved'
+       and m.role is not null
   );
+$$;
+
+-- 1c) Nobody promotes themselves ---------------------------------------------------
+-- Defence in depth on top of the revoked INSERT/UPDATE/DELETE privileges: even
+-- if a grant were ever added by mistake, a client session (PostgREST connects
+-- as 'anon' / 'authenticated') still cannot insert, promote, demote or delete a
+-- membership row. Membership is operator-only, edited from the SQL editor
+-- (role 'postgres'), which is what this check allows through.
+--
+-- Deliberately SECURITY INVOKER (the default): a definer function would run as
+-- its owner and current_user would always read 'postgres', defeating the check.
+create or replace function public.erp_members_block_client_writes()
+returns trigger
+language plpgsql
+as $$
+begin
+  if current_user in ('anon', 'authenticated') then
+    raise exception 'erp_members is operator-managed: clients cannot change membership or roles'
+      using errcode = '42501',
+            hint    = 'approve the member and assign a role from the SQL editor';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists erp_members_no_client_write on public.erp_members;
+create trigger erp_members_no_client_write
+  before insert or update or delete on public.erp_members
+  for each row execute function public.erp_members_block_client_writes();
+
+-- Which collections a role may read/write. Kept as DATA, not as SQL branches:
+-- changing an access boundary is one insert/delete, and 'admin' is simply the
+-- role seeded with the '*' wildcard (no privileged code path).
+--
+-- NOTE: this is an ACCESS boundary only. It does not express accounting truth,
+-- and assigning a non-admin role is an operator decision.
+create table if not exists public.erp_role_scope (
+  role       text not null,
+  collection text not null,
+  primary key (role, collection)
+);
+
+-- Re-runnable: refresh the constraints so a database created by an earlier
+-- version picks up the '*' wildcard without manual work.
+alter table public.erp_role_scope drop constraint if exists erp_role_scope_role_chk;
+alter table public.erp_role_scope add constraint erp_role_scope_role_chk
+  check (role in ('admin', 'accountant', 'warehouse'));
+alter table public.erp_role_scope drop constraint if exists erp_role_scope_coll_chk;
+alter table public.erp_role_scope add constraint erp_role_scope_coll_chk
+  check (collection = '*' or collection ~ '^[A-Za-z_][A-Za-z0-9_]{0,63}$');
+
+alter table public.erp_role_scope enable row level security;
+revoke all on table public.erp_role_scope from anon, authenticated;
+grant select on table public.erp_role_scope to authenticated;
+drop policy if exists erp_role_scope_read on public.erp_role_scope;
+create policy erp_role_scope_read on public.erp_role_scope
+  for select to authenticated using (public.erp_is_member());
+
+-- Seed the access boundary.
+--   admin       -> '*', i.e. every collection the store holds (still NOT 'users')
+--   accountant  -> the financial side, plus the shared invoice documents
+--   warehouse   -> stock and movement documents, plus the shared invoices
+--
+-- '*' keeps today's behaviour for an admin: any collection a future app version
+-- adds is readable without a migration, while a narrower role only ever sees
+-- what it was explicitly given.
+insert into public.erp_role_scope (role, collection) values
+  ('admin', '*'),
+
+  ('accountant', '__singletons'),
+  ('accountant', 'accounts'),
+  ('accountant', 'journalEntries'),
+  ('accountant', 'accountingPeriods'),
+  ('accountant', 'payments'),
+  ('accountant', 'paymentAllocations'),
+  ('accountant', 'cheques'),
+  ('accountant', 'bankAccounts'),
+  ('accountant', 'bankTransactions'),
+  ('accountant', 'treasuryTransactions'),
+  ('accountant', 'expenses'),
+  ('accountant', 'costCenters'),
+  ('accountant', 'standardCostRates'),
+  ('accountant', 'forecasts'),
+  ('accountant', 'payrollDistributions'),
+  ('accountant', 'withholdingAdjustments'),
+  ('accountant', 'auditLogs'),
+  ('accountant', 'salesInvoices'),
+  ('accountant', 'salesInvoiceLines'),
+  ('accountant', 'salesReturns'),
+  ('accountant', 'salesReturnLines'),
+  ('accountant', 'purchaseInvoices'),
+  ('accountant', 'accountMappings'),
+
+  ('warehouse', '__singletons'),
+  ('warehouse', 'custodyMovements'),
+  ('warehouse', 'inventoryTransactions'),
+  ('warehouse', 'inventoryCounts'),
+  ('warehouse', 'inventoryCountLines'),
+  ('warehouse', 'purchaseInvoiceLines'),
+  ('warehouse', 'purchaseReturns'),
+  ('warehouse', 'exportShipments'),
+  ('warehouse', 'scrapSales'),
+  ('warehouse', 'salesInvoices'),
+  ('warehouse', 'salesInvoiceLines'),
+  ('warehouse', 'salesReturns'),
+  ('warehouse', 'salesReturnLines'),
+  ('warehouse', 'purchaseInvoices')
+on conflict (role, collection) do nothing;
+
+-- The caller's role, read from the trusted row keyed by their Auth identity.
+-- Returns NULL for anyone who is not an active member (not approved, or no
+-- role assigned) — NULL matches no row in erp_role_scope, so erp_can() is false.
+create or replace function public.erp_role()
+returns text
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select m.role from public.erp_members m
+   where m.user_id = (select auth.uid())
+     and m.status = 'approved'
+     and m.role is not null;
+$$;
+
+-- Collections the store must NEVER serve, to ANY role.
+-- 'users' carries the local login records with passwords in plaintext; no
+-- database role may read or write them (the client refuses to upload them too).
+create table if not exists public.erp_blocked_collection (
+  collection text primary key
+);
+alter table public.erp_blocked_collection enable row level security;
+revoke all on table public.erp_blocked_collection from anon, authenticated;
+grant select on table public.erp_blocked_collection to authenticated;
+drop policy if exists erp_blocked_collection_read on public.erp_blocked_collection;
+create policy erp_blocked_collection_read on public.erp_blocked_collection
+  for select to authenticated using (public.erp_is_member());
+insert into public.erp_blocked_collection (collection) values ('users')
+  on conflict (collection) do nothing;
+
+-- May this caller touch p_collection? Answered only from the two tables above,
+-- both read through the caller's own Auth identity — never from anything the
+-- client sends. Read and write use the same boundary on purpose.
+create or replace function public.erp_can(p_collection text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select
+    p_collection is not null
+    and not exists (
+      select 1 from public.erp_blocked_collection b where b.collection = p_collection
+    )
+    and exists (
+      select 1
+        from public.erp_role_scope s
+       where s.role = (select public.erp_role())
+         and (s.collection = '*' or s.collection = p_collection)
+    );
 $$;
 
 -- 2) Records + change feed -----------------------------------------------------
@@ -81,13 +304,17 @@ drop policy if exists erp_members_self_select on public.erp_members;
 create policy erp_members_self_select on public.erp_members
   for select to authenticated using (user_id = (select auth.uid()));
 
+-- Reads are scoped by role: erp_can() answers from erp_role_scope using the
+-- caller's own Auth identity, so a warehouse login cannot read journalEntries
+-- and an accountant cannot read inventory movements — no matter how the client
+-- is built (PostgREST direct access is filtered here too).
 drop policy if exists erp_records_member_select on public.erp_records;
 create policy erp_records_member_select on public.erp_records
-  for select to authenticated using (public.erp_is_member());
+  for select to authenticated using (public.erp_can(collection));
 
 drop policy if exists erp_changes_member_select on public.erp_changes;
 create policy erp_changes_member_select on public.erp_changes
-  for select to authenticated using (public.erp_is_member());
+  for select to authenticated using (public.erp_can(collection));
 
 -- No insert/update/delete policies on purpose: the only write path is the RPC.
 revoke all on table public.erp_members from anon, authenticated;
@@ -191,6 +418,16 @@ begin
       return jsonb_build_object('status', 'invalid', 'reason', 'bad_change_shape');
     end if;
     v_base := (v_item ->> 'base_version')::bigint;
+
+    -- Role gate on writes: scoped exactly like reads, answered from
+    -- erp_role_scope via the caller's Auth identity. 'users' belongs to no
+    -- role's scope, so nobody can push login records (or any collection
+    -- outside their role) into the store.
+    if not public.erp_can(v_coll) then
+      return jsonb_build_object(
+        'status', 'forbidden', 'reason', 'collection_not_permitted',
+        'collection', v_coll);
+    end if;
 
     if v_op = 'upsert' and (v_data is null or jsonb_typeof(v_data) <> 'object') then
       return jsonb_build_object('status', 'invalid', 'reason', 'data_must_be_object');
@@ -340,7 +577,8 @@ begin
     from (
       select r.collection, r.id, r.version, r.ord, r.data
         from public.erp_records r
-       where (r.collection, r.ord) > (coalesce(p_after_collection, ''), coalesce(p_after_ord, 0))
+       where public.erp_can(r.collection)
+         and (r.collection, r.ord) > (coalesce(p_after_collection, ''), coalesce(p_after_ord, 0))
        order by r.collection, r.ord
        limit v_lim
     ) t;
@@ -399,7 +637,9 @@ begin
          max(c.seq)
     into v_rows, v_last
     from (
-      select * from public.erp_changes where seq > p_after order by seq limit v_lim
+      select * from public.erp_changes
+       where seq > p_after and public.erp_can(collection)
+       order by seq limit v_lim
     ) c
     left join public.erp_records r on r.collection = c.collection and r.id = c.id;
 
@@ -427,7 +667,12 @@ begin
     'status', 'ok',
     'counts', coalesce((
       select jsonb_object_agg(s.collection, s.n)
-        from (select collection, count(*) as n from public.erp_records group by collection) s
+        from (
+          select collection, count(*) as n
+            from public.erp_records
+           where public.erp_can(collection)
+           group by collection
+        ) s
     ), '{}'::jsonb),
     'head', (select coalesce(max(seq), 0) from public.erp_changes)
   );
@@ -436,6 +681,8 @@ $$;
 
 -- 6) Function permissions ----------------------------------------------------------
 revoke all on function public.erp_is_member() from public, anon;
+revoke all on function public.erp_role() from public, anon;
+revoke all on function public.erp_can(text) from public, anon;
 revoke all on function public.erp_apply_changes(jsonb, text, boolean) from public, anon;
 revoke all on function public.erp_head_seq() from public, anon;
 revoke all on function public.erp_load_page(text, bigint, int) from public, anon;
@@ -443,6 +690,8 @@ revoke all on function public.erp_changes_since(bigint, int) from public, anon;
 revoke all on function public.erp_stats() from public, anon;
 
 grant execute on function public.erp_is_member() to authenticated;
+grant execute on function public.erp_role() to authenticated;
+grant execute on function public.erp_can(text) to authenticated;
 grant execute on function public.erp_apply_changes(jsonb, text, boolean) to authenticated;
 grant execute on function public.erp_head_seq() to authenticated;
 grant execute on function public.erp_load_page(text, bigint, int) to authenticated;
@@ -452,14 +701,31 @@ grant execute on function public.erp_stats() to authenticated;
 commit;
 
 -- ---------------------------------------------------------------------------
--- After running this file (once), approve the people who may use the system.
--- Create their logins first: Dashboard -> Authentication -> Users -> Add user
--- (and turn OFF "Allow new users to sign up" under Authentication settings).
--- Then, in the SQL editor:
+-- After running this file (once), APPROVE the people who may use the system.
+-- Creating a login is not enough: a member is inert until both gates are set.
 --
---   insert into public.erp_members (user_id, note)
---   select id, email from auth.users
---   on conflict (user_id) do nothing;
+--   1. Create their login: Dashboard -> Authentication -> Users -> Add user
+--      (and turn OFF "Allow new users to sign up" under Authentication settings).
+--   2. Approve them AND give them a role, in the SQL editor:
+--
+--        update public.erp_members
+--           set status = 'approved', role = 'warehouse'
+--         where user_id = '<their auth.users id>';
+--
+--      Values: role  = 'admin' | 'accountant' | 'warehouse'   (no default)
+--             status = 'pending' | 'approved'                  (default 'pending')
+--
+--      Until BOTH are set the login authenticates but reads and writes nothing:
+--      every RPC answers 'forbidden' and direct PostgREST SELECTs return empty.
+--
+-- Members created by an earlier version of this file keep the access they had
+-- (status backfilled to 'approved', role backfilled to 'admin'). Restrict them:
+--
+--        update public.erp_members set status = 'pending'            -- lock out
+--        update public.erp_members set role = 'accountant'           -- narrow
+--
+-- Membership is operator-only: a client session cannot insert, update or delete
+-- erp_members rows, so nobody can approve themselves or change their own role.
 --
 -- Optional housekeeping (service role / SQL editor only, never exposed to the app):
 --   delete from public.erp_changes where created_at < now() - interval '60 days';

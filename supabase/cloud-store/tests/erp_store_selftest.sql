@@ -16,7 +16,7 @@ grant execute on function t.check(text, boolean) to authenticated, anon;
 insert into auth.users values
   ('11111111-1111-1111-1111-111111111111', 'member@example.test'),
   ('22222222-2222-2222-2222-222222222222', 'outsider@example.test');
-insert into public.erp_members (user_id, note) values ('11111111-1111-1111-1111-111111111111', 'test member');
+insert into public.erp_members (user_id, note, status, role) values ('11111111-1111-1111-1111-111111111111', 'test member', 'approved', 'admin');
 
 -- ============ outsider (authenticated, not approved) ============
 set role authenticated;
@@ -210,6 +210,119 @@ select t.check('pruned history -> reset for a device that is too far behind',
   (public.erp_changes_since(1, 10) ->> 'status') = 'reset');
 select t.check('pruned history -> a device at the boundary still works',
   (public.erp_changes_since(5, 10) ->> 'status') = 'ok');
+
+-- ============ roles + blocked collections ============
+-- Permissions must come from the caller's own Auth identity and the role the
+-- database holds for it, and a login record must be unreadable by everybody.
+reset role;
+insert into auth.users values
+  ('33333333-3333-3333-3333-333333333333', 'accountant@example.test'),
+  ('44444444-4444-4444-4444-444444444444', 'warehouse@example.test');
+insert into public.erp_members (user_id, note, status, role) values
+  ('33333333-3333-3333-3333-333333333333', 'accountant', 'approved', 'accountant'),
+  ('44444444-4444-4444-4444-444444444444', 'warehouse', 'approved', 'warehouse');
+
+-- a login record planted directly (bypassing the client) that must stay hidden
+insert into public.erp_records (collection, id, data) values
+  ('users', 'usr-secret', '{"username":"admin","password":"S3cret"}'::jsonb);
+
+-- ---------- admin (u1, default role) ----------
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
+
+select t.check('admin default role is admin', public.erp_role() = 'admin');
+select t.check('admin can still write a normal collection',
+  (public.erp_apply_changes(
+     '[{"collection":"items","id":"role-ok","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-1') ->> 'status') = 'ok');
+select t.check('blocked: admin cannot WRITE users',
+  (public.erp_apply_changes(
+     '[{"collection":"users","id":"usr-evil","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-1') ->> 'reason') = 'collection_not_permitted');
+select t.check('blocked: admin cannot READ users via load_page',
+  (select count(*) from jsonb_array_elements(public.erp_load_page('', 0, 5000) -> 'rows') e
+    where e ->> 'collection' = 'users') = 0);
+select t.check('blocked: direct SELECT of users is empty (RLS)',
+  (select count(*) from public.erp_records where collection = 'users') = 0);
+select t.check('blocked: users absent from stats',
+  (public.erp_stats() -> 'counts' -> 'users') is null);
+
+-- ---------- accountant (u3) ----------
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '33333333-3333-3333-3333-333333333333', false);
+
+select t.check('accountant role is read from erp_members', public.erp_role() = 'accountant');
+select t.check('accountant CAN write a financial collection',
+  (public.erp_apply_changes(
+     '[{"collection":"journalEntries","id":"je-acc","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-a') ->> 'status') = 'ok');
+select t.check('accountant CANNOT write a warehouse collection',
+  (public.erp_apply_changes(
+     '[{"collection":"inventoryTransactions","id":"it-block","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-a') ->> 'reason') = 'collection_not_permitted');
+select t.check('accountant cannot see warehouse rows (RLS on SELECT)',
+  (select count(*) from public.erp_records where collection = 'inventoryTransactions') = 0);
+select t.check('accountant cannot see users (RLS on SELECT)',
+  (select count(*) from public.erp_records where collection = 'users') = 0);
+select t.check('accountant load_page hides warehouse + users',
+  (select count(*) from jsonb_array_elements(public.erp_load_page('', 0, 5000) -> 'rows') e
+    where e ->> 'collection' in ('inventoryTransactions', 'users')) = 0);
+select t.check('accountant changes_since hides warehouse changes',
+  (select count(*) from jsonb_array_elements(public.erp_changes_since(0, 2000) -> 'changes') e
+    where e ->> 'collection' = 'inventoryTransactions') = 0);
+select t.check('accountant stats has no warehouse or users counts',
+  (public.erp_stats() -> 'counts' -> 'inventoryTransactions') is null
+  and (public.erp_stats() -> 'counts' -> 'users') is null);
+
+-- ---------- warehouse (u4) ----------
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '44444444-4444-4444-4444-444444444444', false);
+
+select t.check('warehouse role is read from erp_members', public.erp_role() = 'warehouse');
+select t.check('warehouse CAN write a stock collection',
+  (public.erp_apply_changes(
+     '[{"collection":"inventoryTransactions","id":"it-wh","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-w') ->> 'status') = 'ok');
+select t.check('warehouse CANNOT write a financial collection',
+  (public.erp_apply_changes(
+     '[{"collection":"journalEntries","id":"je-block","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-w') ->> 'reason') = 'collection_not_permitted');
+select t.check('warehouse cannot see financial rows (RLS on SELECT)',
+  (select count(*) from public.erp_records where collection = 'journalEntries') = 0);
+select t.check('warehouse cannot see users (RLS on SELECT)',
+  (select count(*) from public.erp_records where collection = 'users') = 0);
+
+-- ---------- no self-escalation through direct access ----------
+do $$ begin
+  begin
+    insert into public.erp_role_scope (role, collection) values ('warehouse', '*');
+    raise exception 'role-scope escalation succeeded';
+  exception when insufficient_privilege then
+    raise notice 'ok  - a member cannot widen their own role scope';
+  end;
+end $$;
+
+do $$ begin
+  begin
+    update public.erp_members set role = 'admin'
+     where user_id = '44444444-4444-4444-4444-444444444444';
+    raise exception 'role self-elevation succeeded';
+  exception when insufficient_privilege then
+    raise notice 'ok  - a member cannot change their own role';
+  end;
+end $$;
+
+do $$ begin
+  begin
+    insert into public.erp_members (user_id, role)
+    values ('55555555-5555-5555-5555-555555555555', 'admin');
+    raise exception 'membership self-grant succeeded';
+  exception when insufficient_privilege then
+    raise notice 'ok  - a member cannot approve themselves';
+  end;
+end $$;
 
 reset role;
 \echo ALL PASSED

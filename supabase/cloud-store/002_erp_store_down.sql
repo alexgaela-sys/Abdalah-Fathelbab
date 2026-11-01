@@ -8,13 +8,20 @@ begin;
 -- Tables first (their policies depend on erp_is_member), then the functions.
 drop table if exists public.erp_changes;
 drop table if exists public.erp_records;
+drop table if exists public.erp_blocked_collection;
+drop table if exists public.erp_role_scope;
 drop table if exists public.erp_members;
 
+-- erp_can() depends on erp_role(), so drop it first; erp_is_member() goes last
+-- because the remaining policies still reference it.
+drop function if exists public.erp_members_block_client_writes();
 drop function if exists public.erp_stats();
 drop function if exists public.erp_changes_since(bigint, int);
 drop function if exists public.erp_load_page(text, bigint, int);
 drop function if exists public.erp_head_seq();
 drop function if exists public.erp_apply_changes(jsonb, text, boolean);
+drop function if exists public.erp_can(text);
+drop function if exists public.erp_role();
 drop function if exists public.erp_is_member();
 
 commit;
