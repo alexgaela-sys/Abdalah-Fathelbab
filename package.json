@@ -23,7 +23,10 @@
     "partialclose": "tsx scripts/qa_partial_closure.ts",
     "qa:withholding": "tsx scripts/qa_withholding_income_tax.ts",
     "qa:cancel": "tsx scripts/qa_sales_cancel_isolation.ts",
-    "qa:settings": "tsx scripts/qa_company_settings.ts"
+    "qa:settings": "tsx scripts/qa_company_settings.ts",
+    "qa:cloud-sql": "bash supabase/cloud-store/tests/run_selftest.sh",
+    "qa:cloud-sync": "bash scripts/cloud_sync_e2e.sh",
+    "qa:cloud-http": "bun scripts/cloud_http_selftest.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -38,14 +41,15 @@
     "motion": "^12.23.24"
   },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
+    "bun-types": "^1.4.4",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
-    "typescript": "^7.0.2",
-    "@types/express": "^4.17.21"
+    "typescript": "^7.0.2"
   }
 }

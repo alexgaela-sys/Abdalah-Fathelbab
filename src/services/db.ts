@@ -12,11 +12,28 @@ import {
   InvoiceTemplateSettings, WithholdingAdjustment,
   isDebitNatureCategory
 } from '../types/erp';
+import { CloudSync, SyncHost } from './cloud/syncEngine';
 
 // -----------------------------------------------------------------------------
 // Deterministic Document Numbering & ID Generation (Centralized, Collision-free)
 // -----------------------------------------------------------------------------
 let idCounter = 0;
+/**
+ * Storage mode, fixed at build time. Default 'local' = the original behaviour
+ * (everything in this browser's localStorage). VITE_ERP_STORAGE=supabase makes
+ * the app start empty and wait for the cloud store to be connected (see
+ * src/components/cloud/CloudGate.tsx) — it never reads or writes the old
+ * localStorage copy on its own.
+ */
+export const CLOUD_STORAGE_MODE: boolean = (() => {
+  try {
+    return String((import.meta as any).env?.VITE_ERP_STORAGE ?? '') === 'supabase';
+  } catch {
+    return false;
+  }
+})();
+
+
 let lastIdStamp = 0;
 
 /**
@@ -1582,85 +1599,111 @@ export function applyUomMigration(db: ERPDatabaseSchema): ERPDatabaseSchema {
   return db;
 }
 
+/**
+ * Turns whatever was stored (an old save, a backup file, a cloud snapshot) into a
+ * complete, migrated database. Pure: it never touches storage. This is the exact
+ * normalisation the app has always applied when it loads its saved data.
+ */
+export function normalizeStoredDatabase(parsed: any): ERPDatabaseSchema {
+  
+  // Clean and prepare users: ensure single admin 'admin' with password '12345'
+  let loadedUsers: User[] = Array.isArray(parsed.users) ? parsed.users : [];
+  let adminUser = loadedUsers.find(u => u.username?.toLowerCase() === 'admin');
+  
+  if (adminUser) {
+    adminUser.password = '12345';
+    adminUser.role = 'Super Admin';
+    adminUser.name = 'المشرف العام (Admin)';
+    adminUser.active = true;
+    // Only keep admin if previous users were demo/test users
+    loadedUsers = [adminUser, ...loadedUsers.filter(u => u.username !== 'admin' && !['accountant', 'production', 'warehouse'].includes(u.username))];
+  } else {
+    loadedUsers = [...INITIAL_USERS];
+  }
+
+  // Clean items: if loaded items are empty or contain old fake product names, migrate to exact SnakDip products
+  const hasOldPlaceholderItems = Array.isArray(parsed.items) && parsed.items.some((i: Item) => 
+    i.nameAr.includes('سناكس سِنجل') || i.nameAr.includes('سناكس ديو') || i.nameAr.includes('[بيانات تجريبية]')
+  );
+
+  let loadedItems: Item[] = INITIAL_PRODUCTION_ITEMS;
+  if (Array.isArray(parsed.items) && parsed.items.length > 0 && !hasOldPlaceholderItems) {
+    loadedItems = parsed.items.map((i: Item) => ({
+      ...i,
+      nameAr: i.nameAr.replace(/\s*\[بيانات تجريبية\]/g, '').replace(/\s*\[TEST DATA\]/g, ''),
+      nameEn: i.nameEn.replace(/\s*\[بيانات تجريبية\]/g, '').replace(/\s*\[TEST DATA\]/g, ''),
+    }));
+  }
+
+  // Clean boms
+  let loadedBoms = hasOldPlaceholderItems ? [] : (Array.isArray(parsed.boms) ? parsed.boms : []);
+  let loadedBomLines = hasOldPlaceholderItems ? [] : (Array.isArray(parsed.bomLines) ? parsed.bomLines : []);
+
+  const merged: ERPDatabaseSchema = {
+    ...createEmptyDatabase(),
+    ...parsed,
+    // New collections/settings stay backward compatible with older saves.
+    payrollDistributions: Array.isArray(parsed.payrollDistributions) ? parsed.payrollDistributions : [],
+    scrapSales: Array.isArray(parsed.scrapSales) ? parsed.scrapSales : [],
+    settings: {
+      ...INITIAL_SETTINGS,
+      ...(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}),
+      // Nested template is merged field-by-field so an older/partial save
+      // never loses the shipped defaults.
+      invoiceTemplate: {
+        ...DEFAULT_INVOICE_TEMPLATE,
+        ...(parsed.settings && typeof parsed.settings === 'object' && parsed.settings.invoiceTemplate
+          ? parsed.settings.invoiceTemplate
+          : {}),
+      },
+    },
+    company: parsed.company || INITIAL_COMPANY,
+    warehouses: parsed.warehouses?.length ? parsed.warehouses : INITIAL_WAREHOUSES,
+    items: loadedItems,
+    boms: loadedBoms,
+    bomLines: loadedBomLines,
+    units: parsed.units?.length ? parsed.units : INITIAL_UNITS,
+    accounts: parsed.accounts?.length ? parsed.accounts : INITIAL_ACCOUNTS,
+    costCenters: parsed.costCenters?.length ? parsed.costCenters : INITIAL_COST_CENTERS,
+    accountMappings: { ...INITIAL_ACCOUNT_MAPPINGS, ...(parsed.accountMappings || {}) },
+    users: loadedUsers,
+  };
+
+  const migrated = applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(merged)));
+  return migrated;
+}
+
+/** The database saved in THIS browser by the offline version of the app, normalised; null if none. */
+export function readLegacyLocalDatabase(): ERPDatabaseSchema | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return null;
+    return normalizeStoredDatabase(JSON.parse(saved));
+  } catch (e) {
+    console.error('Could not read the local ERP database:', e);
+    return null;
+  }
+}
+
 class ERPDatabaseService {
   private db: ERPDatabaseSchema;
   private listeners: Set<() => void> = new Set();
+  /** set once a cloud store is attached; from then on edits go there, not to localStorage */
+  private cloud: CloudSync | null = null;
 
   constructor() {
     this.db = this.load();
   }
 
   private load(): ERPDatabaseSchema {
+    // Cloud build: start blank and untouched; the real data arrives from the server.
+    if (CLOUD_STORAGE_MODE) return createEmptyDatabase();
     try {
       if (typeof localStorage !== 'undefined') {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
-        const parsed = JSON.parse(saved);
-        
-        // Clean and prepare users: ensure single admin 'admin' with password '12345'
-        let loadedUsers: User[] = Array.isArray(parsed.users) ? parsed.users : [];
-        let adminUser = loadedUsers.find(u => u.username?.toLowerCase() === 'admin');
-        
-        if (adminUser) {
-          adminUser.password = '12345';
-          adminUser.role = 'Super Admin';
-          adminUser.name = 'المشرف العام (Admin)';
-          adminUser.active = true;
-          // Only keep admin if previous users were demo/test users
-          loadedUsers = [adminUser, ...loadedUsers.filter(u => u.username !== 'admin' && !['accountant', 'production', 'warehouse'].includes(u.username))];
-        } else {
-          loadedUsers = [...INITIAL_USERS];
-        }
-
-        // Clean items: if loaded items are empty or contain old fake product names, migrate to exact SnakDip products
-        const hasOldPlaceholderItems = Array.isArray(parsed.items) && parsed.items.some((i: Item) => 
-          i.nameAr.includes('سناكس سِنجل') || i.nameAr.includes('سناكس ديو') || i.nameAr.includes('[بيانات تجريبية]')
-        );
-
-        let loadedItems: Item[] = INITIAL_PRODUCTION_ITEMS;
-        if (Array.isArray(parsed.items) && parsed.items.length > 0 && !hasOldPlaceholderItems) {
-          loadedItems = parsed.items.map((i: Item) => ({
-            ...i,
-            nameAr: i.nameAr.replace(/\s*\[بيانات تجريبية\]/g, '').replace(/\s*\[TEST DATA\]/g, ''),
-            nameEn: i.nameEn.replace(/\s*\[بيانات تجريبية\]/g, '').replace(/\s*\[TEST DATA\]/g, ''),
-          }));
-        }
-
-        // Clean boms
-        let loadedBoms = hasOldPlaceholderItems ? [] : (Array.isArray(parsed.boms) ? parsed.boms : []);
-        let loadedBomLines = hasOldPlaceholderItems ? [] : (Array.isArray(parsed.bomLines) ? parsed.bomLines : []);
-
-        const merged: ERPDatabaseSchema = {
-          ...createEmptyDatabase(),
-          ...parsed,
-          // New collections/settings stay backward compatible with older saves.
-          payrollDistributions: Array.isArray(parsed.payrollDistributions) ? parsed.payrollDistributions : [],
-          scrapSales: Array.isArray(parsed.scrapSales) ? parsed.scrapSales : [],
-          settings: {
-            ...INITIAL_SETTINGS,
-            ...(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}),
-            // Nested template is merged field-by-field so an older/partial save
-            // never loses the shipped defaults.
-            invoiceTemplate: {
-              ...DEFAULT_INVOICE_TEMPLATE,
-              ...(parsed.settings && typeof parsed.settings === 'object' && parsed.settings.invoiceTemplate
-                ? parsed.settings.invoiceTemplate
-                : {}),
-            },
-          },
-          company: parsed.company || INITIAL_COMPANY,
-          warehouses: parsed.warehouses?.length ? parsed.warehouses : INITIAL_WAREHOUSES,
-          items: loadedItems,
-          boms: loadedBoms,
-          bomLines: loadedBomLines,
-          units: parsed.units?.length ? parsed.units : INITIAL_UNITS,
-          accounts: parsed.accounts?.length ? parsed.accounts : INITIAL_ACCOUNTS,
-          costCenters: parsed.costCenters?.length ? parsed.costCenters : INITIAL_COST_CENTERS,
-          accountMappings: { ...INITIAL_ACCOUNT_MAPPINGS, ...(parsed.accountMappings || {}) },
-          users: loadedUsers,
-        };
-
-        const migrated = applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(merged)));
+        const migrated = normalizeStoredDatabase(JSON.parse(saved));
         this.saveToStorage(migrated);
         return migrated;
       }
@@ -1674,6 +1717,7 @@ class ERPDatabaseService {
   }
 
   private saveToStorage(data: ERPDatabaseSchema) {
+    if (CLOUD_STORAGE_MODE || this.cloud) return; // the cloud store is the only copy
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -1691,7 +1735,8 @@ class ERPDatabaseService {
   }
 
   private notify() {
-    this.saveToStorage(this.db);
+    if (this.cloud) this.cloud.markDirty();
+    else this.saveToStorage(this.db);
     this.listeners.forEach((listener) => {
       try {
         listener();
@@ -1705,6 +1750,46 @@ class ERPDatabaseService {
     return this.db;
   }
 
+  /**
+   * Switch this device to a shared cloud store. Call connect() on the returned
+   * engine to load the data. Local (browser) saving stops from here on.
+   */
+  public attachCloud(store: ConstructorParameters<typeof CloudSync>[0], opts?: ConstructorParameters<typeof CloudSync>[2]): CloudSync {
+    if (this.cloud) this.cloud.stop();
+    const host: SyncHost = {
+      getDb: () => this.db as unknown as Record<string, any>,
+      createEmpty: () => createEmptyDatabase() as unknown as Record<string, any>,
+      onRemoteApplied: () => this.emit(),
+    };
+    this.cloud = new CloudSync(store, host, opts);
+    return this.cloud;
+  }
+
+  public detachCloud() {
+    if (this.cloud) this.cloud.stop();
+    this.cloud = null;
+  }
+
+  public getCloud(): CloudSync | null {
+    return this.cloud;
+  }
+
+  /** true when edits are going to the shared cloud store */
+  public isCloud(): boolean {
+    return this.cloud !== null;
+  }
+
+  /** Tell subscribers the data changed without saving it (used for server-driven updates). */
+  private emit() {
+    this.listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch (err) {
+        console.error('Error in database subscriber:', err);
+      }
+    });
+  }
+
   // Atomic state update
   public mutate(updater: (draft: ERPDatabaseSchema) => void) {
     updater(this.db);
@@ -1713,6 +1798,10 @@ class ERPDatabaseService {
 
   // Reset to initial clean state
   public resetToClean() {
+    if (this.cloud) {
+      // In the shared cloud store this would erase the company's data for every device.
+      throw new Error('إعادة الضبط الكامل غير متاحة في النسخة السحابية لأنها تمسح بيانات كل الأجهزة. تواصل مع المسؤول.');
+    }
     this.db = createEmptyDatabase();
     this.notify();
   }
