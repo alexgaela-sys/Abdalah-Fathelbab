@@ -222,9 +222,10 @@ insert into public.erp_members (user_id, note, status, role) values
   ('33333333-3333-3333-3333-333333333333', 'accountant', 'approved', 'accountant'),
   ('44444444-4444-4444-4444-444444444444', 'warehouse', 'approved', 'warehouse');
 
--- a login record planted directly (bypassing the client) that must stay hidden
-insert into public.erp_records (collection, id, data) values
-  ('users', 'usr-secret', '{"username":"admin","password":"S3cret"}'::jsonb);
+-- staff: ordinary employee, full data scope, but cannot touch ERP user records
+insert into auth.users values ('66666666-6666-6666-6666-666666666666', 'staff@example.test');
+insert into public.erp_members (user_id, note, status, role) values
+  ('66666666-6666-6666-6666-666666666666', 'staff', 'approved', 'staff');
 
 -- ---------- admin (u1, default role) ----------
 set role authenticated;
@@ -235,17 +236,39 @@ select t.check('admin can still write a normal collection',
   (public.erp_apply_changes(
      '[{"collection":"items","id":"role-ok","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
      'dev-1') ->> 'status') = 'ok');
-select t.check('blocked: admin cannot WRITE users',
+select t.check('admin CAN write an ERP user record (no password)',
   (public.erp_apply_changes(
-     '[{"collection":"users","id":"usr-evil","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
-     'dev-1') ->> 'reason') = 'collection_not_permitted');
-select t.check('blocked: admin cannot READ users via load_page',
-  (select count(*) from jsonb_array_elements(public.erp_load_page('', 0, 5000) -> 'rows') e
-    where e ->> 'collection' = 'users') = 0);
-select t.check('blocked: direct SELECT of users is empty (RLS)',
-  (select count(*) from public.erp_records where collection = 'users') = 0);
-select t.check('blocked: users absent from stats',
-  (public.erp_stats() -> 'counts' -> 'users') is null);
+     '[{"collection":"users","id":"usr-1","op":"upsert","base_version":0,"data":{"username":"sara","role":"Accountant","active":true}}]'::jsonb,
+     'dev-1') ->> 'status') = 'ok');
+select t.check('a password can never be stored on a user record',
+  (public.erp_apply_changes(
+     '[{"collection":"users","id":"usr-pw","op":"upsert","base_version":0,"data":{"username":"x","password":"S3cret"}}]'::jsonb,
+     'dev-1') ->> 'reason') = 'password_not_allowed');
+select t.check('admin sees the users collection in stats and load_page',
+  (public.erp_stats() -> 'counts' ->> 'users')::int = 1
+  and (select count(*) from jsonb_array_elements(public.erp_load_page('', 0, 5000) -> 'rows') e
+        where e ->> 'collection' = 'users') = 1);
+
+-- ---------- staff (u6) ----------
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '66666666-6666-6666-6666-666666666666', false);
+select t.check('staff role is read from erp_members', public.erp_role() = 'staff');
+select t.check('staff CAN write normal collections of every module',
+  (public.erp_apply_changes(
+     '[{"collection":"journalEntries","id":"je-staff","op":"upsert","base_version":0,"data":{"x":1}},
+       {"collection":"inventoryTransactions","id":"it-staff","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-s') ->> 'status') = 'ok');
+select t.check('staff CAN read the user list',
+  (select count(*) from public.erp_records where collection = 'users') = 1);
+select t.check('staff CANNOT change ERP users (no self-promotion)',
+  (public.erp_apply_changes(
+     '[{"collection":"users","id":"usr-1","op":"upsert","base_version":1,"data":{"username":"sara","role":"Super Admin","active":true}}]'::jsonb,
+     'dev-s') ->> 'reason') = 'users_admin_only');
+select t.check('staff CANNOT use the bulk import path',
+  (public.erp_apply_changes(
+     '[{"collection":"items","id":"it-bulk-s","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-s', true) ->> 'reason') = 'bulk_requires_admin');
 
 -- ---------- accountant (u3) ----------
 reset role;

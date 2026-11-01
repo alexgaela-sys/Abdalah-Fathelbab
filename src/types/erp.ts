@@ -43,6 +43,8 @@ export interface User {
   warehouseIds?: string[];
   createdAt: string;
   lastLogin?: string;
+  /** Cloud mode: id of this person's Supabase sign-in account (set when the admin creates the user). */
+  authUserId?: string;
   isTest?: boolean;
 }
 

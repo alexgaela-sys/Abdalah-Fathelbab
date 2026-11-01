@@ -147,10 +147,12 @@ check('import is resumable: running it again inserts nothing', imp2.inserted ===
 
 const again = await A.connect();
 check('connect after import is not empty', again.empty === false);
-const d1 = diffDbs(erpDb.getSnapshot(), seed);
-const onlyUsers = d1.content.every((l: string) => l.startsWith('users:'));
-check('loaded data equals what was imported (users are device-local and never uploaded)', onlyUsers, 'diff: ' + d1.content.join('; '));
-check('device-local users survive a reload (not wiped, so in-app login keeps working)', (erpDb.getSnapshot() as any).users.length >= 1);
+const seedNoPw: any = JSON.parse(JSON.stringify(seed));
+for (const u of seedNoPw.users) delete u.password; // passwords are never uploaded
+const d1 = diffDbs(erpDb.getSnapshot(), seedNoPw);
+check('loaded data equals what was imported (users included, without passwords)', d1.content.length === 0, 'diff: ' + d1.content.join('; '));
+check('ERP users are shared through the cloud and carry no password',
+  (erpDb.getSnapshot() as any).users.length >= 1 && (erpDb.getSnapshot() as any).users.every((u: any) => u.password === undefined));
 console.log('E2E Section 1 PASSED: import + reload verified');
 check('list order preserved after the round-trip', d1.order.length === 0, d1.order.join(','));
 

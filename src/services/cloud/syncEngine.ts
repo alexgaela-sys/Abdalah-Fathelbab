@@ -32,13 +32,19 @@ export const SINGLETON_COLLECTION = '__singletons';
 export const SINGLETON_KEYS: readonly string[] = ['company', 'settings', 'accountMappings'];
 
 /**
- * Collections that are never uploaded to the cloud and never overwritten by
- * a reload. The local `users` list carries login credentials in plaintext;
- * uploading it would expose those credentials to every approved member via
- * erp_load_page(). The cloud sign-in path is Supabase Auth (CloudGate →
- * /auth/v1/token), so these records stay device-local.
+ * Fields that never leave the device, per collection. ERP users ARE shared (every
+ * device must know who exists and what each person may do) but sign-in is Supabase
+ * Auth, so a password is never uploaded; the server refuses one as well.
  */
-export const SENSITIVE_COLLECTIONS: ReadonlySet<string> = new Set(['users']);
+export const STRIPPED_FIELDS: Readonly<Record<string, readonly string[]>> = { users: ['password'] };
+
+function stripLocalOnly(collection: string, rec: any): any {
+  const fields = STRIPPED_FIELDS[collection];
+  if (!fields) return rec;
+  const copy = { ...rec };
+  for (const f of fields) delete copy[f];
+  return copy;
+}
 
 export type SyncState = 'disconnected' | 'connecting' | 'idle' | 'saving' | 'offline' | 'error';
 
@@ -216,12 +222,6 @@ export class CloudSync {
     for (const k of Object.keys(fresh)) {
       if (Array.isArray(fresh[k])) fresh[k] = [];
     }
-    // Device-local collections (users) are never uploaded, so the server cannot
-    // refill them: keep what this device already has instead of wiping it.
-    const current = this.host.getDb();
-    for (const name of SENSITIVE_COLLECTIONS) {
-      if (Array.isArray(current[name])) fresh[name] = current[name];
-    }
     const versions = new Map<string, number>();
     const shadow = new Map<string, string>();
 
@@ -254,13 +254,12 @@ export class CloudSync {
 
   private *rows(db: Record<string, any>): Generator<Row> {
     for (const [name, value] of Object.entries(db)) {
-      if (SENSITIVE_COLLECTIONS.has(name)) continue; // never leaves the device
       if (Array.isArray(value)) {
         for (const rec of value) {
           if (!rec || typeof rec.id !== 'string' || !rec.id) {
             throw new Error(`سجل بدون معرّف داخل «${name}» — لا يمكن حفظه سحابيًا`);
           }
-          yield { collection: name, id: rec.id, data: rec };
+          yield { collection: name, id: rec.id, data: stripLocalOnly(name, rec) };
         }
       } else if (SINGLETON_KEYS.includes(name)) {
         if (value && typeof value === 'object') {
