@@ -78,7 +78,7 @@ class PgStore implements RemoteStore {
   }
   async stats() {
     const r = await this.call<any>('public.erp_stats()');
-    return { counts: r.counts, head: r.head };
+    return { counts: r.counts, head: r.head, role: r.role };
   }
 }
 

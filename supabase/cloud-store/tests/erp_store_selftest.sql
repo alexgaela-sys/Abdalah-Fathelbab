@@ -324,5 +324,56 @@ do $$ begin
   end;
 end $$;
 
+-- ---------- fixes found in review ----------
+-- bulk import is admin-only (warehouse u4 is the current caller)
+select t.check('non-admin cannot use the bulk import path',
+  (public.erp_apply_changes(
+     '[{"collection":"inventoryTransactions","id":"it-bulk","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-w', true) ->> 'reason') = 'bulk_requires_admin');
+
+-- feed cursor for a role that cannot see the newest change
+select set_config('t.h0', public.erp_head_seq()::text, false);
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '33333333-3333-3333-3333-333333333333', false);
+select t.check('accountant writes a change the warehouse cannot see',
+  (public.erp_apply_changes(
+     '[{"collection":"journalEntries","id":"je-hidden","op":"upsert","base_version":0,"data":{"x":1}}]'::jsonb,
+     'dev-a') ->> 'status') = 'ok');
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '44444444-4444-4444-4444-444444444444', false);
+select t.check('hidden newest change: more=false and cursor reaches head (no endless polling)',
+  (public.erp_changes_since(current_setting('t.h0')::bigint, 500) ->> 'more') = 'false'
+  and (public.erp_changes_since(current_setting('t.h0')::bigint, 500) ->> 'last')::bigint = public.erp_head_seq()
+  and public.erp_head_seq() > current_setting('t.h0')::bigint);
+
+-- document numbers: cannot be reused by EDITING an existing record, nor by production orders
+reset role;
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-1111-1111-111111111111', false);
+select t.check('two invoices with different numbers are accepted',
+  (public.erp_apply_changes(
+     '[{"collection":"salesInvoices","id":"dup-a","op":"upsert","base_version":0,"data":{"invoiceNumber":"DUP-1"}},
+       {"collection":"salesInvoices","id":"dup-b","op":"upsert","base_version":0,"data":{"invoiceNumber":"DUP-2"}}]'::jsonb,
+     'dev-1') ->> 'status') = 'ok');
+select t.check('editing an invoice to a number already in use is refused',
+  (public.erp_apply_changes(
+     '[{"collection":"salesInvoices","id":"dup-b","op":"upsert","base_version":1,"data":{"invoiceNumber":"DUP-1"}}]'::jsonb,
+     'dev-1') -> 'conflicts' -> 0 ->> 'reason') = 'duplicate_number');
+select t.check('editing an invoice keeping its own number is fine',
+  (public.erp_apply_changes(
+     '[{"collection":"salesInvoices","id":"dup-b","op":"upsert","base_version":1,"data":{"invoiceNumber":"DUP-2","note":"x"}}]'::jsonb,
+     'dev-1') ->> 'status') = 'ok');
+select t.check('production order numbers cannot repeat',
+  (public.erp_apply_changes(
+     '[{"collection":"productionOrders","id":"po-1","op":"upsert","base_version":0,"data":{"orderNumber":"PRD-1"}}]'::jsonb,
+     'dev-1') ->> 'status') = 'ok'
+  and (public.erp_apply_changes(
+     '[{"collection":"productionOrders","id":"po-2","op":"upsert","base_version":0,"data":{"orderNumber":"PRD-1"}}]'::jsonb,
+     'dev-1') -> 'conflicts' -> 0 ->> 'reason') = 'duplicate_number');
+select t.check('stats tells the caller their role', (public.erp_stats() ->> 'role') = 'admin');
+
+
 reset role;
 \echo ALL PASSED

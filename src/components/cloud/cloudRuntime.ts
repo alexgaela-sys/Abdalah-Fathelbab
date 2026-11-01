@@ -14,6 +14,7 @@ export interface CloudRuntime {
   cfg: SupabaseConfig;
   auth: SupabaseAuth;
   sync: CloudSync;
+  store: SupabaseHttpStore;
 }
 
 let runtime: CloudRuntime | null | undefined;
@@ -29,6 +30,6 @@ export function getCloudRuntime(): CloudRuntime | null {
   const auth = new SupabaseAuth(cfg);
   const store = new SupabaseHttpStore(cfg, auth);
   const sync = erpDb.attachCloud(store);
-  runtime = { cfg, auth, sync };
+  runtime = { cfg, auth, sync, store };
   return runtime;
 }

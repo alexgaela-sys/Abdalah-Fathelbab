@@ -48,7 +48,9 @@ export function readSupabaseConfigFromEnv(): SupabaseConfig | null {
   }
   const url = (env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
   const anonKey = (env.VITE_SUPABASE_ANON_KEY || '').trim();
-  if (!url || anonKey.length < 20 || !/^https?:\/\//.test(url)) return null;
+  if (!url || anonKey.length < 20) return null;
+  // credentials and sessions travel to this address: https only (plain http just for local development)
+  if (!/^https:\/\//.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(url)) return null;
   return { url, anonKey };
 }
 
@@ -311,11 +313,11 @@ export class SupabaseHttpStore implements RemoteStore {
     });
   }
 
-  async stats(): Promise<{ counts: Record<string, number>; head: number }> {
+  async stats(): Promise<{ counts: Record<string, number>; head: number; role?: string | null }> {
     const r = await this.rpc<any>('erp_stats', {});
     if (r.status === 'forbidden') {
       throw new RemoteRejectedError('هذا الحساب غير مصرّح له باستخدام النظام السحابي', 'forbidden');
     }
-    return { counts: r.counts ?? {}, head: Number(r.head ?? 0) };
+    return { counts: r.counts ?? {}, head: Number(r.head ?? 0), role: r.role ?? null };
   }
 }

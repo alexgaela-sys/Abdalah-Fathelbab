@@ -61,7 +61,7 @@ export interface RemoteStore {
   loadAll(): Promise<RemoteRecord[]>;
   changesSince(after: number, limit?: number): Promise<ChangesResult>;
   apply(changes: OutgoingChange[], clientId: string, bulk?: boolean): Promise<ApplyResult>;
-  stats(): Promise<{ counts: Record<string, number>; head: number }>;
+  stats(): Promise<{ counts: Record<string, number>; head: number; role?: string | null }>;
 }
 
 /** The server could not be reached (network down, timeout, 5xx). Safe to retry. */

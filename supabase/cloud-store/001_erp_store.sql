@@ -78,7 +78,7 @@ begin
   ) then
     alter table public.erp_members add column status text not null default 'pending';
     -- One-time backfill: these accounts could already use the store.
-    update public.erp_members set status = 'approved';
+    update public.erp_members set status = 'approved', role = coalesce(role, 'admin');
   end if;
 end $$;
 
@@ -377,11 +377,16 @@ declare
     'exportShipments',        'shipmentNumber',
     'withholdingAdjustments', 'adjustmentNumber',
     'scrapSales',             'docNumber',
-    'payrollDistributions',   'distributionNumber'
+    'payrollDistributions',   'distributionNumber',
+    'productionOrders',       'orderNumber'
   );
 begin
   if v_uid is null or not public.erp_is_member() then
     return jsonb_build_object('status', 'forbidden');
+  end if;
+
+  if p_bulk and public.erp_role() is distinct from 'admin' then
+    return jsonb_build_object('status', 'forbidden', 'reason', 'bulk_requires_admin');
   end if;
 
   if p_changes is null or jsonb_typeof(p_changes) <> 'array' then
@@ -460,7 +465,7 @@ begin
       elsif v_base > 0 and v_cur <> v_base then
         v_conflicts := v_conflicts || jsonb_build_object(
           'collection', v_coll, 'id', v_id, 'reason', 'stale', 'current_version', v_cur);
-      elsif v_base = 0 and not p_bulk and v_numfields ? v_coll then
+      elsif not p_bulk and v_numfields ? v_coll then
         v_field  := v_numfields ->> v_coll;
         v_numval := v_data ->> v_field;
         if v_numval is not null and v_numval <> '' then
@@ -643,11 +648,20 @@ begin
     ) c
     left join public.erp_records r on r.collection = c.collection and r.id = c.id;
 
+  -- 'more' must look only at changes THIS role may see; otherwise a role that
+  -- cannot see the newest changes would be told there is more forever while the
+  -- cursor never advances. When nothing visible remains, the cursor jumps to head.
+  if exists (
+       select 1 from public.erp_changes c2
+        where c2.seq > coalesce(v_last, p_after) and public.erp_can(c2.collection)
+     ) then
+    return jsonb_build_object(
+      'status', 'ok', 'head', v_head, 'changes', v_rows,
+      'last', coalesce(v_last, p_after), 'more', true);
+  end if;
   return jsonb_build_object(
     'status', 'ok', 'head', v_head, 'changes', v_rows,
-    'last', coalesce(v_last, p_after),
-    'more', coalesce(v_last, p_after) < v_head
-  );
+    'last', greatest(coalesce(v_last, p_after), v_head), 'more', false);
 end;
 $$;
 
@@ -665,6 +679,7 @@ begin
   end if;
   return jsonb_build_object(
     'status', 'ok',
+    'role', public.erp_role(),
     'counts', coalesce((
       select jsonb_object_agg(s.collection, s.n)
         from (
