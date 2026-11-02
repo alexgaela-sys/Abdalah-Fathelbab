@@ -343,8 +343,8 @@ export const InventoryView: React.FC<{
                   <th className="p-3.5">نوع الصنف</th>
                   <th className="p-3.5">المستودع</th>
                   <th className="p-3.5 text-center">الرصيد المتاح</th>
-                  <th className="p-3.5 text-center">متوسط التكلفة</th>
-                  <th className="p-3.5 text-left">القيمة الإجمالية</th>
+                  <th data-price className="p-3.5 text-center">متوسط التكلفة</th>
+                  <th data-price className="p-3.5 text-left">القيمة الإجمالية</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -368,10 +368,10 @@ export const InventoryView: React.FC<{
                       <td className="p-3.5 text-center font-mono font-black text-slate-900">
                         {sb.quantity.toLocaleString('ar-EG')} {unitsMap.get(sb.item.baseUnitId) || ''}
                       </td>
-                      <td className="p-3.5 text-center font-mono text-slate-600">
+                      <td data-price className="p-3.5 text-center font-mono text-slate-600">
                         {sb.unitCost.toFixed(2)} ج.م
                       </td>
-                      <td className="p-3.5 text-left font-mono font-black text-emerald-700">
+                      <td data-price className="p-3.5 text-left font-mono font-black text-emerald-700">
                         {sb.totalValue.toLocaleString('ar-EG', { maximumFractionDigits: 2 })} ج.م
                       </td>
                     </tr>
@@ -495,7 +495,7 @@ export const InventoryView: React.FC<{
                 />
               </div>
 
-              <div>
+              <div data-price>
                 <label className="block text-xs font-bold text-slate-700 mb-1">سعر الوحدة (ج.م)</label>
                 <input
                   type="number"
@@ -585,9 +585,9 @@ export const InventoryView: React.FC<{
                     <th className="p-3">التاريخ</th>
                     <th className="p-3">الصنف</th>
                     <th className="p-3 text-center">الكمية</th>
-                    <th className="p-3 text-center">سعر الوحدة</th>
-                    <th className="p-3 text-left">القيمة</th>
-                    <th className="p-3 text-left">القيمة الدفترية</th>
+                    <th data-price className="p-3 text-center">سعر الوحدة</th>
+                    <th data-price className="p-3 text-left">القيمة</th>
+                    <th data-price className="p-3 text-left">القيمة الدفترية</th>
                     <th className="p-3">المشتري</th>
                     <th className="p-3">الدفع</th>
                     <th className="p-3">الحالة</th>
@@ -610,9 +610,9 @@ export const InventoryView: React.FC<{
                           <td className="p-3 text-slate-600">{doc.date}</td>
                           <td className="p-3 font-bold text-slate-800">{itm?.nameAr || doc.itemId}</td>
                           <td className="p-3 text-center font-mono">{doc.quantity}</td>
-                          <td className="p-3 text-center font-mono">{doc.unitPrice.toFixed(2)}</td>
-                          <td className="p-3 text-left font-mono font-black text-emerald-700">{doc.totalValue.toFixed(2)} ج.م</td>
-                          <td className="p-3 text-left font-mono text-slate-600">{doc.bookValue.toFixed(2)} ج.م</td>
+                          <td data-price className="p-3 text-center font-mono">{doc.unitPrice.toFixed(2)}</td>
+                          <td data-price className="p-3 text-left font-mono font-black text-emerald-700">{doc.totalValue.toFixed(2)} ج.م</td>
+                          <td data-price className="p-3 text-left font-mono text-slate-600">{doc.bookValue.toFixed(2)} ج.م</td>
                           <td className="p-3 text-slate-700">{doc.buyerName}</td>
                           <td className="p-3">{doc.paymentMethod === 'cash' ? 'نقدًا' : 'آجل'}</td>
                           <td className="p-3">
@@ -786,7 +786,7 @@ export const InventoryView: React.FC<{
                     <th className="p-2.5 text-center">الرصيد الدفتري</th>
                     <th className="p-2.5 text-center w-32">الرصيد الفعلي</th>
                     <th className="p-2.5 text-center">فارق الكمية</th>
-                    <th className="p-2.5 text-left">فارق التكلفة</th>
+                    <th data-price className="p-2.5 text-left">فارق التكلفة</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -815,7 +815,7 @@ export const InventoryView: React.FC<{
                             {diff > 0 ? `+${diff}` : diff}
                           </span>
                         </td>
-                        <td className="p-2 text-left font-mono font-bold">
+                        <td data-price className="p-2 text-left font-mono font-bold">
                           {diffCost.toFixed(2)} ج.م
                         </td>
                       </tr>

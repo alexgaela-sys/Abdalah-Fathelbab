@@ -123,8 +123,8 @@ const ItemCardReport: React.FC = () => {
                 <th className="py-1.5 px-1 text-center">وارد</th>
                 <th className="py-1.5 px-1 text-center">منصرف</th>
                 <th className="py-1.5 px-1 text-center">الرصيد</th>
-                <th className="py-1.5 px-1 text-center">تكلفة الوحدة</th>
-                <th className="py-1.5 px-1 text-left">القيمة</th>
+                <th data-price className="py-1.5 px-1 text-center">تكلفة الوحدة</th>
+                <th data-price className="py-1.5 px-1 text-left">القيمة</th>
                 <th className="py-1.5 px-1 text-center print:hidden">المستند</th>
               </tr>
             </thead>
@@ -152,8 +152,8 @@ const ItemCardReport: React.FC = () => {
                   <td className="py-1.5 px-1 text-center font-mono text-emerald-700">{r.quantityIn ? fmtQty(r.quantityIn) : '—'}</td>
                   <td className="py-1.5 px-1 text-center font-mono text-rose-700">{r.quantityOut ? fmtQty(r.quantityOut) : '—'}</td>
                   <td className="py-1.5 px-1 text-center font-mono font-bold">{fmtQty(r.runningBalance)}</td>
-                  <td className="py-1.5 px-1 text-center font-mono">{fmtMoney(r.unitCost)}</td>
-                  <td className="py-1.5 px-1 text-left font-mono">{fmtMoney(r.value)}</td>
+                  <td data-price className="py-1.5 px-1 text-center font-mono">{fmtMoney(r.unitCost)}</td>
+                  <td data-price className="py-1.5 px-1 text-left font-mono">{fmtMoney(r.value)}</td>
                   <td className="py-1.5 px-1 text-center print:hidden">
                     {r.link && (
                       <button
@@ -172,8 +172,8 @@ const ItemCardReport: React.FC = () => {
                 <td className="py-1.5 px-1 text-center">{fmtQty(card.totalIn)}</td>
                 <td className="py-1.5 px-1 text-center">{fmtQty(card.totalOut)}</td>
                 <td className="py-1.5 px-1 text-center">{fmtQty(card.closingBalance)}</td>
-                <td className="py-1.5 px-1 text-center">—</td>
-                <td className="py-1.5 px-1 text-left">{fmtMoney(card.closingValue)}</td>
+                <td data-price className="py-1.5 px-1 text-center">—</td>
+                <td data-price className="py-1.5 px-1 text-left">{fmtMoney(card.closingValue)}</td>
                 <td className="print:hidden" />
               </tr>
             </tbody>
@@ -181,7 +181,7 @@ const ItemCardReport: React.FC = () => {
 
           <div className="mt-2 text-[11px] font-bold">
             الرصيد الفعلي بالمخزون (التشغيلات): {fmtQty(card.actualBalance)} {card.unitNameAr} ·
-            قيمة المخزون الحالية: {fmtMoney(card.closingValue)} ج.م ·
+            <span data-price>قيمة المخزون الحالية: {fmtMoney(card.closingValue)} ج.م · </span>
             {Math.abs(card.mismatch) > 0.000001
               ? ` فرق غير مغطى: ${fmtQty(card.mismatch)} ${card.unitNameAr}`
               : ' المطابقة سليمة (الرصيد الختامي = الرصيد الفعلي)'}

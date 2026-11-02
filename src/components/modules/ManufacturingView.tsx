@@ -953,7 +953,7 @@ export const ManufacturingView: React.FC = () => {
       )}
 
       {/* QA-17 — Standard vs Actual conversion cost (real actuals, never fabricated) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-3">
+      <div data-price className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-3">
         <div>
           <h3 className="font-bold text-xs text-slate-800">التكلفة التحويلية: المعياري مقابل الفعلي</h3>
           <p className="text-[11px] text-slate-500">

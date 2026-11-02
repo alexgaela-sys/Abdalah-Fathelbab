@@ -87,6 +87,12 @@ export function App() {
     }
   };
 
+  // People without the "prices" permission get every [data-price] element hidden.
+  useEffect(() => {
+    const sess = AuthService.getCurrentSession();
+    document.documentElement.dataset.hidePrices = PermissionService.canSeePrices(sess?.user) ? 'false' : 'true';
+  });
+
   // Cloud mode: the admin can change this person's role/permissions or switch them off
   // from another device. Follow that without a re-login. (A Super Admin previewing another
   // role from the header is a local choice, so only a CHANGE of the stored record applies.)

@@ -331,10 +331,10 @@ export const ProductsMasterView: React.FC = () => {
                 <th className="p-3.5 whitespace-nowrap">العائلة والنكهة</th>
                 <th className="p-3.5 whitespace-nowrap">الوحدة</th>
                 <th className="p-3.5 whitespace-nowrap text-center">الضريبة</th>
-                <th className="p-3.5 whitespace-nowrap text-left">التكلفة المعيارية</th>
-                <th className="p-3.5 whitespace-nowrap text-left">سعر التجزئة</th>
-                <th className="p-3.5 whitespace-nowrap text-left">سعر الجملة</th>
-                <th className="p-3.5 whitespace-nowrap text-left">تصدير (USD)</th>
+                <th data-price className="p-3.5 whitespace-nowrap text-left">التكلفة المعيارية</th>
+                <th data-price className="p-3.5 whitespace-nowrap text-left">سعر التجزئة</th>
+                <th data-price className="p-3.5 whitespace-nowrap text-left">سعر الجملة</th>
+                <th data-price className="p-3.5 whitespace-nowrap text-left">تصدير (USD)</th>
                 <th className="p-3.5 whitespace-nowrap text-center">حد الطلب</th>
                 <th className="p-3.5 whitespace-nowrap text-center">الرصيد الحالي</th>
                 <th className="p-3.5 whitespace-nowrap text-center">الحالة</th>
@@ -388,16 +388,16 @@ export const ProductsMasterView: React.FC = () => {
                         {item.vatCategory === 'standard' ? '14%' : 'معفى 0%'}
                       </span>
                     </td>
-                    <td className="p-3.5 text-left font-mono font-semibold text-slate-700 whitespace-nowrap">
+                    <td data-price className="p-3.5 text-left font-mono font-semibold text-slate-700 whitespace-nowrap">
                       {item.standardCost ? `${item.standardCost.toFixed(2)} ج.م` : '0.00'}
                     </td>
-                    <td className="p-3.5 text-left font-mono font-bold text-slate-900 whitespace-nowrap">
+                    <td data-price className="p-3.5 text-left font-mono font-bold text-slate-900 whitespace-nowrap">
                       {item.sellingPriceRetail ? `${item.sellingPriceRetail.toFixed(2)} ج.م` : '0.00'}
                     </td>
-                    <td className="p-3.5 text-left font-mono text-slate-700 whitespace-nowrap">
+                    <td data-price className="p-3.5 text-left font-mono text-slate-700 whitespace-nowrap">
                       {item.sellingPriceWholesale ? `${item.sellingPriceWholesale.toFixed(2)} ج.م` : '0.00'}
                     </td>
-                    <td className="p-3.5 text-left font-mono text-emerald-700 font-bold whitespace-nowrap">
+                    <td data-price className="p-3.5 text-left font-mono text-emerald-700 font-bold whitespace-nowrap">
                       {item.sellingPriceExportUSD ? `$${item.sellingPriceExportUSD.toFixed(2)}` : '$0.00'}
                     </td>
                     <td className="p-3.5 text-center font-mono text-slate-600 whitespace-nowrap">
@@ -617,7 +617,7 @@ export const ProductsMasterView: React.FC = () => {
               </div>
 
               {/* Row 4: Pricing & Costs */}
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+              <div data-price className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
                 <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5 pb-2 border-b border-slate-200">
                   <DollarSign className="w-3.5 h-3.5 text-amber-600" />
                   <span>التكاليف وأسعار البيع المعتمدة</span>

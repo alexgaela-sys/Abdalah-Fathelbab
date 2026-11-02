@@ -405,3 +405,7 @@ div.fixed.inset-0.z-50 > div {
 .print-hidden {
   display: none !important;
 }
+
+
+/* People without the "prices" permission: money values are tagged data-price in the screens. */
+html[data-hide-prices="true"] [data-price] { display: none !important; }

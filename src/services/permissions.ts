@@ -7,7 +7,9 @@ export type ModuleKey =
   | 'dashboard' | 'items' | 'inventory' | 'manufacturing' | 'quality' | 'costing'
   | 'sales' | 'purchasing' | 'customers' | 'suppliers' | 'representatives'
   | 'export' | 'treasury' | 'banks' | 'cheques' | 'expenses' | 'accounting'
-  | 'reports' | 'users' | 'settings' | 'audit';
+  | 'reports' | 'users' | 'settings' | 'audit'
+  /** Not a screen: whether the person may SEE prices, costs and money values at all. */
+  | 'prices';
 
 const AUTHORIZATION_SUPER_ADMIN: RoleName = 'Super Admin';
 
@@ -29,7 +31,7 @@ export const ALL_MODULES: ModuleKey[] = [
   'dashboard', 'items', 'inventory', 'manufacturing', 'quality', 'costing',
   'sales', 'purchasing', 'customers', 'suppliers', 'representatives',
   'export', 'treasury', 'banks', 'cheques', 'expenses', 'accounting',
-  'reports', 'users', 'settings', 'audit',
+  'reports', 'users', 'settings', 'audit', 'prices',
 ];
 
 /** F23: the six explicit actions the Super Admin assigns per module. */
@@ -43,6 +45,7 @@ export const MODULE_LABELS_AR: Record<ModuleKey, string> = {
   representatives: 'المناديب والعهد', export: 'التصدير', treasury: 'الخزينة',
   banks: 'البنوك', cheques: 'الشيكات', expenses: 'المصروفات', accounting: 'المحاسبة والدفاتر',
   reports: 'التقارير', users: 'المستخدمون والصلاحيات', settings: 'الإعدادات', audit: 'سجل التدقيق',
+  prices: 'رؤية الأسعار والتكاليف',
 };
 
 export const ACTION_LABELS_AR: Record<string, string> = {
@@ -60,6 +63,7 @@ const NO_POST: PermissionAction[] = ['view', 'create', 'edit', 'export'];
  */
 const MATRIX: Record<RoleName, Partial<Record<ModuleKey, PermissionAction[]>>> = {
   'Super Admin': {
+    prices: ALL_ACTIONS,
     dashboard: ALL_ACTIONS, items: ALL_ACTIONS, inventory: ALL_ACTIONS,
     manufacturing: ALL_ACTIONS, quality: ALL_ACTIONS, costing: ALL_ACTIONS,
     sales: ALL_ACTIONS, purchasing: ALL_ACTIONS, customers: ALL_ACTIONS,
@@ -69,6 +73,7 @@ const MATRIX: Record<RoleName, Partial<Record<ModuleKey, PermissionAction[]>>> =
     settings: ALL_ACTIONS, audit: ALL_ACTIONS,
   },
   'General Manager': {
+    prices: VIEW_ONLY,
     dashboard: ALL_ACTIONS, items: VIEW_EXPORT, inventory: VIEW_EXPORT,
     manufacturing: VIEW_EXPORT, quality: VIEW_EXPORT, costing: VIEW_EXPORT,
     sales: VIEW_EXPORT, purchasing: VIEW_EXPORT, customers: VIEW_EXPORT,
@@ -77,6 +82,7 @@ const MATRIX: Record<RoleName, Partial<Record<ModuleKey, PermissionAction[]>>> =
     accounting: VIEW_EXPORT, reports: ALL_ACTIONS, audit: VIEW_EXPORT,
   },
   'Chief Accountant': {
+    prices: VIEW_ONLY,
     dashboard: VIEW_EXPORT, items: VIEW_ONLY, inventory: VIEW_EXPORT,
     manufacturing: VIEW_ONLY, quality: VIEW_ONLY, costing: ALL_ACTIONS,
     sales: [...NO_POST, 'approve'], purchasing: [...NO_POST, 'approve'],
@@ -86,12 +92,14 @@ const MATRIX: Record<RoleName, Partial<Record<ModuleKey, PermissionAction[]>>> =
     accounting: ALL_ACTIONS, reports: ALL_ACTIONS, audit: VIEW_EXPORT,
   },
   'Accountant': {
+    prices: VIEW_ONLY,
     dashboard: VIEW_ONLY, items: VIEW_ONLY, inventory: VIEW_EXPORT,
     sales: NO_POST, purchasing: NO_POST, customers: NO_POST, suppliers: NO_POST,
     treasury: NO_POST, banks: NO_POST, cheques: NO_POST, expenses: NO_POST,
     accounting: NO_POST, reports: VIEW_EXPORT,
   },
   'Cost Accountant': {
+    prices: VIEW_ONLY,
     dashboard: VIEW_ONLY, items: VIEW_EXPORT, inventory: VIEW_EXPORT,
     manufacturing: VIEW_EXPORT, costing: ALL_ACTIONS, quality: VIEW_ONLY,
     sales: VIEW_ONLY, purchasing: VIEW_ONLY, reports: VIEW_EXPORT, accounting: VIEW_ONLY,
@@ -104,27 +112,33 @@ const MATRIX: Record<RoleName, Partial<Record<ModuleKey, PermissionAction[]>>> =
     dashboard: VIEW_ONLY, items: VIEW_ONLY, inventory: NO_POST, quality: VIEW_ONLY,
   },
   'Sales Manager': {
+    prices: VIEW_ONLY,
     dashboard: VIEW_ONLY, items: VIEW_EXPORT, inventory: VIEW_EXPORT,
     sales: ALL_ACTIONS, customers: [...NO_POST, 'approve'],
     representatives: [...NO_POST, 'approve'], export: NO_POST, reports: VIEW_EXPORT,
   },
   'Sales Representative': {
+    prices: VIEW_ONLY,
     dashboard: VIEW_ONLY, items: VIEW_ONLY, customers: ['view', 'create'],
     representatives: ['view', 'create', 'edit'], sales: ['view', 'create'],
   },
   'Purchasing Manager': {
+    prices: VIEW_ONLY,
     dashboard: VIEW_ONLY, items: [...NO_POST, 'approve'], purchasing: ALL_ACTIONS,
     suppliers: [...NO_POST, 'approve'], inventory: VIEW_EXPORT, reports: VIEW_EXPORT,
   },
   'Production Manager': {
+    prices: VIEW_ONLY,
     dashboard: VIEW_ONLY, items: VIEW_EXPORT, inventory: NO_POST,
     manufacturing: ALL_ACTIONS, quality: NO_POST, costing: VIEW_EXPORT, reports: VIEW_EXPORT,
   },
   'Treasury Accountant': {
+    prices: VIEW_ONLY,
     dashboard: VIEW_ONLY, treasury: ALL_ACTIONS, banks: ALL_ACTIONS,
     cheques: ALL_ACTIONS, expenses: NO_POST, accounting: VIEW_ONLY, reports: VIEW_EXPORT,
   },
   'Viewer': {
+    prices: VIEW_ONLY,
     dashboard: VIEW_ONLY, items: VIEW_ONLY, inventory: VIEW_ONLY,
     sales: VIEW_ONLY, purchasing: VIEW_ONLY, customers: VIEW_ONLY, suppliers: VIEW_ONLY,
     manufacturing: VIEW_ONLY, quality: VIEW_ONLY, costing: VIEW_ONLY, export: VIEW_ONLY,
@@ -134,6 +148,13 @@ const MATRIX: Record<RoleName, Partial<Record<ModuleKey, PermissionAction[]>>> =
 };
 
 export class PermissionService {
+  /** May this person SEE prices, costs and money values? (Super Admin always; others by role + per-user override.) */
+  public static canSeePrices(user: { role: RoleName; permissions?: Record<string, PermissionAction[]> } | undefined | null): boolean {
+    if (!user) return true;
+    if (user.role === AUTHORIZATION_SUPER_ADMIN) return true;
+    return this.getActionsForUser(user, 'prices').includes('view');
+  }
+
   /** Actions the role holds on a module (empty array = no access). */
   public static getActions(role: RoleName, module: ModuleKey): PermissionAction[] {
     return MATRIX[role]?.[module] || [];
