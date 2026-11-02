@@ -22,7 +22,7 @@ import { currencyForCustomerType } from './pricing';
 import type { JournalLine } from '../types/erp';
 
 export const OPENING_EQUITY_ACCOUNT_ID = 'acc-3103';
-export const OPENING_SOURCE_TYPES = ['opening_balance_inventory', 'opening_balance_customer', 'opening_balance_supplier'];
+export const OPENING_SOURCE_TYPES = ['opening_balance_inventory', 'opening_balance_customer', 'opening_balance_supplier', 'opening_balance_general'];
 const OPENING_DOC_LABEL = 'رصيد أول المدة';
 
 type Actor = Pick<GuardOptions, 'userId' | 'userName' | 'isTest'>;
@@ -205,5 +205,104 @@ export class OpeningBalanceService {
       ss.openingBalance = amount;
     });
     return { success: true };
+  }
+
+  /**
+   * Opening balances of cash / bank / cheques / tax accounts: each line is a debit or credit
+   * balance of ONE existing account; the net is balanced against 3103. A bank line may name the
+   * bank account so its register balance moves together with the GL.
+   */
+  public static postGeneralOpening(params: {
+    date: string;
+    lines: Array<{ accountId: string; side: 'debit' | 'credit'; amount: number; description: string; bankAccountId?: string }>;
+  } & Actor): { success: boolean; error?: string; reference?: string } {
+    const guard = AuthorizationService.enforce('accounting', 'post', { userId: params.userId, userName: params.userName, isTest: params.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+    const db = erpDb.getSnapshot();
+    if (!params.date) return { success: false, error: 'تاريخ الرصيد الافتتاحي مطلوب' };
+    const rows = (params.lines || []).filter(l => Number(l.amount) !== 0);
+    if (rows.length === 0) return { success: false, error: 'لا توجد أرصدة' };
+    const jl: JournalLine[] = [];
+    let net = 0; // debit - credit of the real lines
+    for (const l of rows) {
+      const acc = db.accounts.find(a => a.id === l.accountId);
+      if (!acc || acc.isHeader) return { success: false, error: `حساب غير صالح (${l.accountId})` };
+      const amt = r2(Math.abs(Number(l.amount)));
+      if (!(amt > 0)) return { success: false, error: `مبلغ غير صالح (${acc.nameAr})` };
+      jl.push(l.side === 'debit' ? line(l.accountId, amt, 0, amt, 1, 'EGP', l.description) : line(l.accountId, 0, amt, amt, 1, 'EGP', l.description));
+      net += l.side === 'debit' ? amt : -amt;
+    }
+    net = r2(net);
+    this.ensureOpeningEquityAccount();
+    if (net !== 0) {
+      jl.push(net > 0
+        ? line(OPENING_EQUITY_ACCOUNT_ID, 0, net, net, 1, 'EGP', 'مقابل أرصدة أول المدة')
+        : line(OPENING_EQUITY_ACCOUNT_ID, -net, 0, -net, 1, 'EGP', 'مقابل أرصدة أول المدة'));
+    }
+    const reference = `OPB-GEN-${params.date.replace(/-/g, '')}-${db.journalEntries.length + 1}`;
+    const jv = AccountingEngine.postJournal({
+      date: params.date, reference, description: 'أرصدة أول المدة — خزينة وبنك وشيكات وضرائب',
+      sourceDocumentType: 'opening_balance_general', sourceDocumentId: reference, lines: jl,
+    } as never, params.userId, params.userName, params.isTest);
+    if (!jv.success) return { success: false, error: jv.error };
+    erpDb.mutate(draft => {
+      for (const l of rows) {
+        if (!l.bankAccountId) continue;
+        const b = draft.bankAccounts.find(x => x.id === l.bankAccountId);
+        if (b) b.currentBalance = r2((b.currentBalance || 0) + (l.side === 'debit' ? 1 : -1) * Math.abs(Number(l.amount)));
+      }
+      draft.auditLogs.push({
+        id: generateErpId('aud'), timestamp: new Date().toISOString(), userId: guard.userId, userName: guard.userName,
+        module: 'المحاسبة', action: 'post', recordId: reference, description: `أرصدة أول المدة (${rows.length} حساب)`,
+      } as never);
+    });
+    return { success: true, reference };
+  }
+
+  /**
+   * Imports an opening-balance PACKAGE (the file built by scripts/build_opening_database.ts) into the
+   * live database WITHOUT replacing it: users, settings, items and everything else stay as they are.
+   * Only allowed on a database that has no postings, customers or stock yet, so it can never
+   * double-load or overwrite real work. Atomic: one mutate.
+   */
+  public static importPackage(pkg: any, actor: Actor): { success: boolean; error?: string; summary?: string } {
+    const guard = AuthorizationService.enforce('accounting', 'post', { userId: actor.userId, userName: actor.userName, isTest: actor.isTest });
+    if (!guard.allowed) return { success: false, error: guard.error };
+    const arr = (k: string): any[] => (Array.isArray(pkg?.[k]) ? pkg[k] : []);
+    const journals = arr('journalEntries');
+    if (journals.length === 0 || !journals.every(j => String(j.sourceDocumentType || '').startsWith('opening_balance'))) {
+      return { success: false, error: 'الملف ليس ملف أرصدة افتتاحية صالحًا (يجب أن تكون كل قيوده من نوع رصيد أول المدة)' };
+    }
+    const net = Math.round(journals.reduce((t, j) => t + (Number(j.totalDebit) || 0) - (Number(j.totalCredit) || 0), 0) * 100) / 100;
+    if (net !== 0) return { success: false, error: 'قيود الملف غير متوازنة — لن يتم الاستيراد' };
+    const db = erpDb.getSnapshot();
+    if (db.journalEntries.length > 0 || db.customers.length > 0 || db.batches.length > 0 || db.inventoryTransactions.length > 0) {
+      return { success: false, error: 'لا يمكن استيراد الأرصدة الافتتاحية: النظام فيه قيود أو عملاء أو مخزون بالفعل. يُستخدم هذا الاستيراد على نظام فارغ فقط.' };
+    }
+    erpDb.mutate(draft => {
+      journals.forEach(j => draft.journalEntries.push(j));
+      arr('batches').forEach(b => draft.batches.push(b));
+      arr('inventoryTransactions').forEach(t => draft.inventoryTransactions.push(t));
+      arr('customers').forEach(c => draft.customers.push(c));
+      for (const s of arr('suppliers')) {
+        const t = draft.suppliers.find(x => x.id === s.id);
+        if (t) { t.openingBalance = s.openingBalance; t.currentBalance = s.currentBalance; } else draft.suppliers.push(s);
+      }
+      for (const b of arr('bankAccounts')) {
+        const t = draft.bankAccounts.find(x => x.id === b.id);
+        if (t) t.currentBalance = b.currentBalance; else draft.bankAccounts.push(b);
+      }
+      for (const a of arr('accounts')) {
+        const t = draft.accounts.find(x => x.id === a.id);
+        if (t) t.currentBalance = a.currentBalance; else draft.accounts.push(a);
+      }
+      arr('auditLogs').forEach(l => draft.auditLogs.push(l));
+      draft.auditLogs.push({
+        id: generateErpId('aud'), timestamp: new Date().toISOString(), userId: guard.userId, userName: guard.userName,
+        module: 'المحاسبة', action: 'post', recordId: 'opening-package',
+        description: `استيراد ملف أرصدة أول المدة (${journals.length} قيد، ${arr('customers').length} عميل، ${arr('batches').length} تشغيلة مخزون)`,
+      } as never);
+    });
+    return { success: true, summary: `${journals.length} قيد، ${arr('customers').length} عميل، ${arr('batches').length} تشغيلة مخزون` };
   }
 }

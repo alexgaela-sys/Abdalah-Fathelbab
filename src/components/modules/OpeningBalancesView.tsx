@@ -55,6 +55,25 @@ export const OpeningBalancesView: React.FC = () => {
     refresh();
   };
 
+  const importFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const pkg = JSON.parse(String(ev.target?.result));
+        if (!confirm('استيراد ملف الأرصدة الافتتاحية؟ يُضاف على النظام الحالي ولا يغيّر المستخدمين أو الإعدادات، ويُسمح به على نظام فارغ فقط.')) return;
+        const res = OpeningBalanceService.importPackage(pkg, { userId: 'usr-admin', userName: 'المشرف العام (Admin)' });
+        setMsg(res.success ? { ok: true, text: `تم استيراد الأرصدة الافتتاحية: ${res.summary}` } : { ok: false, text: res.error || 'تعذّر الاستيراد' });
+        refresh();
+      } catch {
+        setMsg({ ok: false, text: 'تعذّرت قراءة الملف — تأكد أنه ملف أرصدة افتتاحية بصيغة JSON' });
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const equity = db.accounts.find(a => a.id === 'acc-3103')?.currentBalance || 0;
 
   const partyTable = (kind: 'customer' | 'supplier') => {
@@ -114,6 +133,14 @@ export const OpeningBalancesView: React.FC = () => {
         هنا فقط تُحمَّل أرصدة بداية التشغيل (مخزون، عملاء، موردون). كل رصيد يُرحَّل بقيد متوازن مقابل حساب
         <b> 3103 أرصدة أول المدة </b>(حقوق ملكية) — <b>لا يظهر ربحًا ولا خسارة</b>، وليس مشتريات ولا جردًا.
         لا تستخدم «تسوية الجرد» لتحميل رصيد افتتاحي. رصيد الحساب 3103 الحالي: <b>{fmt(equity)}</b> ج.م.
+      </div>
+
+      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs flex flex-wrap items-center gap-3">
+        <span className="font-bold text-slate-700">لديك ملف أرصدة جاهز؟</span>
+        <label className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 cursor-pointer font-bold">
+          استيراد ملف الأرصدة الافتتاحية (JSON)
+          <input type="file" accept=".json,application/json" className="hidden" onChange={importFile} />
+        </label>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
