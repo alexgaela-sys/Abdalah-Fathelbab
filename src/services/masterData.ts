@@ -14,8 +14,9 @@
 import { erpDb, generateErpId } from './db';
 import { AuthorizationService, GuardOptions } from './authorization';
 import { Customer, Supplier, Item, User, RoleName, PermissionAction } from '../types/erp';
+import { LedgerService } from './ledger';
 import { ALL_MODULES, ASSIGNABLE_ACTIONS } from './permissions';
-import { channelForCustomerType } from './pricing';
+import { channelForCustomerType, currencyForCustomerType } from './pricing';
 
 type ModuleAction = { module: any; action: 'create' | 'edit' };
 
@@ -69,7 +70,8 @@ export class MasterDataService {
       address: params.address || '',
       phone: params.phone || '',
       taxNumber: params.taxNumber || '',
-      currency: params.currency || 'EGP',
+      // The card currency follows the customer type (export = USD): see currencyForCustomerType.
+      currency: currencyForCustomerType(params.customerType),
       creditLimit,
       currentBalance: opening,
       paymentTerms: params.paymentTerms || '',
@@ -142,7 +144,7 @@ export class MasterDataService {
       if (params.address !== undefined) c.address = params.address;
       if (params.phone !== undefined) c.phone = params.phone;
       if (params.taxNumber !== undefined) c.taxNumber = params.taxNumber;
-      if (params.currency !== undefined) c.currency = params.currency;
+      c.currency = currencyForCustomerType(c.customerType);
       c.creditLimit = creditLimit;
       if (params.paymentTerms !== undefined) c.paymentTerms = params.paymentTerms;
       draft.auditLogs.push({
@@ -155,6 +157,32 @@ export class MasterDataService {
     });
 
     return { success: true, customer: erpDb.getSnapshot().customers.find(c => c.id === customerId) };
+  }
+
+  /**
+   * Repair for cards created before currency followed the customer type: an export customer
+   * saved with an EGP card posted its invoices to 1106 but was read from 1105, so the statement
+   * came out empty and the card balance mixed dollars with pounds. Flip the currency to match
+   * the type and restate the card balance from the posted ledger (the single source of truth).
+   * Idempotent; touches only cards whose currency disagrees with their type.
+   */
+  public static normalizeCustomerCurrencies(): number {
+    const wrong = erpDb.getSnapshot().customers.filter(c => c.currency !== currencyForCustomerType(c.customerType));
+    if (wrong.length === 0) return 0;
+    erpDb.mutate(draft => {
+      for (const c of draft.customers) {
+        if (c.currency !== currencyForCustomerType(c.customerType)) c.currency = currencyForCustomerType(c.customerType);
+      }
+    });
+    // Restate balances from the ledger now that the card reads the right control account.
+    const restated = wrong.map(c => ({ id: c.id, balance: LedgerService.buildCustomerStatement({ customerId: c.id }).closingBalance }));
+    erpDb.mutate(draft => {
+      for (const r of restated) {
+        const c = draft.customers.find(x => x.id === r.id);
+        if (c) c.currentBalance = r.balance;
+      }
+    });
+    return wrong.length;
   }
 
   /** Toggle customer active flag without touching their balance or history. */

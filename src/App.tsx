@@ -4,6 +4,7 @@ import { getCloudRuntime } from './components/cloud/cloudRuntime';
 import { AuthService, AuthSession } from './services/auth';
 import { RoleName, User } from './types/erp';
 import { PermissionService } from './services/permissions';
+import { MasterDataService } from './services/masterData';
 import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { LoginView } from './components/auth/LoginView';
@@ -92,6 +93,12 @@ export function App() {
     const sess = AuthService.getCurrentSession();
     document.documentElement.dataset.hidePrices = PermissionService.canSeePrices(sess?.user) ? 'false' : 'true';
   });
+
+  // One-off repair (idempotent): an export customer saved with an EGP card is flipped to USD and
+  // its card balance is restated from the ledger, so the statement and 1106 agree.
+  useEffect(() => {
+    try { MasterDataService.normalizeCustomerCurrencies(); } catch (e) { console.error('customer currency repair failed', e); }
+  }, []);
 
   // Cloud mode: the admin can change this person's role/permissions or switch them off
   // from another device. Follow that without a re-login. (A Super Admin previewing another

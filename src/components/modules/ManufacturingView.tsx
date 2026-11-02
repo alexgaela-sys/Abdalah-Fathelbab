@@ -341,6 +341,7 @@ export const ManufacturingView: React.FC = () => {
     }
 
     setShowDailyOutputModal(null);
+    if (res.warning) alert('⚠️ ' + res.warning);
   };
 
   // Issue BOM raw/packaging materials: replaced by the staged issue dialog
@@ -1490,7 +1491,7 @@ export const ManufacturingView: React.FC = () => {
                 </button>
               </div>
               <p className="text-[10px] text-teal-800">
-                يتطلب سببًا وصلاحية اعتماد. كمية البديل لا تُضاف إلى احتياجات الخامة الأصلية (لا ازدواج استهلاك).
+                يتطلب سببًا وصلاحية اعتماد. لاستبدال قطعة بها مشكلة: اختر نفس الخامة كـ«إضافية» واذكر السبب (يمكن تكرارها). كمية البديل لا تُضاف إلى احتياجات الخامة الأصلية (لا ازدواج استهلاك).
               </p>
               {issueExtras.map((ex, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-end">

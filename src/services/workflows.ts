@@ -376,6 +376,10 @@ export class WorkflowService {
       };
     }
 
+    if (params.channel === 'export' && params.currency !== 'USD') {
+      return { success: false, error: 'فاتورة التصدير يجب أن تكون بالدولار USD' };
+    }
+
     const warehouse = db.warehouses.find(w => w.id === params.warehouseId);
     if (!warehouse) return { success: false, error: 'المستودع غير صالح' };
 
