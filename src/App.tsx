@@ -27,6 +27,7 @@ import { BanksView } from './components/modules/BanksView';
 import { ChequesView } from './components/modules/ChequesView';
 import { ExpensesView } from './components/modules/ExpensesView';
 import { AccountingView } from './components/modules/AccountingView';
+import { OpeningBalancesView } from './components/modules/OpeningBalancesView';
 import { ReportsView, ReportType } from './components/modules/ReportsView';
 import { UsersView } from './components/modules/UsersView';
 import { SettingsView } from './components/modules/SettingsView';
@@ -217,6 +218,7 @@ export function App() {
           {activeTab === 'cheques' && <ChequesView />}
           {activeTab === 'expenses' && <ExpensesView />}
           {activeTab === 'accounting' && <AccountingView />}
+          {activeTab === 'opening' && <OpeningBalancesView />}
           {activeTab === 'reports' && (
             <ReportsView
               initialReport={reportsSub}

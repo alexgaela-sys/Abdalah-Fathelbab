@@ -20,7 +20,7 @@ const TAB_TO_MODULE: Record<NavTab, ModuleKey> = {
   sales: 'sales', purchasing: 'purchasing', customers: 'customers',
   suppliers: 'suppliers', representatives: 'representatives', export: 'export',
   treasury: 'treasury', banks: 'banks', cheques: 'cheques', expenses: 'expenses',
-  accounting: 'accounting', reports: 'reports', users: 'users', settings: 'settings',
+  accounting: 'accounting', opening: 'accounting', reports: 'reports', users: 'users', settings: 'settings',
   audit: 'audit',
 };
 

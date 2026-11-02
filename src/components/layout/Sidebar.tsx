@@ -26,6 +26,7 @@ export type NavTab =
   | 'cheques'
   | 'expenses'
   | 'accounting'
+  | 'opening'
   | 'reports'
   | 'users'
   | 'settings'
@@ -87,6 +88,7 @@ const NAV_GROUPS: Array<{
     titleAr: 'الحسابات',
     items: [
       { id: 'accounting', label: 'المحاسبة', icon: BookOpen },
+      { id: 'opening', label: 'أرصدة أول المدة', icon: BookOpen },
       { id: 'treasury', label: 'الخزينة', icon: Wallet },
       { id: 'banks', label: 'البنوك', icon: Landmark },
       { id: 'cheques', label: 'الشيكات', icon: FileCheck2 },

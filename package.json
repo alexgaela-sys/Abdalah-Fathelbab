@@ -29,7 +29,8 @@
     "qa:cloud-http": "bun scripts/cloud_http_selftest.ts",
     "qa:cloud-identity": "bun scripts/cloud_identity_test.ts",
     "qa:export-customer": "bun scripts/qa_export_customer_statement.ts",
-    "qa:production-issue": "bun scripts/qa_production_issue_and_deviation.ts"
+    "qa:production-issue": "bun scripts/qa_production_issue_and_deviation.ts",
+    "qa:opening": "bun scripts/qa_opening_balances.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

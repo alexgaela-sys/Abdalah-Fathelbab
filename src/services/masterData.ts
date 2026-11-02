@@ -15,6 +15,7 @@ import { erpDb, generateErpId } from './db';
 import { AuthorizationService, GuardOptions } from './authorization';
 import { Customer, Supplier, Item, User, RoleName, PermissionAction } from '../types/erp';
 import { LedgerService } from './ledger';
+import { OpeningBalanceService } from './openingBalances';
 import { ALL_MODULES, ASSIGNABLE_ACTIONS } from './permissions';
 import { channelForCustomerType, currencyForCustomerType } from './pricing';
 
@@ -31,6 +32,8 @@ export class MasterDataService {
     code: string; name: string; customerType: Customer['customerType']; channel: string;
     address?: string; phone?: string; taxNumber?: string; currency?: 'EGP' | 'USD';
     creditLimit?: number; openingBalance?: number; paymentTerms?: string;
+    /** Cut-over date + rate (USD customers) of the opening balance; it is POSTED to the books, not only stored on the card. */
+    openingDate?: string; openingExchangeRate?: number;
     userId?: string; userName?: string; isTest?: boolean;
   }): { success: boolean; customer?: Customer; error?: string } {
     const g = guard({ module: 'customers', action: 'create' }, params);
@@ -73,11 +76,16 @@ export class MasterDataService {
       // The card currency follows the customer type (export = USD): see currencyForCustomerType.
       currency: currencyForCustomerType(params.customerType),
       creditLimit,
-      currentBalance: opening,
+      // The opening balance is posted through OpeningBalanceService below (card AND books together).
+      currentBalance: 0,
       paymentTerms: params.paymentTerms || '',
-      openingBalance: opening,
+      openingBalance: 0,
       active: true,
     };
+    const openingRate = Number(params.openingExchangeRate) || (erpDb.getSnapshot().company.currentUsdExchangeRate || 0);
+    if (opening !== 0 && customer.currency === 'USD' && !(openingRate > 0)) {
+      return { success: false, error: 'عميل التصدير برصيد افتتاحي يتطلب سعر صرف (جنيه للدولار)' };
+    }
 
     erpDb.mutate(draft => {
       draft.customers.push(customer);
@@ -90,7 +98,15 @@ export class MasterDataService {
       });
     });
 
-    return { success: true, customer };
+    if (opening !== 0) {
+      const ob = OpeningBalanceService.postCustomerOpening({
+        customerId: customer.id, amount: opening, date: params.openingDate || new Date().toISOString().split('T')[0],
+        exchangeRate: openingRate, userId: g.userId, userName: g.userName, isTest: params.isTest,
+      });
+      if (!ob.success) return { success: false, customer: erpDb.getSnapshot().customers.find(c => c.id === customer.id), error: `تم إنشاء العميل لكن تعذّر ترحيل الرصيد الافتتاحي: ${ob.error}` };
+    }
+
+    return { success: true, customer: erpDb.getSnapshot().customers.find(c => c.id === customer.id) || customer };
   }
 
   /**
@@ -215,6 +231,7 @@ export class MasterDataService {
   public static createSupplier(params: {
     code: string; name: string; taxNumber?: string; contactPerson?: string; phone?: string;
     address?: string; paymentTerms?: string; currency?: 'EGP' | 'USD'; openingBalance?: number;
+    openingDate?: string; openingExchangeRate?: number;
     userId?: string; userName?: string; isTest?: boolean;
   }): { success: boolean; supplier?: Supplier; error?: string } {
     const g = guard({ module: 'suppliers', action: 'create' }, params);
@@ -243,10 +260,14 @@ export class MasterDataService {
       address: (params.address || '').trim(),
       paymentTerms: params.paymentTerms || '',
       currency: params.currency || 'EGP',
-      openingBalance: opening,
-      currentBalance: opening,
+      openingBalance: 0,
+      currentBalance: 0,
       active: true,
     };
+    const supRate = Number(params.openingExchangeRate) || (erpDb.getSnapshot().company.currentUsdExchangeRate || 0);
+    if (opening !== 0 && supplier.currency === 'USD' && !(supRate > 0)) {
+      return { success: false, error: 'مورد بالدولار برصيد افتتاحي يتطلب سعر صرف (جنيه للدولار)' };
+    }
 
     erpDb.mutate(draft => {
       draft.suppliers.push(supplier);
@@ -259,7 +280,15 @@ export class MasterDataService {
       });
     });
 
-    return { success: true, supplier };
+    if (opening !== 0) {
+      const ob = OpeningBalanceService.postSupplierOpening({
+        supplierId: supplier.id, amount: opening, date: params.openingDate || new Date().toISOString().split('T')[0],
+        exchangeRate: supRate, userId: g.userId, userName: g.userName, isTest: params.isTest,
+      });
+      if (!ob.success) return { success: false, supplier: erpDb.getSnapshot().suppliers.find(x => x.id === supplier.id), error: `تم إنشاء المورد لكن تعذّر ترحيل الرصيد الافتتاحي: ${ob.error}` };
+    }
+
+    return { success: true, supplier: erpDb.getSnapshot().suppliers.find(x => x.id === supplier.id) || supplier };
   }
 
   public static setSupplierActive(supplierId: string, active: boolean, options?: GuardOptions): { success: boolean; error?: string } {
