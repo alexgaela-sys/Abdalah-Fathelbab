@@ -3,7 +3,8 @@ import {
   User as UserIcon, Lock, Mail, Phone, Shield, 
   Check, AlertCircle, Eye, EyeOff, X, Image as ImageIcon
 } from 'lucide-react';
-import { erpDb } from '../../services/db';
+import { erpDb, CLOUD_STORAGE_MODE } from '../../services/db';
+import { getCloudRuntime } from '../cloud/cloudRuntime';
 import { AuthService } from '../../services/auth';
 import { MasterDataService } from '../../services/masterData';
 import { RoleName, User } from '../../types/erp';
@@ -54,7 +55,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     'Viewer'
   ];
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -79,6 +80,36 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       }
     }
 
+    // Cloud mode: the password is the Supabase sign-in password and the user list is
+    // admin-managed on the server. Everyone may change their own password; only a
+    // Super Admin may also edit the profile fields.
+    if (CLOUD_STORAGE_MODE) {
+      const rt = getCloudRuntime();
+      const isAdmin = currentUser.role === 'Super Admin';
+      if (!newPassword && !isAdmin) {
+        setErrorMsg('تعديل البيانات الشخصية من صلاحية المدير. يمكنك هنا تغيير كلمة المرور فقط.');
+        return;
+      }
+      if (newPassword) {
+        if (newPassword.length < 6) {
+          setErrorMsg('كلمة المرور يجب ألا تقل عن 6 أحرف');
+          return;
+        }
+        try {
+          await rt?.auth.updatePassword(newPassword);
+        } catch (e) {
+          setErrorMsg((e as Error).message || 'تعذر تغيير كلمة المرور');
+          return;
+        }
+        setNewPassword('');
+        setConfirmPassword('');
+        if (!isAdmin) {
+          setSuccessMsg('تم تغيير كلمة المرور بنجاح');
+          return;
+        }
+      }
+    }
+
     // F15: guarded service write. Role/active changes require 'users:edit';
     // a plain user editing their own profile can never self-elevate.
     const profileRes = MasterDataService.updateOwnProfile({
@@ -88,7 +119,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       email,
       phone,
       avatar,
-      newPassword: newPassword || undefined,
+      newPassword: CLOUD_STORAGE_MODE ? undefined : newPassword || undefined,
       requestedRole: role,
       requestedActive: active,
       options: { userId: currentUser.id, userName: currentUser.name },

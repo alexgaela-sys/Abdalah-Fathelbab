@@ -351,6 +351,8 @@ export class MasterDataService {
    */
   public static createUser(params: {
     username: string; password: string; name: string; email?: string; role: RoleName;
+    /** Cloud mode: the user signs in with this Supabase account, so no password is kept in the ERP. */
+    authUserId?: string;
     userId?: string; userName?: string; isTest?: boolean;
   }): { success: boolean; user?: User; error?: string } {
     const g = guard({ module: 'users', action: 'create' }, params);
@@ -363,8 +365,12 @@ export class MasterDataService {
 
     if (!username) return { success: false, error: 'اسم الدخول (username) مطلوب' };
     if (!name) return { success: false, error: 'اسم المستخدم مطلوب' };
-    if (!password) return { success: false, error: 'كلمة المرور مطلوبة — لا يوجد كلمة مرور افتراضية' };
-    if (password.length < 6) return { success: false, error: 'كلمة المرور يجب ألا تقل عن 6 أحرف' };
+    if (!params.authUserId) {
+      if (!password) return { success: false, error: 'كلمة المرور مطلوبة — لا يوجد كلمة مرور افتراضية' };
+      if (password.length < 6) return { success: false, error: 'كلمة المرور يجب ألا تقل عن 6 أحرف' };
+    } else if (!(params.email || '').trim()) {
+      return { success: false, error: 'البريد الإلكتروني مطلوب لحساب الدخول' };
+    }
     if (db.users.some(u => u.username.toLowerCase() === username)) {
       return { success: false, error: `اسم الدخول (${username}) مستخدم بالفعل` };
     }
@@ -372,9 +378,9 @@ export class MasterDataService {
     const user: User = {
       id: generateErpId('usr'),
       username,
-      password,
+      ...(params.authUserId ? { authUserId: params.authUserId } : { password }),
       name,
-      email: (params.email || '').trim(),
+      email: (params.email || '').trim().toLowerCase(),
       role: params.role,
       active: true,
       createdAt: new Date().toISOString(),
@@ -392,6 +398,28 @@ export class MasterDataService {
     });
 
     return { success: true, user };
+  }
+
+  /** Cloud mode: attach a Supabase sign-in account to an ERP user that has none (e.g. imported from the old system). */
+  public static linkAuthUser(userId: string, authUserId: string, options?: GuardOptions): { success: boolean; error?: string } {
+    const g = guard({ module: 'users', action: 'edit' }, options);
+    if (!g.allowed) return { success: false, error: g.error };
+    const existing = erpDb.getSnapshot().users.find(u => u.id === userId);
+    if (!existing) return { success: false, error: 'المستخدم غير موجود' };
+    erpDb.mutate(draft => {
+      const u = draft.users.find(x => x.id === userId);
+      if (!u) return;
+      u.authUserId = authUserId;
+      delete u.password;
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: g.userId, userName: g.userName,
+        module: 'المستخدمون والصلاحيات', action: 'edit', recordId: userId,
+        description: `إنشاء حساب دخول سحابي للمستخدم ${existing.username} بواسطة ${g.userName}`,
+      });
+    });
+    return { success: true };
   }
 
   public static setUserActive(userId: string, active: boolean, options?: GuardOptions): { success: boolean; error?: string } {
