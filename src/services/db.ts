@@ -590,6 +590,21 @@ export const CHIP_AND_FRYING_ITEMS: Item[] = [
     ...pkgItem('item-raw-chip', 'RM-CHIP-01', 'شيبس / فاير فينجر', 'Chips / Fire Finger', 'unit-kg'),
     itemType: 'raw_material',
   },
+  // Per-flavour ready-made chips bought from the supplier by KG (production sheet, Nov 2026).
+  ...([
+    ['item-raw-chip-chicken', 'RM-CHIP-CHK', 'شيبس ذرة محمص بالدجاج', 'Roasted corn chips - chicken'],
+    ['item-raw-chip-beef-bbq', 'RM-CHIP-BBQ', 'شيبس ذرة محمص باللحم باربكيو', 'Roasted corn chips - beef BBQ'],
+    ['item-raw-chip-krinkle', 'RM-CHIP-KRK', 'كرينكل شيبس الذرة بالدجاج', 'Krinkle corn chips - chicken'],
+    ['item-raw-chip-fire-lemon', 'RM-CHIP-FFL', 'فاير فينجر ليمون', 'Fire finger - lemon'],
+    ['item-raw-chip-fire-shrimp', 'RM-CHIP-FFS', 'فاير فينجر جمبري', 'Fire finger - shrimp'],
+    ['item-raw-chip-nacho-salt', 'RM-CHIP-NSL', 'ناتشوز شيبس مملح', 'Nacho chips - salted'],
+    ['item-raw-chip-nacho-cheese', 'RM-CHIP-NCH', 'ناتشوز شيبس بالجبنة', 'Nacho chips - cheese'],
+    ['item-raw-chip-nacho-paprika', 'RM-CHIP-NPR', 'ناتشوز شيبس بالبابريكا (الفلفل الحلو)', 'Nacho chips - paprika'],
+    ['item-raw-chip-dibi-shells', 'RM-CHIP-DBS', 'ديبي شيلز مقرمشات مملحة', 'Dibi shells - salted'],
+  ] as const).map(([id, code, ar, en]): Item => ({
+    ...pkgItem(id, code, ar, en, 'unit-kg'),
+    itemType: 'raw_material',
+  })),
 ];
 
 // Production Master Catalog: Exact 11 Finished Products (SnakDip) & Essential Raw Materials/Packaging

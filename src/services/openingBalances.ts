@@ -296,6 +296,9 @@ export class OpeningBalanceService {
         const t = draft.accounts.find(x => x.id === a.id);
         if (t) t.currentBalance = a.currentBalance; else draft.accounts.push(a);
       }
+      for (const it of arr('items')) if (!draft.items.find(x => x.id === it.id)) draft.items.push(it);
+      for (const b of arr('boms')) if (!draft.boms.find(x => x.id === b.id)) draft.boms.push(b);
+      for (const l of arr('bomLines')) if (!draft.bomLines.find(x => x.id === l.id)) draft.bomLines.push(l);
       arr('auditLogs').forEach(l => draft.auditLogs.push(l));
       draft.auditLogs.push({
         id: generateErpId('aud'), timestamp: new Date().toISOString(), userId: guard.userId, userName: guard.userName,

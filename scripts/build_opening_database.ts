@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { erpDb, createEmptyDatabase, applyMasterDataMigration, applyUomMigration, applyWithholdingAccountMigration } from '../src/services/db';
 import { MasterDataService } from '../src/services/masterData';
 import { OpeningBalanceService } from '../src/services/openingBalances';
+import { installStandardBoms } from '../src/services/standardFormulas';
 import { LedgerService } from '../src/services/ledger';
 
 const OUT = process.argv[2] || 'snakdip_opening_2026-10-31.json';
@@ -138,6 +139,8 @@ must('general', OpeningBalanceService.postGeneralOpening({
 log.push(['غير محمّل (لا يوجد حساب مطابق في النظام)', 'عهد وسلف الموظفين', 21350]);
 log.push(['غير محمّل (لا يوجد حساب مطابق في النظام)', 'أعمال تحت التنفيذ (تجهيزات وإنشاءات)', 102300]);
 log.push(['غير محمّل (لا يوجد حساب مطابق في النظام)', 'قروض وأقساط', 33500]);
+
+must('standard BOMs', installStandardBoms({ userId: A.userId, userName: A.userName, isTest: false } as never) as never);
 
 // ---------------------------------------------------------------- checks + export
 const db = snap();

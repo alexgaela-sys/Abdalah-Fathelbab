@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { BookOpenCheck, Plus, Trash2 } from 'lucide-react';
 import { erpDb } from '../../services/db';
 import { OpeningBalanceService } from '../../services/openingBalances';
+import { installStandardBoms } from '../../services/standardFormulas';
 import { currencyForCustomerType } from '../../services/pricing';
 
 type Tab = 'inventory' | 'customers' | 'suppliers';
@@ -74,6 +75,13 @@ export const OpeningBalancesView: React.FC = () => {
     reader.readAsText(file);
   };
 
+  const installBoms = () => {
+    if (!confirm('تحميل معادلات التصنيع القياسية للمنتجات الـ11؟ (تُنشأ نسخة جديدة وتُوقف النسخة الفعالة السابقة)')) return;
+    const res = installStandardBoms({ userId: 'usr-admin', userName: 'المشرف العام (Admin)' });
+    setMsg(res.success ? { ok: true, text: `تم تحميل ${res.created} معادلة تصنيع` } : { ok: false, text: res.error || 'تعذّر التحميل' });
+    refresh();
+  };
+
   const equity = db.accounts.find(a => a.id === 'acc-3103')?.currentBalance || 0;
 
   const partyTable = (kind: 'customer' | 'supplier') => {
@@ -141,6 +149,7 @@ export const OpeningBalancesView: React.FC = () => {
           استيراد ملف الأرصدة الافتتاحية (JSON)
           <input type="file" accept=".json,application/json" className="hidden" onChange={importFile} />
         </label>
+        <button onClick={installBoms} className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-100 font-bold">تحميل معادلات التصنيع القياسية (11 منتج)</button>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
