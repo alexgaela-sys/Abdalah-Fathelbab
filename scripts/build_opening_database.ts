@@ -98,11 +98,17 @@ for (const c of customers) {
     code: c.code, name: c.name, customerType: 'wholesale', channel: 'wholesale', phone: c.phone, openingBalance: c.opening, openingDate: D, ...A,
   } as never));
 }
-// Export: Kuwait — USD 9,138.88 outstanding, carried at the EGP value in the books (549,421.39)
-const KUWAIT_USD = 9138.88; const KUWAIT_EGP = 549421.39;
+// Export customers (USD). Booked at the provisional October rate 56.0 (the Kuwait invoice and the UAE deposit rate).
+//   Kuwait owes the company $5,154;  UAE paid a $12,956 deposit (credit balance = advance).
+const EXPORT_RATE = 56;
+const KUWAIT_USD = 5154; const UAE_USD = -12956;
 must('customer Kuwait', MasterDataService.createCustomer({
   code: 'CUS-KUWAIT', name: 'عميل الكويت (تصدير)', customerType: 'export', channel: 'export', openingBalance: KUWAIT_USD,
-  openingExchangeRate: KUWAIT_EGP / KUWAIT_USD, openingDate: D, ...A,
+  openingExchangeRate: EXPORT_RATE, openingDate: D, ...A,
+} as never));
+must('customer UAE', MasterDataService.createCustomer({
+  code: 'CUS-UAE', name: 'عميل الإمارات (تصدير)', customerType: 'export', channel: 'export', openingBalance: UAE_USD,
+  openingExchangeRate: EXPORT_RATE, openingDate: D, ...A,
 } as never));
 
 // ---------------------------------------------------------------- suppliers
@@ -150,7 +156,7 @@ for (const c of snap().customers) {
   if (Math.abs(st.cardDiff) > 0.01) throw new Error(`customer ${c.name}: card/statement differ by ${st.cardDiff}`);
 }
 if (tb !== 0) throw new Error(`journals do not balance: ${tb}`);
-if (Math.abs(bal('acc-1106') - KUWAIT_EGP) > 0.01) throw new Error('Kuwait EGP mismatch');
+if (Math.abs(bal('acc-1106') - (KUWAIT_USD + UAE_USD) * EXPORT_RATE) > 0.01) throw new Error('export receivable mismatch');
 if (Math.abs(bal('acc-2101') + 2776470.89) > 0.01 && Math.abs(bal('acc-2101') - 2776470.89) > 0.01) throw new Error('suppliers mismatch');
 
 writeFileSync(OUT, JSON.stringify(snap()));
