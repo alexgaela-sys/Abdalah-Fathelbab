@@ -4,7 +4,7 @@
 // (raw materials / packaging with unit prices) and the customers / suppliers ledgers.
 //   bun scripts/build_opening_database.ts <out.json>
 import { readFileSync, writeFileSync } from 'fs';
-import { erpDb, createEmptyDatabase, applyMasterDataMigration, applyUomMigration, applyWithholdingAccountMigration } from '../src/services/db';
+import { erpDb, createEmptyDatabase, applyMasterDataMigration, applyUomMigration, applyWithholdingAccountMigration, applyEmployeeCipLoanAccountsMigration } from '../src/services/db';
 import { MasterDataService } from '../src/services/masterData';
 import { OpeningBalanceService } from '../src/services/openingBalances';
 import { installStandardBoms } from '../src/services/standardFormulas';
@@ -19,7 +19,7 @@ const stock = JSON.parse(readFileSync(new URL('../data/opening_stock_2026-10-31.
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const must = <T extends { success: boolean; error?: string }>(label: string, r: T): T => { if (!r.success) throw new Error(`${label}: ${r.error}`); return r; };
 
-erpDb.restore(JSON.parse(JSON.stringify(applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(createEmptyDatabase()))))));
+erpDb.restore(JSON.parse(JSON.stringify(applyEmployeeCipLoanAccountsMigration(applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(createEmptyDatabase())))))));
 const snap = () => erpDb.getSnapshot();
 const log: Array<[string, string, number]> = [];
 
@@ -131,13 +131,13 @@ must('general', OpeningBalanceService.postGeneralOpening({
     { accountId: 'acc-1104', side: 'debit', amount: 159000, description: 'شيكات تحت التحصيل (صافي) 31/10/2026' },
     { accountId: 'acc-1113', side: 'debit', amount: 52815.70, description: 'ضريبة القيمة المضافة — مدخلات' },
     { accountId: 'acc-1114', side: 'debit', amount: 2513.68, description: 'ضريبة خصم من المنبع (أصل)' },
+    { accountId: 'acc-1115', side: 'debit', amount: 21350, description: 'عهد وسلف الموظفين 31/10/2026' },
+    { accountId: 'acc-1201', side: 'debit', amount: 102300, description: 'أعمال تحت التنفيذ (تجهيزات وإنشاءات) 31/10/2026' },
+    { accountId: 'acc-2105', side: 'credit', amount: 33500, description: 'قروض وأقساط (قرض سيارة) 31/10/2026' },
     { accountId: 'acc-2103', side: 'credit', amount: 35191.58, description: 'ضريبة القيمة المضافة — مخرجات' },
     { accountId: 'acc-2104', side: 'credit', amount: 155430, description: 'رواتب وأجور مستحقة' },
   ],
 }));
-log.push(['غير محمّل (لا يوجد حساب مطابق في النظام)', 'عهد وسلف الموظفين', 21350]);
-log.push(['غير محمّل (لا يوجد حساب مطابق في النظام)', 'أعمال تحت التنفيذ (تجهيزات وإنشاءات)', 102300]);
-log.push(['غير محمّل (لا يوجد حساب مطابق في النظام)', 'قروض وأقساط', 33500]);
 
 must('standard BOMs', installStandardBoms({ userId: A.userId, userName: A.userName, isTest: false } as never) as never);
 
