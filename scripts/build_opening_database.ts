@@ -31,17 +31,16 @@ const add = (itemId: string, qty: number, value: number, note: string) => {
   const p = pools.get(itemId) || { itemId, qty: 0, value: 0, note: '' };
   p.qty += qty; p.value += value; p.note = p.note ? `${p.note} + ${note}` : note; pools.set(itemId, p);
 };
-const SAUCE_KG = 0.075; // one sauce piece = 0.075 kg (the ERP recipe rate)
 for (const r of stock.raw) {
   const n = r.name;
   if (!(r.qty > 0) || !(r.value > 0)) continue;
   if (n.startsWith('ديو ')) add('item-pkg-box-duo', r.qty, r.value, 'علب ديو');
   else if (n.startsWith('سنجل ')) add('item-pkg-box-single', r.qty, r.value, 'علب سنجل');
-  else if (n === 'صوص باربكيو') add('item-raw-flavor-honey-bbq', r.qty * SAUCE_KG, r.value, n);
-  else if (n === 'صوص سويت شيلي') add('item-raw-flavor-sweet-chili', r.qty * SAUCE_KG, r.value, n);
-  else if (n === 'صوص برجر') add('item-raw-flavor-smokey-burger', r.qty * SAUCE_KG, r.value, n);
-  else if (n === 'صوص سبايسي') add('item-raw-flavor-spicy-grilled', r.qty * SAUCE_KG, r.value, n);
-  else if (n === 'صوص مستردة') add('item-raw-flavor-honey-mustard', r.qty * SAUCE_KG, r.value, n);
+  else if (n === 'صوص باربكيو') add('item-raw-flavor-honey-bbq', r.qty, r.value, n);
+  else if (n === 'صوص سويت شيلي') add('item-raw-flavor-sweet-chili', r.qty, r.value, n);
+  else if (n === 'صوص برجر') add('item-raw-flavor-smokey-burger', r.qty, r.value, n);
+  else if (n === 'صوص سبايسي') add('item-raw-flavor-spicy-grilled', r.qty, r.value, n);
+  else if (n === 'صوص مستردة') add('item-raw-flavor-honey-mustard', r.qty, r.value, n);
   else if (n.startsWith('طبق ابيض')) add('item-pkg-tray', r.qty, r.value, n);
   else if (n.startsWith('طبق اصفر') || n === 'طبق صوص سنجل') add('item-pkg-sauce-tray', r.qty, r.value, n);
   else if (n === 'جلافزات') add('item-pkg-liner', r.qty, r.value, n);

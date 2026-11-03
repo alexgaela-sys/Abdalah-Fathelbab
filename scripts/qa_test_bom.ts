@@ -28,7 +28,7 @@ export function ensureTestBom(finishedItemId: string): BomHeader {
     ['item-raw-oil', PRODUCTION_RATES.OIL_KG_PER_1000, 'unit-kg'],
     ['item-raw-chip', Number(chipKg.toFixed(4)), 'unit-kg'],
     ['item-pkg-film', Number((chipKg * PRODUCTION_RATES.ROLL_PER_KG_CHIPS).toFixed(6)), 'unit-roll'],
-    ...sauces.map(id => [id, PRODUCTION_RATES.SAUCE_KG_PER_PIECE * BASE, 'unit-kg'] as [string, number, string]),
+    ...sauces.map(id => [id, PRODUCTION_RATES.SAUCE_KG_PER_PIECE * BASE, 'unit-piece'] as [string, number, string]),
     [isDuo ? 'item-pkg-box-duo' : 'item-pkg-box-single', BASE, 'unit-piece'],
     ['item-pkg-tray', BASE, 'unit-piece'],
     ...(isDuo

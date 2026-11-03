@@ -4,7 +4,6 @@ import { erpDb } from './db';
 import { ManufacturingEngine } from './manufacturing';
 
 const BASE = 1000;
-const SAUCE_KG = 0.075;
 const SAUCE = { sweet: 'item-raw-flavor-sweet-chili', spicy: 'item-raw-flavor-spicy-grilled', bbq: 'item-raw-flavor-honey-bbq', burger: 'item-raw-flavor-smokey-burger', mustard: 'item-raw-flavor-honey-mustard' };
 
 /** قطعة نهائية تطلع من كل 1 كجم شيبس */
@@ -35,7 +34,7 @@ export function formulaLines(f: Formula) {
   return [
     L(f.chip, (portions * BASE) / CHIP_YIELD[f.chip], 'unit-kg'),
     L('item-pkg-film', 1, 'unit-roll'),
-    ...f.sauces.map(id => L(id, SAUCE_KG * BASE, 'unit-kg')),
+    ...f.sauces.map(id => L(id, BASE, 'unit-piece')),
     L(f.duo ? 'item-pkg-box-duo' : 'item-pkg-box-single', BASE, 'unit-piece'),
     ...(f.duo
       ? [L('item-pkg-tray', BASE, 'unit-piece'), L('item-pkg-sauce-tray', BASE, 'unit-piece'), L('item-pkg-liner', BASE, 'unit-piece')]

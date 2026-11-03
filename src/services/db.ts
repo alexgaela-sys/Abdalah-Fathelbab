@@ -662,8 +662,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص سويت شيلي',
     nameEn: 'Sweet Chili Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -684,8 +684,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص سبايسي مشوي',
     nameEn: 'Spicy Grilled Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -706,8 +706,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص مستردة',
     nameEn: 'Honey Mustard Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -728,8 +728,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص برجر',
     nameEn: 'Burger Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -750,8 +750,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص باربكيو',
     nameEn: 'BBQ Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -1124,7 +1124,8 @@ export const PRODUCTION_RATES_CHIP_KG_PER_PIECE = 800 / 1000;
 
 export const PRODUCTION_RATES = {
   /** grams of sauce per finished piece (0.075 KG = 75 g, full decimal precision) */
-  SAUCE_KG_PER_PIECE: 0.075,
+  /** sauce is supplied by the PIECE: 1 sauce piece per sauce flavour per finished piece (name kept for compatibility) */
+  SAUCE_KG_PER_PIECE: 1,
   /** chips consumed per SINGLE piece / per DUO piece */
   CHIPS_PER_SINGLE: 1,
   CHIPS_PER_DUO: 2,
@@ -1207,7 +1208,7 @@ function buildInitialBoms(): { boms: BomHeader[]; bomLines: BomLine[] } {
         ...recipe.sauceItemIds.map(id => ({
           materialItemId: id,
           quantityRequired: PRODUCTION_RATES.SAUCE_KG_PER_PIECE * BASE,
-          unitId: 'unit-kg',
+          unitId: 'unit-piece',
         })),
         // --- primary container: singles and duos use DIFFERENT boxes ---
         {
@@ -1460,6 +1461,14 @@ export function applyMasterDataMigration(db: ERPDatabaseSchema): ERPDatabaseSche
   // preserved. Idempotent, and safe for existing databases.
   const chip = items.find(i => i.id === 'item-raw-chip');
   if (chip) { chip.itemType = 'raw_material'; }
+
+  // Sauces are supplied by the PIECE (not by weight). Switch the unit only while the
+  // sauce has no stock movements, so existing history is never reinterpreted.
+  const usedItemIds = new Set((Array.isArray(db.inventoryTransactions) ? db.inventoryTransactions : []).map((t: { itemId: string }) => t.itemId));
+  for (const sid of ['item-raw-flavor-sweet-chili', 'item-raw-flavor-spicy-grilled', 'item-raw-flavor-honey-mustard', 'item-raw-flavor-smokey-burger', 'item-raw-flavor-honey-bbq']) {
+    const sauce = items.find(i => i.id === sid);
+    if (sauce && sauce.baseUnitId === 'unit-kg' && !usedItemIds.has(sid)) { sauce.baseUnitId = 'unit-piece'; sauce.purchaseUnitId = 'unit-piece'; }
+  }
 
   // 3) canonical recipe display names for the 11 finished products (ids intact)
   for (const [id, recipe] of Object.entries(CANONICAL_FINISHED_PRODUCTS)) {
