@@ -1345,14 +1345,15 @@ export function createEmptyDatabase(): ERPDatabaseSchema {
 }
 
 /**
- * ADDITIVE migration: employee custody/advances (1115), construction-in-progress (1201,
+ * ADDITIVE migration: employee custody (1115) and advances (1116), construction-in-progress (1201,
  * under a new non-current-assets header 12) and loans & instalments (2105). Never touches
  * existing accounts or balances.
  */
 export function applyEmployeeCipLoanAccountsMigration(db: ERPDatabaseSchema): ERPDatabaseSchema {
   const accounts = Array.isArray(db.accounts) ? db.accounts : [];
   const add = (a: Account) => { if (!accounts.some(x => x.id === a.id)) accounts.push(a); };
-  add({ id: 'acc-1115', code: '1115', nameAr: 'عهد وسلف الموظفين', nameEn: 'Employee Custody & Advances', category: 'Assets', isHeader: false, parentId: 'acc-11', level: 3, currentBalance: 0 });
+  add({ id: 'acc-1115', code: '1115', nameAr: 'عهد الموظفين', nameEn: 'Employee Custody', category: 'Assets', isHeader: false, parentId: 'acc-11', level: 3, currentBalance: 0 });
+  add({ id: 'acc-1116', code: '1116', nameAr: 'سلف الموظفين', nameEn: 'Employee Advances', category: 'Assets', isHeader: false, parentId: 'acc-11', level: 3, currentBalance: 0 });
   add({ id: 'acc-12', code: '12', nameAr: 'الأصول غير المتداولة', nameEn: 'Non-Current Assets', category: 'Assets', isHeader: true, parentId: 'acc-1', level: 2, currentBalance: 0 });
   add({ id: 'acc-1201', code: '1201', nameAr: 'أعمال تحت التنفيذ (تجهيزات وإنشاءات)', nameEn: 'Construction in Progress', category: 'Assets', isHeader: false, parentId: 'acc-12', level: 3, currentBalance: 0 });
   add({ id: 'acc-2105', code: '2105', nameAr: 'قروض وأقساط (قرض سيارة)', nameEn: 'Loans & Instalments', category: 'Liabilities', isHeader: false, parentId: 'acc-21', level: 3, currentBalance: 0 });
