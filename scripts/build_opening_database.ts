@@ -27,14 +27,15 @@ const log: Array<[string, string, number]> = [];
 const val = (name: string) => stock.raw.find(r => r.name === name)!;
 type Pool = { itemId: string; qty: number; value: number; note: string };
 const pools = new Map<string, Pool>();
-// Sauces are valued at the LATEST supplier carton price incl. VAT ÷ 50 pieces (= FIFO: the stock on hand is
-// smaller than the last purchase layer). The stock sheet carried older prices (e.g. burger 9.638928).
-const SAUCE_FIFO_CARTON: Record<string, number> = {
-  'item-raw-flavor-smokey-burger': 493.2894, 'item-raw-flavor-honey-mustard': 404.5518,
-  'item-raw-flavor-sweet-chili': 292.3188, 'item-raw-flavor-honey-bbq': 313.2036, 'item-raw-flavor-spicy-grilled': 334.077,
+// Sauces are valued at the item-master cost = latest supplier carton price incl. VAT / 50 pieces
+// (this is FIFO: the stock on hand is smaller than the last purchase layer). The stock sheet carried
+// older prices (e.g. burger 9.638928).
+const SAUCE_UNIT_COST: Record<string, number> = {
+  'item-raw-flavor-smokey-burger': 9.8658, 'item-raw-flavor-honey-mustard': 8.09,
+  'item-raw-flavor-sweet-chili': 5.85, 'item-raw-flavor-honey-bbq': 6.26, 'item-raw-flavor-spicy-grilled': 6.68,
 };
 const add = (itemId: string, qty: number, value: number, note: string) => {
-  if (SAUCE_FIFO_CARTON[itemId]) value = qty * (SAUCE_FIFO_CARTON[itemId] / 50);
+  if (SAUCE_UNIT_COST[itemId]) value = qty * SAUCE_UNIT_COST[itemId];
   const p = pools.get(itemId) || { itemId, qty: 0, value: 0, note: '' };
   p.qty += qty; p.value += value; p.note = p.note ? `${p.note} + ${note}` : note; pools.set(itemId, p);
 };
