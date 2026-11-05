@@ -341,6 +341,7 @@ export const ManufacturingView: React.FC = () => {
     }
 
     setShowDailyOutputModal(null);
+    if (res.warning) alert('⚠️ ' + res.warning);
   };
 
   // Issue BOM raw/packaging materials: replaced by the staged issue dialog
@@ -953,7 +954,7 @@ export const ManufacturingView: React.FC = () => {
       )}
 
       {/* QA-17 — Standard vs Actual conversion cost (real actuals, never fabricated) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-3">
+      <div data-price className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 space-y-3">
         <div>
           <h3 className="font-bold text-xs text-slate-800">التكلفة التحويلية: المعياري مقابل الفعلي</h3>
           <p className="text-[11px] text-slate-500">
@@ -1490,7 +1491,7 @@ export const ManufacturingView: React.FC = () => {
                 </button>
               </div>
               <p className="text-[10px] text-teal-800">
-                يتطلب سببًا وصلاحية اعتماد. كمية البديل لا تُضاف إلى احتياجات الخامة الأصلية (لا ازدواج استهلاك).
+                يتطلب سببًا وصلاحية اعتماد. لاستبدال قطعة بها مشكلة: اختر نفس الخامة كـ«إضافية» واذكر السبب (يمكن تكرارها). كمية البديل لا تُضاف إلى احتياجات الخامة الأصلية (لا ازدواج استهلاك).
               </p>
               {issueExtras.map((ex, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-end">

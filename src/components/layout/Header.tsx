@@ -158,7 +158,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {showRoleMenu && (
-            <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-cream-200 py-2 z-50 text-right animate-scale-in">
+            <div className="absolute left-0 top-full mt-2 w-64 max-h-[calc(100vh-5rem)] overflow-y-auto bg-white rounded-2xl shadow-xl border border-cream-200 py-2 z-50 text-right animate-scale-in">
               <div className="px-4 py-2 border-b border-cream-100 flex items-center justify-between">
                 <div>
                   <div className="text-xs font-black text-ink-900">{currentUser?.name}</div>

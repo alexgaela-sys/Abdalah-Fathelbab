@@ -16,11 +16,14 @@ import {
   normalizeStoredDatabase,
   readLegacyLocalDatabase,
 } from '../../services/db';
-import { RemoteRejectedError } from '../../services/cloud/remoteStore';
+import { RemoteRejectedError, RemoteUnavailableError } from '../../services/cloud/remoteStore';
 import { getCloudRuntime } from './cloudRuntime';
+import { erpDb, generateErpId } from '../../services/db';
+import { AuthService } from '../../services/auth';
+import { buildOwnerUser, resolveCloudIdentity } from '../../services/cloud/cloudIdentity';
 import { SyncBadge } from './SyncBadge';
 
-type Phase = 'config' | 'signin' | 'connecting' | 'setup' | 'importing' | 'ready' | 'fatal';
+type Phase = 'config' | 'signin' | 'connecting' | 'setup' | 'importing' | 'ready' | 'fatal' | 'noaccess';
 
 const card = 'w-full max-w-md bg-white rounded-2xl border border-cream-300 shadow-lg p-6 space-y-4 text-right';
 const input =
@@ -165,6 +168,7 @@ const FirstTimeSetup: React.FC<SetupProps> = ({ onImport, error }) => {
 
 export const CloudGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const rt = getCloudRuntime();
+  const [retryable, setRetryable] = useState(false);
   const [phase, setPhase] = useState<Phase>(rt ? (rt.auth.getSession() ? 'connecting' : 'signin') : 'config');
   const [message, setMessage] = useState('');
   const [setupError, setSetupError] = useState('');
@@ -172,8 +176,32 @@ export const CloudGate: React.FC<{ children: React.ReactNode }> = ({ children })
   const [relogin, setRelogin] = useState(false);
   const started = useRef(false);
 
-  const finish = useCallback(() => {
+  // Data is loaded: decide WHO this signed-in person is inside the ERP, then open it.
+  const finish = useCallback(async () => {
     if (!rt) return;
+    const session = rt.auth.getSession();
+    let isDbAdmin = false;
+    try {
+      isDbAdmin = (await rt.store.stats()).role === 'admin';
+    } catch {
+      isDbAdmin = false;
+    }
+    const who = { email: session?.email ?? '', authUserId: session?.userId ?? '', isDbAdmin };
+    const res = resolveCloudIdentity(erpDb.getSnapshot().users, who);
+    if (res.ok) {
+      AuthService.startCloudSession(res.user);
+    } else if (res.reason === 'bootstrap') {
+      const owner = buildOwnerUser(who, generateErpId('usr'));
+      erpDb.mutate(draft => {
+        draft.users.push(owner);
+      });
+      AuthService.startCloudSession(owner);
+    } else {
+      AuthService.logout();
+      setMessage(res.messageAr);
+      setPhase('noaccess');
+      return;
+    }
     rt.sync.startPolling();
     setPhase('ready');
   }, [rt]);
@@ -184,17 +212,35 @@ export const CloudGate: React.FC<{ children: React.ReactNode }> = ({ children })
     setMessage('');
     try {
       const { empty } = await rt.sync.connect();
-      if (empty) setPhase('setup');
-      else finish();
+      if (empty) {
+        // "empty" only means this account can read nothing. Only an admin may start
+        // the first import; any other role may simply not be allowed to see the data.
+        let role: string | null | undefined;
+        try {
+          role = (await rt.store.stats()).role;
+        } catch {
+          role = null;
+        }
+        setMessage('');
+        setPhase(role === 'admin' ? 'setup' : 'noaccess');
+      } else await finish();
     } catch (e) {
       if (e instanceof RemoteRejectedError && e.code === 'auth') {
         setPhase('signin');
         return;
       }
+      setRetryable(e instanceof RemoteUnavailableError);
       setMessage((e as Error).message || 'تعذّر الاتصال بالخادم');
       setPhase('fatal');
     }
   }, [rt, finish]);
+
+  // connection was down while opening: keep trying by itself instead of waiting for a tap
+  useEffect(() => {
+    if (phase !== 'fatal' || !retryable) return;
+    const t = setTimeout(() => void connect(), 5000);
+    return () => clearTimeout(t);
+  }, [phase, retryable, connect]);
 
   useEffect(() => {
     if (!rt || started.current) return;
@@ -230,7 +276,7 @@ export const CloudGate: React.FC<{ children: React.ReactNode }> = ({ children })
       await rt.sync.importAll(source.db as unknown as Record<string, any>, (done, total) => setProgress({ done, total }));
       const { empty } = await rt.sync.connect();
       if (empty) throw new Error('لم تُحفظ أي بيانات على الخادم');
-      finish();
+      await finish();
     } catch (e) {
       setSetupError((e as Error).message || 'فشل رفع البيانات');
       setPhase('setup');
@@ -289,6 +335,23 @@ export const CloudGate: React.FC<{ children: React.ReactNode }> = ({ children })
 
   if (phase === 'setup') {
     return <FirstTimeSetup onImport={source => void doImport(source)} error={setupError} />;
+  }
+
+  if (phase === 'noaccess') {
+    return (
+      <Shell title="لا توجد بيانات متاحة لهذا الحساب">
+        <p className="text-sm leading-6 text-ink-800 font-bold">
+          {message ||
+            'لا يستطيع هذا الحساب قراءة أي بيانات حاليًا. قد تكون السحابة فارغة أو صلاحيات حسابك لا تشمل البيانات. اطلب من المدير رفع البيانات أو مراجعة صلاحيات حسابك، ثم أعد المحاولة.'}
+        </p>
+        <button className={primary} onClick={() => void connect()}>
+          إعادة المحاولة
+        </button>
+        <button className={secondary} onClick={() => void signOut()}>
+          تسجيل الخروج
+        </button>
+      </Shell>
+    );
   }
 
   if (phase === 'fatal') {

@@ -128,6 +128,41 @@ export class AuthService {
   }
 
   /**
+   * Cloud mode: the person already proved who they are with Supabase Auth, so the
+   * ERP session is simply their own user record (role + permissions come from the
+   * shared users list). There is no second password and no local fallback account.
+   */
+  public static startCloudSession(user: User): AuthSession {
+    const nowIso = new Date().toISOString();
+    const session: AuthSession = {
+      user: { ...user, lastLogin: nowIso },
+      token: `cloud-${user.id}`,
+      loginAt: nowIso,
+    };
+    memorySession = session;
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    } catch (e) {
+      console.error('Failed to store auth session:', e);
+    }
+    return session;
+  }
+
+  /** Cloud mode: the user's record changed on the server (role/permissions) — keep the open session in step. */
+  public static refreshCloudSession(user: User): AuthSession | null {
+    const cur = this.getCurrentSession();
+    if (!cur) return null;
+    const session: AuthSession = { ...cur, user: { ...user, lastLogin: cur.user.lastLogin } };
+    memorySession = session;
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    } catch {
+      /* storage blocked: the in-memory copy still works */
+    }
+    return session;
+  }
+
+  /**
    * Log out and clear session
    */
   public static logout(): void {

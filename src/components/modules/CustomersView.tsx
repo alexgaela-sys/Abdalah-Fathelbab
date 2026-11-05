@@ -10,7 +10,7 @@ import { Customer, QualityDestination } from '../../types/erp';
 import { WorkflowService } from '../../services/workflows';
 import { MasterDataService } from '../../services/masterData';
 import { LedgerService } from '../../services/ledger';
-import { channelForCustomerType } from '../../services/pricing';
+import { channelForCustomerType, currencyForCustomerType } from '../../services/pricing';
 import { printDocument } from '../printUtils';
 
 export const CustomersView: React.FC = () => {
@@ -1220,8 +1220,10 @@ export const CustomersView: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 mb-1">عملة التعامل</label>
                   <select
                     value={currency}
+                    disabled
+                    title="عملة العميل تتحدد تلقائيًا من نوعه: عميل التصدير بالدولار وباقي العملاء بالجنيه"
                     onChange={(e) => setCurrency(e.target.value as any)}
-                    className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                    className="w-full p-2 rounded-xl bg-slate-100 border border-slate-300 text-xs"
                   >
                     <option value="EGP">جنيه مصري (EGP)</option>
                     <option value="USD">دولار أمريكي (USD)</option>
@@ -1245,7 +1247,7 @@ export const CustomersView: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 mb-1">نوع العميل والقناة</label>
                   <select
                     value={customerType}
-                    onChange={(e) => setCustomerType(e.target.value as any)}
+                    onChange={(e) => { const t = e.target.value as 'retail' | 'wholesale' | 'export'; setCustomerType(t); setCurrency(currencyForCustomerType(t)); }}
                     className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                   >
                     <option value="wholesale">تاجر جملة</option>

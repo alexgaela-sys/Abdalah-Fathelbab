@@ -32,3 +32,13 @@ echo "--- re-applying the migration (must be idempotent)"
 "${PSQL[@]}" -d erp_test -f "$HERE/../001_erp_store.sql" >/dev/null && echo "idempotent: ok"
 echo "--- rollback script"
 "${PSQL[@]}" -d erp_test -f "$HERE/../002_erp_store_down.sql" >/dev/null && echo "rollback: ok"
+
+echo "--- upgrading a database that already had members (pre-role, pre-status schema)"
+"${PSQL[@]}" -d postgres -c "create database erp_legacy" >/dev/null
+"${PSQL[@]}" -d erp_legacy -f "$HERE/00_shim_supabase.sql" >/dev/null
+"${PSQL[@]}" -d erp_legacy -c "
+  insert into auth.users values ('99999999-9999-9999-9999-999999999999','old@example.test');
+  create table public.erp_members (user_id uuid primary key references auth.users(id) on delete cascade, note text, added_at timestamptz not null default now());
+  insert into public.erp_members (user_id, note) values ('99999999-9999-9999-9999-999999999999','pre-existing');" >/dev/null
+"${PSQL[@]}" -d erp_legacy -f "$HERE/../001_erp_store.sql" >/dev/null 2>&1
+"${PSQL[@]}" -d erp_legacy -tA -c "select case when status='approved' and role='admin' then 'ok  - an existing member keeps access after the upgrade (approved + admin)' else 'FAILED: legacy member is '||status||'/'||coalesce(role,'null') end from public.erp_members" | tee /dev/stderr | grep -q '^ok' || exit 1

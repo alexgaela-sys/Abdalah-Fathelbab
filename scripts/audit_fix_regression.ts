@@ -453,8 +453,8 @@ section('B. BOM RECIPE — containers, flavours, carton & film ratios (parts B /
     near(need(CHIP) as number, 120, 1e-6), `got ${need(CHIP)}`);
   check('10. BOM scales linearly: 150 PCS -> 27 KG oil (180/1000)',
     near(need('item-raw-oil') as number, 27, 1e-6), `got ${need('item-raw-oil')}`);
-  check('10. BOM scales linearly: 150 PCS -> 11.25 KG sauce (0.075 x 150)',
-    near(need(SAUCE.sweetChili) as number, 11.25, 1e-6), `got ${need(SAUCE.sweetChili)}`);
+  check('10. BOM scales linearly: 150 PCS -> 150 sauce pieces (1 per piece)',
+    near(need(SAUCE.sweetChili) as number, 150, 1e-6), `got ${need(SAUCE.sweetChili)}`);
   check('10. BOM keeps the 15:1 carton ratio at 150 PCS (10 cartons)',
     near(need(KRAFT_SINGLE) as number, 10, 1e-6), `got ${need(KRAFT_SINGLE)}`);
 

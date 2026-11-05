@@ -3,7 +3,7 @@
 // in the database store the app reads (browser localStorage).
 import React, { useRef, useState } from 'react';
 import { Building2, ImageUp, Save, Trash2 } from 'lucide-react';
-import { erpDb } from '../../../services/db';
+import { erpDb, CLOUD_STORAGE_MODE } from '../../../services/db';
 import { CompanySettingsService } from '../../../services/companySettings';
 import { SectionCard } from '../../ui';
 
@@ -112,8 +112,9 @@ export const CompanySettingsSection: React.FC = () => {
 
           <div className="rounded-2xl border border-slate-200 bg-white p-4 text-[11px] leading-relaxed text-slate-600">
             <b className="text-slate-800 block mb-1">أين تُحفظ البيانات؟</b>
-            تُحفظ في قاعدة بيانات التطبيق نفسها (localStorage) وتُقرأ عند كل فتح، وتظهر مباشرة في الفواتير المطبوعة.
-            لا توجد مزامنة سحابية بين الأجهزة — النسخ الاحتياطي من تبويب «البيانات».
+            {CLOUD_STORAGE_MODE
+              ? 'تُحفظ في قاعدة البيانات السحابية المشتركة وتظهر على كل الأجهزة، وتظهر مباشرة في الفواتير المطبوعة. يُنصح بأخذ نسخة احتياطية دورية من تبويب «البيانات».'
+              : 'تُحفظ في قاعدة بيانات التطبيق نفسها (localStorage) وتُقرأ عند كل فتح، وتظهر مباشرة في الفواتير المطبوعة. لا توجد مزامنة سحابية بين الأجهزة — النسخ الاحتياطي من تبويب «البيانات».'}
           </div>
         </div>
 

@@ -371,7 +371,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Monthly revenue vs COGS bars */}
-        <SectionCard title="الإيرادات مقابل التكلفة" hint="آخر 6 أشهر — من فواتير المبيعات المرحلة" icon={BarChart3} className="lg:col-span-2">
+        <SectionCard money title="الإيرادات مقابل التكلفة" hint="آخر 6 أشهر — من فواتير المبيعات المرحلة" icon={BarChart3} className="lg:col-span-2">
           {monthlySeries.every(m => m.revenue === 0) ? (
             <EmptyState
               title="لا توجد مبيعات مرحّلة بعد"
@@ -412,7 +412,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
         </SectionCard>
 
         {/* Inventory by warehouse */}
-        <SectionCard title="قيمة المخزون بالمستودعات" hint="من سجل التشغيلات الفعلي" icon={Boxes}>
+        <SectionCard money title="قيمة المخزون بالمستودعات" hint="من سجل التشغيلات الفعلي" icon={Boxes}>
           {warehouseSeries.length === 0 ? (
             <EmptyState
               title="لا يوجد مخزون حالياً"
@@ -486,7 +486,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigateTab }) =
         </div>
 
         {/* Best-selling products */}
-        <div className="card p-5 lg:col-span-2">
+        <div className="card p-5 lg:col-span-2" data-price>
           <div className="flex items-center justify-between pb-3 border-b border-cream-200">
             <div className="flex items-center gap-2">
               <ShoppingCart className="w-5 h-5 text-brand-600" />
@@ -562,7 +562,7 @@ const KpiTile: React.FC<{
   valueTone?: string;
   onClick?: () => void;
 }> = ({ label, value, hint, icon: Icon, tone, valueTone, onClick }) => (
-  <div className="kpi-card" onClick={onClick}>
+  <div className="kpi-card" onClick={onClick} {...(/ج\.م|\$/.test(value) || /ج\.م|\$/.test(hint) ? { 'data-price': true } : {})}>
     <div className="flex items-center justify-between">
       <span className="kpi-label">{label}</span>
       <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${tone}`}>

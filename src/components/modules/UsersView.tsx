@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useModuleWriteAccess } from '../../hooks/usePermissions';
 import { 
   KeyRound, Plus, Shield, UserCheck, 
-  Lock, Check, Trash2, Key
+  Lock, Check, Trash2, Key, Power
 } from 'lucide-react';
-import { erpDb } from '../../services/db';
+import { erpDb, CLOUD_STORAGE_MODE } from '../../services/db';
+import { callAdminUsers } from '../cloud/adminUsers';
 import { MasterDataService } from '../../services/masterData';
 import { RoleName, User, PermissionAction } from '../../types/erp';
 import {
@@ -15,6 +16,7 @@ import {
 export const UsersView: React.FC = () => {
   const db = erpDb.getSnapshot();
   const [showAddModal, setShowAddModal] = useState(false);
+  const [busy, setBusy] = useState(false);
   // QA-25: UI permission affordance (service authorization stays the real wall).
   const writeAccess = useModuleWriteAccess('users', 'إدارة المستخدمين');
   // F23: explicit per-user, per-module, per-action permission assignment.
@@ -45,13 +47,50 @@ export const UsersView: React.FC = () => {
     'Viewer'
   ];
 
-  const handleSaveUser = () => {
-    if (!name.trim() || !username.trim()) {
+  const handleSaveUser = async () => {
+    if (busy) return;
+    if (!name.trim() || (!CLOUD_STORAGE_MODE && !username.trim())) {
       alert('يرجى إدخال اسم المستخدم وبياناته');
       return;
     }
     if (!password.trim()) {
       alert('كلمة المرور مطلوبة — لا يوجد كلمة مرور افتراضية (الحد الأدنى 6 أحرف)');
+      return;
+    }
+
+    if (CLOUD_STORAGE_MODE) {
+      // The sign-in account is created on the server; the ERP user keeps the role and
+      // permissions (no password is stored in the ERP). Both must succeed or neither stays.
+      const mail = email.trim().toLowerCase();
+      if (!mail) { alert('البريد الإلكتروني مطلوب: هو اسم الدخول للنظام'); return; }
+      setBusy(true);
+      const acc = await callAdminUsers({
+        action: 'create', email: mail, password, role: role === 'Super Admin' ? 'admin' : 'staff',
+      });
+      if (!acc.ok || !acc.user_id) {
+        setBusy(false);
+        alert(acc.ok ? 'تعذر إنشاء حساب الدخول' : acc.messageAr);
+        return;
+      }
+      const res = MasterDataService.createUser({
+        username: username.trim() || mail.split('@')[0],
+        password: '',
+        authUserId: acc.user_id,
+        name,
+        email: mail,
+        role,
+        userId: 'usr-admin',
+        userName: 'المشرف العام (Admin)',
+      });
+      if (!res.success) {
+        await callAdminUsers({ action: 'delete', user_id: acc.user_id });
+        setBusy(false);
+        alert(res.error || 'تعذر إنشاء المستخدم');
+        return;
+      }
+      setBusy(false);
+      setShowAddModal(false);
+      setName(''); setUsername(''); setPassword(''); setEmail('');
       return;
     }
 
@@ -77,15 +116,64 @@ export const UsersView: React.FC = () => {
     setEmail('');
   };
 
-  const handleDeleteUser = (userId: string, userName: string) => {
+  // ---- cloud-only account actions ----
+  const handleCreateLogin = async (u: User) => {
+    if (busy) return;
+    if (!u.email) { alert('هذا المستخدم ليس له بريد إلكتروني. احذفه وأنشئه من جديد ببريد.'); return; }
+    const pw = window.prompt(`كلمة مرور جديدة لحساب دخول ${u.email} (6 أحرف فأكثر):`);
+    if (!pw) return;
+    setBusy(true);
+    const acc = await callAdminUsers({
+      action: 'create', email: u.email, password: pw, role: u.role === 'Super Admin' ? 'admin' : 'staff',
+    });
+    if (!acc.ok || !acc.user_id) { setBusy(false); alert(acc.ok ? 'تعذر الإنشاء' : acc.messageAr); return; }
+    const res = MasterDataService.linkAuthUser(u.id, acc.user_id, { userId: 'usr-admin', userName: 'المشرف العام (Admin)' });
+    setBusy(false);
+    if (!res.success) { alert(res.error || 'تعذر ربط الحساب'); return; }
+    alert('تم إنشاء حساب الدخول. يدخل الموظف ببريده وكلمة المرور التي كتبتها.');
+  };
+
+  const handleResetPassword = async (u: User) => {
+    if (busy || !u.authUserId) return;
+    const pw = window.prompt(`كلمة مرور جديدة للمستخدم ${u.name} (6 أحرف فأكثر):`);
+    if (!pw) return;
+    setBusy(true);
+    const r = await callAdminUsers({ action: 'set_password', user_id: u.authUserId, password: pw });
+    setBusy(false);
+    alert(r.ok ? 'تم تغيير كلمة المرور' : r.messageAr);
+  };
+
+  const handleToggleActive = async (u: User) => {
+    if (busy) return;
+    const next = !u.active;
+    if (!window.confirm(next ? `تفعيل المستخدم "${u.name}"؟` : `تعطيل المستخدم "${u.name}"؟ لن يستطيع الدخول.`)) return;
+    setBusy(true);
+    if (CLOUD_STORAGE_MODE && u.authUserId) {
+      const r = await callAdminUsers({ action: 'set_active', user_id: u.authUserId, active: next });
+      if (!r.ok) { setBusy(false); alert(r.messageAr); return; }
+    }
+    const res = MasterDataService.setUserActive(u.id, next, { userId: 'usr-admin', userName: 'المشرف العام (Admin)' });
+    setBusy(false);
+    if (!res.success) alert(res.error || 'تعذر تغيير الحالة');
+  };
+
+  const handleDeleteUser = async (userId: string, userName: string) => {
     if (userId === 'usr-admin') {
       alert('لا يمكن حذف حساب المشرف العام الأساسي للنظام');
       return;
     }
+    if (busy) return;
     if (confirm(`هل أنت متأكد من حذف المستخدم "${userName}"؟`)) {
+      const target = db.users.find(x => x.id === userId);
+      setBusy(true);
+      if (CLOUD_STORAGE_MODE && target?.authUserId) {
+        const r = await callAdminUsers({ action: 'delete', user_id: target.authUserId });
+        if (!r.ok) { setBusy(false); alert(r.messageAr); return; }
+      }
       const res = MasterDataService.deleteUser(userId, {
         userId: 'usr-admin', userName: 'المشرف العام (Admin)',
       });
+      setBusy(false);
       if (!res.success) alert(res.error || 'تعذر حذف المستخدم');
     }
   };
@@ -156,7 +244,7 @@ export const UsersView: React.FC = () => {
             <tr>
               <th className="p-3.5">اسم الموظف / المسؤول</th>
               <th className="p-3.5">اسم الدخول (Username)</th>
-              <th className="p-3.5">كلمة المرور</th>
+              <th className="p-3.5">{CLOUD_STORAGE_MODE ? 'حساب الدخول' : 'كلمة المرور'}</th>
               <th className="p-3.5">الدور الوظيفي (Role)</th>
               <th className="p-3.5 text-center">الحالة</th>
               <th className="p-3.5 text-center">آخر تسجيل دخول</th>
@@ -180,7 +268,7 @@ export const UsersView: React.FC = () => {
                 <td className="p-3.5 font-mono font-bold text-slate-800">@{u.username}</td>
                 <td className="p-3.5 font-mono text-slate-500">
                   <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[11px]">
-                    {u.password ? '•••••' : '—'}
+                    {CLOUD_STORAGE_MODE ? (u.authUserId ? 'مفعّل' : 'بدون حساب') : u.password ? '•••••' : '—'}
                   </span>
                 </td>
                 <td className="p-3.5 font-bold text-indigo-700">
@@ -193,8 +281,10 @@ export const UsersView: React.FC = () => {
                   </span>
                 </td>
                 <td className="p-3.5 text-center">
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-100 text-emerald-800">
-                    نشط ومفعل
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                    u.active ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                  }`}>
+                    {u.active ? 'نشط ومفعل' : 'معطّل'}
                   </span>
                 </td>
                 <td className="p-3.5 text-center text-slate-500 font-mono text-[11px]">
@@ -211,6 +301,36 @@ export const UsersView: React.FC = () => {
                         title="تخصيص الصلاحيات"
                       >
                         <Shield className="w-4 h-4" />
+                      </button>
+                    )}
+                    {CLOUD_STORAGE_MODE && !u.authUserId && (
+                      <button
+                        onClick={() => void handleCreateLogin(u)}
+                        disabled={busy}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition cursor-pointer disabled:opacity-40"
+                        title="إنشاء حساب دخول"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    )}
+                    {CLOUD_STORAGE_MODE && u.authUserId && (
+                      <button
+                        onClick={() => void handleResetPassword(u)}
+                        disabled={busy}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-700 hover:bg-indigo-50 transition cursor-pointer disabled:opacity-40"
+                        title="تغيير كلمة المرور"
+                      >
+                        <KeyRound className="w-4 h-4" />
+                      </button>
+                    )}
+                    {u.role !== 'Super Admin' && (
+                      <button
+                        onClick={() => void handleToggleActive(u)}
+                        disabled={busy}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-amber-700 hover:bg-amber-50 transition cursor-pointer disabled:opacity-40"
+                        title={u.active ? 'تعطيل المستخدم' : 'تفعيل المستخدم'}
+                      >
+                        <Power className="w-4 h-4" />
                       </button>
                     )}
                     {u.id !== 'usr-admin' && u.username !== 'admin' && (
@@ -342,6 +462,7 @@ export const UsersView: React.FC = () => {
                 />
               </div>
 
+              {!CLOUD_STORAGE_MODE && (
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">اسم الدخول (Username)</label>
                 <input
@@ -352,6 +473,7 @@ export const UsersView: React.FC = () => {
                   className="w-full p-2.5 rounded-xl bg-slate-50 border border-slate-300 text-xs font-mono"
                 />
               </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">كلمة المرور (Password) — إجبارية، 6 أحرف فأكثر</label>
@@ -365,7 +487,9 @@ export const UsersView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">البريد الإلكتروني</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {CLOUD_STORAGE_MODE ? 'البريد الإلكتروني (هو اسم الدخول للنظام)' : 'البريد الإلكتروني'}
+                </label>
                 <input
                   type="email"
                   value={email}
@@ -397,10 +521,11 @@ export const UsersView: React.FC = () => {
                 إلغاء
               </button>
               <button
-                onClick={handleSaveUser}
-                className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md cursor-pointer"
+                onClick={() => void handleSaveUser()}
+                disabled={busy}
+                className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md cursor-pointer disabled:opacity-50"
               >
-                إنشاء المستخدم
+                {busy ? 'جاري الإنشاء…' : 'إنشاء المستخدم'}
               </button>
             </div>
           </div>

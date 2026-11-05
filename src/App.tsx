@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { erpDb } from './services/db';
+import React, { useState, useEffect, useRef } from 'react';
+import { erpDb, CLOUD_STORAGE_MODE } from './services/db';
+import { getCloudRuntime } from './components/cloud/cloudRuntime';
 import { AuthService, AuthSession } from './services/auth';
 import { RoleName, User } from './types/erp';
 import { PermissionService } from './services/permissions';
+import { MasterDataService } from './services/masterData';
 import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { LoginView } from './components/auth/LoginView';
@@ -25,6 +27,7 @@ import { BanksView } from './components/modules/BanksView';
 import { ChequesView } from './components/modules/ChequesView';
 import { ExpensesView } from './components/modules/ExpensesView';
 import { AccountingView } from './components/modules/AccountingView';
+import { OpeningBalancesView } from './components/modules/OpeningBalancesView';
 import { ReportsView, ReportType } from './components/modules/ReportsView';
 import { UsersView } from './components/modules/UsersView';
 import { SettingsView } from './components/modules/SettingsView';
@@ -72,7 +75,57 @@ export function App() {
   const handleLogout = () => {
     AuthService.logout();
     setCurrentUser(null);
+    if (CLOUD_STORAGE_MODE) {
+      // The sign-in is the Supabase account, so signing out means leaving it too.
+      const rt = getCloudRuntime();
+      void (async () => {
+        try {
+          rt?.sync.stop();
+          await rt?.auth.signOut();
+        } finally {
+          window.location.reload();
+        }
+      })();
+    }
   };
+
+  // People without the "prices" permission get every [data-price] element hidden.
+  useEffect(() => {
+    const sess = AuthService.getCurrentSession();
+    document.documentElement.dataset.hidePrices = PermissionService.canSeePrices(sess?.user) ? 'false' : 'true';
+  });
+
+  // One-off repair (idempotent): an export customer saved with an EGP card is flipped to USD and
+  // its card balance is restated from the ledger, so the statement and 1106 agree.
+  useEffect(() => {
+    try { MasterDataService.normalizeCustomerCurrencies(); } catch (e) { console.error('customer currency repair failed', e); }
+  }, []);
+
+  // Cloud mode: the admin can change this person's role/permissions or switch them off
+  // from another device. Follow that without a re-login. (A Super Admin previewing another
+  // role from the header is a local choice, so only a CHANGE of the stored record applies.)
+  const lastRecord = useRef<string>('');
+  useEffect(() => {
+    if (!CLOUD_STORAGE_MODE || !currentUser) return;
+    const fresh = erpDb.getSnapshot().users.find(u => u.id === currentUser.id);
+    if (!fresh || !fresh.active) {
+      handleLogout();
+      return;
+    }
+    const sig = JSON.stringify([fresh.role, fresh.permissions ?? null, fresh.active]);
+    if (lastRecord.current === '') {
+      lastRecord.current = sig;
+      return;
+    }
+    if (sig !== lastRecord.current) {
+      lastRecord.current = sig;
+      const session = AuthService.refreshCloudSession(fresh);
+      if (session) {
+        setCurrentUser({ ...session.user });
+        setCurrentRole(session.user.role);
+      }
+    }
+  });
 
   const handleRoleChange = (role: RoleName) => {
     // Service-level restriction: only a Super Admin session may switch roles.
@@ -110,6 +163,9 @@ export function App() {
 
   // If not logged in, show Login Screen
   if (!currentUser) {
+    // Cloud mode has no second login: the gate above already signed the person in
+    // (or is reloading after sign-out), so there is nothing to show here.
+    if (CLOUD_STORAGE_MODE) return null;
     return <LoginView onLoginSuccess={handleLoginSuccess} />;
   }
 
@@ -162,6 +218,7 @@ export function App() {
           {activeTab === 'cheques' && <ChequesView />}
           {activeTab === 'expenses' && <ExpensesView />}
           {activeTab === 'accounting' && <AccountingView />}
+          {activeTab === 'opening' && <OpeningBalancesView />}
           {activeTab === 'reports' && (
             <ReportsView
               initialReport={reportsSub}

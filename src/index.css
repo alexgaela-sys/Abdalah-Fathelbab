@@ -310,9 +310,11 @@ div.fixed.inset-0.z-50 > div {
    report, customer statement, item card) is expanded to the full page.
    ============================================================ */
 @media print {
+  /* margin 0 makes the browser drop its own header/footer (page title + URL);
+     the 12mm page margin is re-created as padding on .print-area below. */
   @page {
     size: A4;
-    margin: 12mm;
+    margin: 0;
   }
 
   body {
@@ -350,7 +352,10 @@ div.fixed.inset-0.z-50 > div {
     top: 0 !important;
     width: 100% !important;
     overflow: visible !important;
-    padding: 0 !important;
+    padding: 12mm !important;
+    box-sizing: border-box !important;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
     margin: 0 !important;
     max-height: none !important;
     max-width: none !important;
@@ -405,3 +410,7 @@ div.fixed.inset-0.z-50 > div {
 .print-hidden {
   display: none !important;
 }
+
+
+/* People without the "prices" permission: money values are tagged data-price in the screens. */
+html[data-hide-prices="true"] [data-price] { display: none !important; }

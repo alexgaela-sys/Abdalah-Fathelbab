@@ -929,6 +929,14 @@ export class ManufacturingEngine {
     for (const iss of issues) {
       const netIssued = netByMaterial.get(iss.materialItemId) || 0;
       const materialName = db.items.find(i => i.id === iss.materialItemId)?.nameAr || iss.materialItemId;
+      // A DELIBERATE substitute / additional line (reason + approval already verified above) is
+      // never "a repeated issue": replacing a defective piece or issuing a second batch of a
+      // substitute is exactly what it exists for. Stock is still checked, every line is audited,
+      // and the extra quantity shows up in the deviation alert and the closing variance.
+      if (iss.kind !== 'bom') {
+        netByMaterial.set(iss.materialItemId, netIssued + iss.issueQty);
+        continue;
+      }
       if (plannedByLineUnit.has(iss.materialItemId)) {
         const virginOverride = isOverrideIssue && netIssued <= PROD_EPS;
         if (!virginOverride && netIssued + iss.issueQty > iss.plannedBaseQty + iss.tol) {
@@ -1055,7 +1063,7 @@ export class ManufacturingEngine {
     userName: string;
     /** Marks the waste-reconciliation journal as test data (QA-12). */
     isTest?: boolean;
-  }): { success: boolean; error?: string } {
+  }): { success: boolean; error?: string; warning?: string } {
     const db = erpDb.getSnapshot();
     const order = db.productionOrders.find(o => o.id === params.orderId);
     if (!order) return { success: false, error: 'أمر الإنتاج غير موجود' };
@@ -1272,7 +1280,83 @@ export class ManufacturingEngine {
     void scrapMoved;
     void defectiveMoved;
 
-    return { success: true };
+    // Deviation alert (never blocks): output above what the issued materials can cover.
+    const coverage = ManufacturingEngine.getMaterialCoverage(order.id);
+    let warning: string | undefined;
+    if (coverage && coverage.excessUnits > 0) {
+      warning =
+        `تنبيه انحراف: إجمالي الإنتاج المسجّل (${coverage.totalOutput}) أكبر من الكمية التي تكفيها الخامات المصروفة ` +
+        `(${coverage.producibleUnits}) بزيادة ${coverage.excessUnits}. الخامة المحددة للانحراف: ${coverage.limitingMaterialName}. ` +
+        `اصرف الخامة الناقصة بسبب موثّق أو راجع الكميات.`;
+      erpDb.mutate(draft => {
+        draft.auditLogs.push({
+          id: generateErpId('aud'),
+          timestamp: new Date().toISOString(),
+          userId: params.userId,
+          userName: params.userName,
+          module: 'إدارة الإنتاج والتكاليف',
+          action: 'edit',
+          recordId: order.id,
+          description: `انحراف إنتاج على الأمر ${order.orderNumber}: ${warning}`,
+        });
+      });
+    }
+
+    return { success: true, warning };
+  }
+
+  /**
+   * Material coverage of an order: how many units the net-issued materials can make versus what
+   * was actually recorded as output (good + defective + scrap). Substitutes count toward the
+   * BOM material they replace. A material whose issue is zero limits output to zero.
+   */
+  public static getMaterialCoverage(orderId: string): {
+    totalOutput: number; producibleUnits: number; excessUnits: number;
+    limitingMaterialId?: string; limitingMaterialName?: string;
+  } | null {
+    const db = erpDb.getSnapshot();
+    const order = db.productionOrders.find(o => o.id === orderId);
+    if (!order) return null;
+    const bom = db.boms.find(b => b.id === order.bomId);
+    const snapshot = order.bomSnapshot;
+    const bomLines = snapshot
+      ? snapshot.lines
+      : db.bomLines.filter(l => l.bomId === order.bomId).map(l => ({
+          materialItemId: l.materialItemId, quantityRequired: l.quantityRequired, unitId: l.unitId, wastePercentage: l.wastePercentage,
+        }));
+    const baseQty = snapshot?.baseQuantity || bom?.baseQuantity || 1;
+    if (bomLines.length === 0 || !(baseQty > 0)) return null;
+
+    const net = new Map<string, number>();
+    for (const c of db.productionConsumptions) {
+      if (c.productionOrderId !== orderId) continue;
+      const q = (Number(c.actualQuantity) || 0) - (Number(c.returnedQuantity) || 0) - (Number(c.approvedVarianceQuantity) || 0);
+      const target = c.issueKind === 'substitute' && c.substituteForMaterialItemId ? c.substituteForMaterialItemId : c.materialItemId;
+      net.set(target, (net.get(target) || 0) + q);
+    }
+
+    let producible = Infinity;
+    let limitingId: string | undefined;
+    for (const bl of bomLines) {
+      const item = db.items.find(i => i.id === bl.materialItemId);
+      let perUnit = (bl.quantityRequired * (1 + ((bl.wastePercentage || 0) / 100))) / baseQty;
+      try { perUnit *= getUnitConversion(db, bl.unitId, item?.baseUnitId || bl.unitId); } catch { /* keep raw */ }
+      if (!(perUnit > 0)) continue;
+      const units = (net.get(bl.materialItemId) || 0) / perUnit;
+      if (units < producible) { producible = units; limitingId = bl.materialItemId; }
+    }
+    if (!Number.isFinite(producible)) return null;
+
+    const totalOutput = (Number(order.producedQuantity) || 0) + (Number(order.defectiveQuantity) || 0) + (Number(order.scrapQuantity) || 0);
+    const producibleUnits = Math.floor((producible + 1e-6) * 1000) / 1000;
+    const excess = Math.max(0, Number((totalOutput - producibleUnits).toFixed(3)));
+    // 0.5% slack absorbs rounding of staged issues.
+    const excessUnits = excess > Math.max(0.01, producibleUnits * 0.005) ? excess : 0;
+    return {
+      totalOutput, producibleUnits, excessUnits,
+      limitingMaterialId: limitingId,
+      limitingMaterialName: limitingId ? (db.items.find(i => i.id === limitingId)?.nameAr || limitingId) : undefined,
+    };
   }
 
   /**

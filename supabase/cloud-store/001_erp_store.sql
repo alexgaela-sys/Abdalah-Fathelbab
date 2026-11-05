@@ -62,7 +62,7 @@ alter table public.erp_members
   drop constraint if exists erp_members_role_chk;
 alter table public.erp_members
   add constraint erp_members_role_chk
-    check (role is null or role in ('admin', 'accountant', 'warehouse'));
+    check (role is null or role in ('admin', 'staff', 'accountant', 'warehouse'));
 
 -- Approval state. Added inside a DO block so the one-time backfill below runs
 -- exactly once: members that existed BEFORE this rule already had access, so
@@ -78,7 +78,7 @@ begin
   ) then
     alter table public.erp_members add column status text not null default 'pending';
     -- One-time backfill: these accounts could already use the store.
-    update public.erp_members set status = 'approved';
+    update public.erp_members set status = 'approved', role = coalesce(role, 'admin');
   end if;
 end $$;
 
@@ -150,7 +150,7 @@ create table if not exists public.erp_role_scope (
 -- version picks up the '*' wildcard without manual work.
 alter table public.erp_role_scope drop constraint if exists erp_role_scope_role_chk;
 alter table public.erp_role_scope add constraint erp_role_scope_role_chk
-  check (role in ('admin', 'accountant', 'warehouse'));
+  check (role in ('admin', 'staff', 'accountant', 'warehouse'));
 alter table public.erp_role_scope drop constraint if exists erp_role_scope_coll_chk;
 alter table public.erp_role_scope add constraint erp_role_scope_coll_chk
   check (collection = '*' or collection ~ '^[A-Za-z_][A-Za-z0-9_]{0,63}$');
@@ -172,6 +172,7 @@ create policy erp_role_scope_read on public.erp_role_scope
 -- what it was explicitly given.
 insert into public.erp_role_scope (role, collection) values
   ('admin', '*'),
+  ('staff', '*'),
 
   ('accountant', '__singletons'),
   ('accountant', 'accounts'),
@@ -241,8 +242,10 @@ grant select on table public.erp_blocked_collection to authenticated;
 drop policy if exists erp_blocked_collection_read on public.erp_blocked_collection;
 create policy erp_blocked_collection_read on public.erp_blocked_collection
   for select to authenticated using (public.erp_is_member());
-insert into public.erp_blocked_collection (collection) values ('users')
-  on conflict (collection) do nothing;
+-- 'users' used to be listed here. It is now stored (WITHOUT passwords: sign-in is
+-- Supabase Auth) so every device knows who the ERP users are and what they may do.
+-- Writes to it are admin-only and a password field is refused (see erp_apply_changes).
+delete from public.erp_blocked_collection where collection = 'users';
 
 -- May this caller touch p_collection? Answered only from the two tables above,
 -- both read through the caller's own Auth identity — never from anything the
@@ -377,11 +380,16 @@ declare
     'exportShipments',        'shipmentNumber',
     'withholdingAdjustments', 'adjustmentNumber',
     'scrapSales',             'docNumber',
-    'payrollDistributions',   'distributionNumber'
+    'payrollDistributions',   'distributionNumber',
+    'productionOrders',       'orderNumber'
   );
 begin
   if v_uid is null or not public.erp_is_member() then
     return jsonb_build_object('status', 'forbidden');
+  end if;
+
+  if p_bulk and public.erp_role() is distinct from 'admin' then
+    return jsonb_build_object('status', 'forbidden', 'reason', 'bulk_requires_admin');
   end if;
 
   if p_changes is null or jsonb_typeof(p_changes) <> 'array' then
@@ -432,6 +440,18 @@ begin
     if v_op = 'upsert' and (v_data is null or jsonb_typeof(v_data) <> 'object') then
       return jsonb_build_object('status', 'invalid', 'reason', 'data_must_be_object');
     end if;
+
+    -- ERP user records decide who may do what inside the app, so only an admin may
+    -- change them (nobody can promote themselves), and a password may never be stored.
+    if v_coll = 'users' then
+      if public.erp_role() is distinct from 'admin' then
+        return jsonb_build_object(
+          'status', 'forbidden', 'reason', 'users_admin_only', 'collection', v_coll);
+      end if;
+      if v_op = 'upsert' and v_data ? 'password' then
+        return jsonb_build_object('status', 'invalid', 'reason', 'password_not_allowed');
+      end if;
+    end if;
     if v_op = 'upsert' and octet_length(v_data::text) > 10485760 then
       return jsonb_build_object('status', 'invalid', 'reason', 'record_too_large');
     end if;
@@ -460,7 +480,7 @@ begin
       elsif v_base > 0 and v_cur <> v_base then
         v_conflicts := v_conflicts || jsonb_build_object(
           'collection', v_coll, 'id', v_id, 'reason', 'stale', 'current_version', v_cur);
-      elsif v_base = 0 and not p_bulk and v_numfields ? v_coll then
+      elsif not p_bulk and v_numfields ? v_coll then
         v_field  := v_numfields ->> v_coll;
         v_numval := v_data ->> v_field;
         if v_numval is not null and v_numval <> '' then
@@ -643,11 +663,20 @@ begin
     ) c
     left join public.erp_records r on r.collection = c.collection and r.id = c.id;
 
+  -- 'more' must look only at changes THIS role may see; otherwise a role that
+  -- cannot see the newest changes would be told there is more forever while the
+  -- cursor never advances. When nothing visible remains, the cursor jumps to head.
+  if exists (
+       select 1 from public.erp_changes c2
+        where c2.seq > coalesce(v_last, p_after) and public.erp_can(c2.collection)
+     ) then
+    return jsonb_build_object(
+      'status', 'ok', 'head', v_head, 'changes', v_rows,
+      'last', coalesce(v_last, p_after), 'more', true);
+  end if;
   return jsonb_build_object(
     'status', 'ok', 'head', v_head, 'changes', v_rows,
-    'last', coalesce(v_last, p_after),
-    'more', coalesce(v_last, p_after) < v_head
-  );
+    'last', greatest(coalesce(v_last, p_after), v_head), 'more', false);
 end;
 $$;
 
@@ -665,6 +694,7 @@ begin
   end if;
   return jsonb_build_object(
     'status', 'ok',
+    'role', public.erp_role(),
     'counts', coalesce((
       select jsonb_object_agg(s.collection, s.n)
         from (

@@ -48,7 +48,9 @@ export function readSupabaseConfigFromEnv(): SupabaseConfig | null {
   }
   const url = (env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
   const anonKey = (env.VITE_SUPABASE_ANON_KEY || '').trim();
-  if (!url || anonKey.length < 20 || !/^https?:\/\//.test(url)) return null;
+  if (!url || anonKey.length < 20) return null;
+  // credentials and sessions travel to this address: https only (plain http just for local development)
+  if (!/^https:\/\//.test(url) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(url)) return null;
   return { url, anonKey };
 }
 
@@ -191,6 +193,28 @@ export class SupabaseAuth {
     return this.refreshing;
   }
 
+  /** The signed-in person changes THEIR OWN sign-in password (Supabase Auth, PUT /auth/v1/user). */
+  async updatePassword(newPassword: string): Promise<void> {
+    const token = await this.getAccessToken();
+    let res: any;
+    try {
+      res = await this.fetchImpl(`${this.cfg.url}/auth/v1/user`, {
+        method: 'PUT',
+        headers: {
+          apikey: this.cfg.anonKey,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password: newPassword }),
+      });
+    } catch (e) {
+      throw new RemoteUnavailableError(`تعذّر الاتصال بالخادم (${(e as Error)?.message || 'network'})`);
+    }
+    if (!res.ok) {
+      throw new RemoteRejectedError(await readErrorText(res), res.status === 401 ? 'auth' : 'rejected');
+    }
+  }
+
   async signOut(): Promise<void> {
     const s = this.session;
     this.persist(null);
@@ -311,11 +335,11 @@ export class SupabaseHttpStore implements RemoteStore {
     });
   }
 
-  async stats(): Promise<{ counts: Record<string, number>; head: number }> {
+  async stats(): Promise<{ counts: Record<string, number>; head: number; role?: string | null }> {
     const r = await this.rpc<any>('erp_stats', {});
     if (r.status === 'forbidden') {
       throw new RemoteRejectedError('هذا الحساب غير مصرّح له باستخدام النظام السحابي', 'forbidden');
     }
-    return { counts: r.counts ?? {}, head: Number(r.head ?? 0) };
+    return { counts: r.counts ?? {}, head: Number(r.head ?? 0), role: r.role ?? null };
   }
 }

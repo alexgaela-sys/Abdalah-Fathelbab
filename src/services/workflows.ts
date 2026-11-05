@@ -376,6 +376,10 @@ export class WorkflowService {
       };
     }
 
+    if (params.channel === 'export' && params.currency !== 'USD') {
+      return { success: false, error: 'فاتورة التصدير يجب أن تكون بالدولار USD' };
+    }
+
     const warehouse = db.warehouses.find(w => w.id === params.warehouseId);
     if (!warehouse) return { success: false, error: 'المستودع غير صالح' };
 
@@ -2117,7 +2121,7 @@ export class WorkflowService {
     // Determine actual cost per line from the original purchase invoice when available,
     // otherwise from the current batch cost in the warehouse.
     const sourceInvoice = params.purchaseInvoiceId ? db.purchaseInvoices.find(i => i.id === params.purchaseInvoiceId) : undefined;
-    const costLines: Array<{ itemId: string; quantity: number; unitCost: number; unitPrice: number; batchNumber?: string; vatRate: number }> = [];
+    const costLines: Array<{ itemId: string; quantity: number; unitCost: number; unitPrice: number; batchNumber?: string; vatRate: number; priceFromStock?: boolean }> = [];
 
     for (const l of params.lines) {
       const item = db.items.find(i => i.id === l.itemId);
@@ -2126,9 +2130,11 @@ export class WorkflowService {
 
       let unitCost = 0;
       let vatRate = 0;
+      let priceFromStock = true; // no invoice price (e.g. opening-balance stock): use the actual stock cost
       if (sourceInvoice) {
         const invLine = db.purchaseInvoiceLines.find(pl => pl.purchaseInvoiceId === sourceInvoice.id && pl.itemId === l.itemId);
         if (invLine) {
+          priceFromStock = false;
           unitCost = invLine.unitPrice;
           vatRate = invLine.vatRate || 0;
           // ITEM 4 — returnable cap: received qty minus qty already returned on
@@ -2149,20 +2155,8 @@ export class WorkflowService {
           }
         }
       }
-      costLines.push({ itemId: l.itemId, quantity: l.quantity, unitCost, unitPrice: unitCost, batchNumber: l.batchNumber, vatRate });
+      costLines.push({ itemId: l.itemId, quantity: l.quantity, unitCost, unitPrice: unitCost, batchNumber: l.batchNumber, vatRate, priceFromStock });
     }
-
-    // ITEM 4 — every per-line amount is rounded to 2 decimals first, and the
-    // totals are the SUMS of those rounded lines, so the journal, the return
-    // document and the supplier balance all agree to the cent.
-    const r2 = (n: number) => Math.round(n * 100) / 100;
-    const lineAmounts = costLines.map(cl => ({
-      net: r2(cl.quantity * cl.unitPrice),
-      vat: r2(cl.quantity * cl.unitPrice * cl.vatRate),
-    }));
-    const invSubtotal = lineAmounts.reduce((s, a) => s + a.net, 0);
-    const invVat = lineAmounts.reduce((s, a) => s + a.vat, 0);
-    const totalAmount = r2(invSubtotal + invVat);
 
     // Issue goods from warehouse first (validates stock, computes actual FIFO cost)
     const issueResults: Array<ReturnType<typeof InventoryEngine.recordMovement>> = [];
@@ -2184,6 +2178,29 @@ export class WorkflowService {
       if (!mv.success) return { success: false, error: `فشل صرف مرتجع المشتريات: ${mv.error}` };
       issueResults.push(mv);
     }
+
+    // Lines with no invoice price (opening-balance stock, or an item not on the invoice) are
+    // returned at the ACTUAL FIFO cost that left the warehouse, with no VAT and no price variance.
+    costLines.forEach((cl, i) => {
+      if (!cl.priceFromStock) return;
+      const q = Number(cl.quantity) || 0;
+      const cost = issueResults[i]?.actualCost || 0;
+      cl.unitCost = q > 0 ? cost / q : 0;
+      cl.unitPrice = cl.unitCost;
+      cl.vatRate = 0;
+    });
+
+    // ITEM 4 — every per-line amount is rounded to 2 decimals first, and the
+    // totals are the SUMS of those rounded lines, so the journal, the return
+    // document and the supplier balance all agree to the cent.
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const lineAmounts = costLines.map(cl => ({
+      net: r2(cl.quantity * cl.unitPrice),
+      vat: r2(cl.quantity * cl.unitPrice * cl.vatRate),
+    }));
+    const invSubtotal = lineAmounts.reduce((s, a) => s + a.net, 0);
+    const invVat = lineAmounts.reduce((s, a) => s + a.vat, 0);
+    const totalAmount = r2(invSubtotal + invVat);
 
     // Journal: Dr Supplier Payable (subtotal + VAT) | Cr Inventory (actual issued cost) + Cr VAT Input
     const supAcc = AccountingEngine.getMappedAccountId('supplier_payable', 'acc-2101');
@@ -4232,7 +4249,7 @@ export class WorkflowService {
     const inspId = generateErpId('qi');
 
     // For rejected/conditional goods: physically move from source warehouse to destination
-    if (params.result !== 'passed' && params.destination !== 'saleable') {
+    if (params.result !== 'passed' && params.destination !== 'saleable' && sourceWh !== routing.warehouseId) {
       const est = InventoryEngine.estimateIssueCost(params.itemId, sourceWh, params.inspectedQuantity, params.batchNumber);
       if (est.available < params.inspectedQuantity) {
         return { success: false, error: `الكمية المتاحة من (${item.nameAr}) بمستودع المصدر هي ${est.available} ولا تكفي لتحويل ${params.inspectedQuantity} بعد الفحص` };
@@ -4274,7 +4291,12 @@ export class WorkflowService {
       if (!inMv.success) return { success: false, error: inMv.error };
 
       // GL reclassification: inventory accounts move value between warehouse accounts
-      const fromAcc = AccountingEngine.getMappedAccountId('inventory_finished_local', 'acc-1109');
+      // The value leaves the inventory account of the SOURCE warehouse (raw materials are not finished goods).
+      const fromAcc = sourceWh === 'wh-raw' ? AccountingEngine.getMappedAccountId('purchase_raw_inventory', 'acc-1108')
+        : sourceWh === 'wh-damaged' ? AccountingEngine.getMappedAccountId('inventory_damaged', 'acc-1111')
+        : sourceWh === 'wh-scrap' ? AccountingEngine.getMappedAccountId('inventory_scrap', 'acc-1112')
+        : sourceWh === 'wh-export' ? AccountingEngine.getMappedAccountId('inventory_finished_export', 'acc-1110')
+        : AccountingEngine.getMappedAccountId('inventory_finished_local', 'acc-1109');
       const toAcc = AccountingEngine.getMappedAccountId(routing.inventoryMappingKey, routing.fallbackAccId);
       const value = params.inspectedQuantity * unitCost;
       if (value > 0 && fromAcc !== toAcc) {
@@ -4286,7 +4308,7 @@ export class WorkflowService {
           sourceDocumentId: inspId,
           lines: [
             jl(toAcc, value, 0, value, 1, 'EGP', `استلام مخزون معاد تصنيفه: ${routing.label}`),
-            jl(fromAcc, 0, value, value, 1, 'EGP', `خصم مخزون معاد تصنيفه من المخزون القابل للبيع`),
+            jl(fromAcc, 0, value, value, 1, 'EGP', `خصم مخزون معاد تصنيفه من مستودع المصدر (${sourceWh})`),
           ],
         }, params.userId, params.userName, params.isTest);
         if (!jv.success) return { success: false, error: jv.error };

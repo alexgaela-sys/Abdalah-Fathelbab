@@ -15,6 +15,7 @@
 import { erpDb } from './db';
 import { AccountingEngine } from './accounting';
 import { Customer, JournalEntry, TreasuryTransaction } from '../types/erp';
+import { currencyForCustomerType } from './pricing';
 
 export type CustomerDocType =
   | 'sales_invoice' | 'customer_payment' | 'sales_return' | 'cheque'
@@ -247,7 +248,10 @@ export class LedgerService {
     docType?: CustomerDocType | 'all';
   }): CustomerStatement {
     const db = erpDb.getSnapshot();
-    const customer = db.customers.find(c => c.id === params.customerId);
+    const rawCustomer = db.customers.find(c => c.id === params.customerId);
+    // The card currency always follows the customer type (export = USD), even on legacy cards
+    // saved with the wrong one — otherwise invoices (posted to 1106 by type) are read from 1105.
+    const customer = rawCustomer ? { ...rawCustomer, currency: currencyForCustomerType(rawCustomer.customerType) } : undefined;
     const empty: CustomerStatement = {
       customerId: params.customerId, currency: 'EGP', openingBalance: 0, rows: [],
       totalDebit: 0, totalCredit: 0, closingBalance: 0, cardBalance: 0, cardDiff: 0, glBalance: 0, glDiff: 0,

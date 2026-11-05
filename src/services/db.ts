@@ -590,6 +590,21 @@ export const CHIP_AND_FRYING_ITEMS: Item[] = [
     ...pkgItem('item-raw-chip', 'RM-CHIP-01', 'شيبس / فاير فينجر', 'Chips / Fire Finger', 'unit-kg'),
     itemType: 'raw_material',
   },
+  // Per-flavour ready-made chips bought from the supplier by KG (production sheet, Nov 2026).
+  ...([
+    ['item-raw-chip-chicken', 'RM-CHIP-CHK', 'شيبس ذرة محمص بالدجاج', 'Roasted corn chips - chicken'],
+    ['item-raw-chip-beef-bbq', 'RM-CHIP-BBQ', 'شيبس ذرة محمص باللحم باربكيو', 'Roasted corn chips - beef BBQ'],
+    ['item-raw-chip-krinkle', 'RM-CHIP-KRK', 'كرينكل شيبس الذرة بالدجاج', 'Krinkle corn chips - chicken'],
+    ['item-raw-chip-fire-lemon', 'RM-CHIP-FFL', 'فاير فينجر ليمون', 'Fire finger - lemon'],
+    ['item-raw-chip-fire-shrimp', 'RM-CHIP-FFS', 'فاير فينجر جمبري', 'Fire finger - shrimp'],
+    ['item-raw-chip-nacho-salt', 'RM-CHIP-NSL', 'ناتشوز شيبس مملح', 'Nacho chips - salted'],
+    ['item-raw-chip-nacho-cheese', 'RM-CHIP-NCH', 'ناتشوز شيبس بالجبنة', 'Nacho chips - cheese'],
+    ['item-raw-chip-nacho-paprika', 'RM-CHIP-NPR', 'ناتشوز شيبس بالبابريكا (الفلفل الحلو)', 'Nacho chips - paprika'],
+    ['item-raw-chip-dibi-shells', 'RM-CHIP-DBS', 'ديبي شيلز مقرمشات مملحة', 'Dibi shells - salted'],
+  ] as const).map(([id, code, ar, en]): Item => ({
+    ...pkgItem(id, code, ar, en, 'unit-kg'),
+    itemType: 'raw_material',
+  })),
 ];
 
 // Production Master Catalog: Exact 11 Finished Products (SnakDip) & Essential Raw Materials/Packaging
@@ -647,8 +662,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص سويت شيلي',
     nameEn: 'Sweet Chili Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -669,8 +684,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص سبايسي مشوي',
     nameEn: 'Spicy Grilled Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -691,8 +706,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص مستردة',
     nameEn: 'Honey Mustard Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -713,8 +728,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص برجر',
     nameEn: 'Burger Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -735,8 +750,8 @@ export const INITIAL_PRODUCTION_ITEMS: Item[] = [
     nameAr: 'صوص باربكيو',
     nameEn: 'BBQ Sauce',
     itemType: 'raw_material',
-    baseUnitId: 'unit-kg',
-    purchaseUnitId: 'unit-kg',
+    baseUnitId: 'unit-piece',
+    purchaseUnitId: 'unit-piece',
     vatRate: 0.14,
     vatCategory: 'standard',
     trackBatch: true,
@@ -1109,7 +1124,8 @@ export const PRODUCTION_RATES_CHIP_KG_PER_PIECE = 800 / 1000;
 
 export const PRODUCTION_RATES = {
   /** grams of sauce per finished piece (0.075 KG = 75 g, full decimal precision) */
-  SAUCE_KG_PER_PIECE: 0.075,
+  /** sauce is supplied by the PIECE: 1 sauce piece per sauce flavour per finished piece (name kept for compatibility) */
+  SAUCE_KG_PER_PIECE: 1,
   /** chips consumed per SINGLE piece / per DUO piece */
   CHIPS_PER_SINGLE: 1,
   CHIPS_PER_DUO: 2,
@@ -1192,7 +1208,7 @@ function buildInitialBoms(): { boms: BomHeader[]; bomLines: BomLine[] } {
         ...recipe.sauceItemIds.map(id => ({
           materialItemId: id,
           quantityRequired: PRODUCTION_RATES.SAUCE_KG_PER_PIECE * BASE,
-          unitId: 'unit-kg',
+          unitId: 'unit-piece',
         })),
         // --- primary container: singles and duos use DIFFERENT boxes ---
         {
@@ -1325,7 +1341,24 @@ export function createEmptyDatabase(): ERPDatabaseSchema {
   // paths converge on identical master data, with one single source of truth
   // (the migrations) instead of names duplicated across the seed and the
   // migration — which is what let the two drift apart.
-  return applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(fresh)));
+  return applyEmployeeCipLoanAccountsMigration(applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(fresh))));
+}
+
+/**
+ * ADDITIVE migration: employee custody (1115) and advances (1116), construction-in-progress (1201,
+ * under a new non-current-assets header 12) and loans & instalments (2105). Never touches
+ * existing accounts or balances.
+ */
+export function applyEmployeeCipLoanAccountsMigration(db: ERPDatabaseSchema): ERPDatabaseSchema {
+  const accounts = Array.isArray(db.accounts) ? db.accounts : [];
+  const add = (a: Account) => { if (!accounts.some(x => x.id === a.id)) accounts.push(a); };
+  add({ id: 'acc-1115', code: '1115', nameAr: 'عهد الموظفين', nameEn: 'Employee Custody', category: 'Assets', isHeader: false, parentId: 'acc-11', level: 3, currentBalance: 0 });
+  add({ id: 'acc-1116', code: '1116', nameAr: 'سلف الموظفين', nameEn: 'Employee Advances', category: 'Assets', isHeader: false, parentId: 'acc-11', level: 3, currentBalance: 0 });
+  add({ id: 'acc-12', code: '12', nameAr: 'الأصول غير المتداولة', nameEn: 'Non-Current Assets', category: 'Assets', isHeader: true, parentId: 'acc-1', level: 2, currentBalance: 0 });
+  add({ id: 'acc-1201', code: '1201', nameAr: 'أعمال تحت التنفيذ (تجهيزات وإنشاءات)', nameEn: 'Construction in Progress', category: 'Assets', isHeader: false, parentId: 'acc-12', level: 3, currentBalance: 0 });
+  add({ id: 'acc-2105', code: '2105', nameAr: 'قروض وأقساط (قرض سيارة)', nameEn: 'Loans & Instalments', category: 'Liabilities', isHeader: false, parentId: 'acc-21', level: 3, currentBalance: 0 });
+  db.accounts = accounts;
+  return db;
 }
 
 /**
@@ -1445,6 +1478,14 @@ export function applyMasterDataMigration(db: ERPDatabaseSchema): ERPDatabaseSche
   // preserved. Idempotent, and safe for existing databases.
   const chip = items.find(i => i.id === 'item-raw-chip');
   if (chip) { chip.itemType = 'raw_material'; }
+
+  // Sauces are supplied by the PIECE (not by weight). Switch the unit only while the
+  // sauce has no stock movements, so existing history is never reinterpreted.
+  const usedItemIds = new Set((Array.isArray(db.inventoryTransactions) ? db.inventoryTransactions : []).map((t: { itemId: string }) => t.itemId));
+  for (const sid of ['item-raw-flavor-sweet-chili', 'item-raw-flavor-spicy-grilled', 'item-raw-flavor-honey-mustard', 'item-raw-flavor-smokey-burger', 'item-raw-flavor-honey-bbq']) {
+    const sauce = items.find(i => i.id === sid);
+    if (sauce && sauce.baseUnitId === 'unit-kg' && !usedItemIds.has(sid)) { sauce.baseUnitId = 'unit-piece'; sauce.purchaseUnitId = 'unit-piece'; }
+  }
 
   // 3) canonical recipe display names for the 11 finished products (ids intact)
   for (const [id, recipe] of Object.entries(CANONICAL_FINISHED_PRODUCTS)) {
@@ -1669,7 +1710,7 @@ export function normalizeStoredDatabase(parsed: any): ERPDatabaseSchema {
     users: loadedUsers,
   };
 
-  const migrated = applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(merged)));
+  const migrated = applyEmployeeCipLoanAccountsMigration(applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(merged))));
   return migrated;
 }
 

@@ -20,6 +20,13 @@ export function currencyForChannel(channel: SalesChannel): 'EGP' | 'USD' {
   return channel === 'export' ? 'USD' : 'EGP';
 }
 
+/** The customer card currency is implied by the customer type: export = USD, everyone else = EGP.
+ *  A card whose currency disagrees with its type posts to one receivable account (1106 by channel)
+ *  and is read from another (1105 by currency) — so the two are never allowed to differ. */
+export function currencyForCustomerType(customerType: Customer['customerType']): 'EGP' | 'USD' {
+  return customerType === 'export' ? 'USD' : 'EGP';
+}
+
 /** Default warehouse implied by the channel (export ships from WH-03). */
 export function warehouseForChannel(channel: SalesChannel): string {
   return channel === 'export' ? 'wh-export' : 'wh-local';

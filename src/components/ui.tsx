@@ -62,8 +62,10 @@ export const SectionCard: React.FC<{
   headerAction?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
-}> = ({ title, hint, icon: Icon, headerAction, children, className = '' }) => (
-  <div className={`card ${className}`}>
+  /** Shows money: hidden from people without the "prices" permission. */
+  money?: boolean;
+}> = ({ title, hint, icon: Icon, headerAction, children, className = '', money }) => (
+  <div className={`card ${className}`} {...(money ? { 'data-price': true } : {})}>
     <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3.5 border-b border-cream-200">
       <div className="flex items-center gap-2 min-w-0">
         {Icon && <Icon className="w-5 h-5 text-brand-600 shrink-0" />}

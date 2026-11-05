@@ -11,6 +11,9 @@ import { ManufacturingEngine } from '../../services/manufacturing';
 import { SettingsService } from '../../services/settings';
 import { printDocument } from '../printUtils';
 
+import { AuthService } from '../../services/auth';
+import { PermissionService } from '../../services/permissions';
+
 export type ReportType = 
   | 'trial_balance'
   | 'income_statement'
@@ -32,7 +35,19 @@ export const ReportsView: React.FC<{
   onNavigateTab?: (tab: string) => void;
 }> = ({ initialReport, onNavigateTab }) => {
   const db = erpDb.getSnapshot();
-  const [selectedReport, setSelectedReport] = useState<ReportType>(initialReport || 'trial_balance');
+  // People without the "prices" permission only get the reports that carry no money.
+  const MONEY_REPORTS: ReportType[] = [
+    'trial_balance', 'income_statement', 'balance_sheet', 'receivables_aging',
+    'payables_aging', 'inventory_valuation', 'sales_analysis', 'vat_report', 'raw_material_variance',
+  ];
+  const canSeePrices = PermissionService.canSeePrices(AuthService.getCurrentSession()?.user);
+  const [selectedReport, setSelectedReport] = useState<ReportType>(() => {
+    const wanted = initialReport || 'trial_balance';
+    return !canSeePrices && MONEY_REPORTS.includes(wanted) ? 'expiry_status' : wanted;
+  });
+  React.useEffect(() => {
+    if (!canSeePrices && MONEY_REPORTS.includes(selectedReport)) setSelectedReport('expiry_status');
+  });
 
   // ITEM 13 / R-13 — the expiry-threshold button used to only navigate away to
   // Settings, which contained no editor for it, so the value could never be
@@ -336,6 +351,7 @@ export const ReportsView: React.FC<{
       {/* Report Selection Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
         <button
+          data-price
           onClick={() => setSelectedReport('trial_balance')}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
             selectedReport === 'trial_balance' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
@@ -344,6 +360,7 @@ export const ReportsView: React.FC<{
           ميزان المراجعة (Trial Balance)
         </button>
         <button
+          data-price
           onClick={() => setSelectedReport('income_statement')}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
             selectedReport === 'income_statement' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
@@ -352,6 +369,7 @@ export const ReportsView: React.FC<{
           قائمة الدخل والأرباح (P&L)
         </button>
         <button
+          data-price
           onClick={() => setSelectedReport('balance_sheet')}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
             selectedReport === 'balance_sheet' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
@@ -360,6 +378,7 @@ export const ReportsView: React.FC<{
           الميزانية العمومية (Balance Sheet)
         </button>
         <button
+          data-price
           onClick={() => setSelectedReport('receivables_aging')}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
             selectedReport === 'receivables_aging' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
@@ -368,6 +387,7 @@ export const ReportsView: React.FC<{
           أعمار ديون العملاء (Aging)
         </button>
         <button
+          data-price
           onClick={() => setSelectedReport('vat_report')}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
             selectedReport === 'vat_report' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
@@ -384,6 +404,7 @@ export const ReportsView: React.FC<{
           الصلاحية (Expiry)
         </button>
         <button
+          data-price
           onClick={() => setSelectedReport('raw_material_variance')}
           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
             selectedReport === 'raw_material_variance' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'

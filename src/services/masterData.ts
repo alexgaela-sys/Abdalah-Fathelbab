@@ -14,8 +14,10 @@
 import { erpDb, generateErpId } from './db';
 import { AuthorizationService, GuardOptions } from './authorization';
 import { Customer, Supplier, Item, User, RoleName, PermissionAction } from '../types/erp';
+import { LedgerService } from './ledger';
+import { OpeningBalanceService } from './openingBalances';
 import { ALL_MODULES, ASSIGNABLE_ACTIONS } from './permissions';
-import { channelForCustomerType } from './pricing';
+import { channelForCustomerType, currencyForCustomerType } from './pricing';
 
 type ModuleAction = { module: any; action: 'create' | 'edit' };
 
@@ -30,6 +32,8 @@ export class MasterDataService {
     code: string; name: string; customerType: Customer['customerType']; channel: string;
     address?: string; phone?: string; taxNumber?: string; currency?: 'EGP' | 'USD';
     creditLimit?: number; openingBalance?: number; paymentTerms?: string;
+    /** Cut-over date + rate (USD customers) of the opening balance; it is POSTED to the books, not only stored on the card. */
+    openingDate?: string; openingExchangeRate?: number;
     userId?: string; userName?: string; isTest?: boolean;
   }): { success: boolean; customer?: Customer; error?: string } {
     const g = guard({ module: 'customers', action: 'create' }, params);
@@ -69,13 +73,19 @@ export class MasterDataService {
       address: params.address || '',
       phone: params.phone || '',
       taxNumber: params.taxNumber || '',
-      currency: params.currency || 'EGP',
+      // The card currency follows the customer type (export = USD): see currencyForCustomerType.
+      currency: currencyForCustomerType(params.customerType),
       creditLimit,
-      currentBalance: opening,
+      // The opening balance is posted through OpeningBalanceService below (card AND books together).
+      currentBalance: 0,
       paymentTerms: params.paymentTerms || '',
-      openingBalance: opening,
+      openingBalance: 0,
       active: true,
     };
+    const openingRate = Number(params.openingExchangeRate) || (erpDb.getSnapshot().company.currentUsdExchangeRate || 0);
+    if (opening !== 0 && customer.currency === 'USD' && !(openingRate > 0)) {
+      return { success: false, error: 'عميل التصدير برصيد افتتاحي يتطلب سعر صرف (جنيه للدولار)' };
+    }
 
     erpDb.mutate(draft => {
       draft.customers.push(customer);
@@ -88,7 +98,15 @@ export class MasterDataService {
       });
     });
 
-    return { success: true, customer };
+    if (opening !== 0) {
+      const ob = OpeningBalanceService.postCustomerOpening({
+        customerId: customer.id, amount: opening, date: params.openingDate || new Date().toISOString().split('T')[0],
+        exchangeRate: openingRate, userId: g.userId, userName: g.userName, isTest: params.isTest,
+      });
+      if (!ob.success) return { success: false, customer: erpDb.getSnapshot().customers.find(c => c.id === customer.id), error: `تم إنشاء العميل لكن تعذّر ترحيل الرصيد الافتتاحي: ${ob.error}` };
+    }
+
+    return { success: true, customer: erpDb.getSnapshot().customers.find(c => c.id === customer.id) || customer };
   }
 
   /**
@@ -142,7 +160,7 @@ export class MasterDataService {
       if (params.address !== undefined) c.address = params.address;
       if (params.phone !== undefined) c.phone = params.phone;
       if (params.taxNumber !== undefined) c.taxNumber = params.taxNumber;
-      if (params.currency !== undefined) c.currency = params.currency;
+      c.currency = currencyForCustomerType(c.customerType);
       c.creditLimit = creditLimit;
       if (params.paymentTerms !== undefined) c.paymentTerms = params.paymentTerms;
       draft.auditLogs.push({
@@ -155,6 +173,32 @@ export class MasterDataService {
     });
 
     return { success: true, customer: erpDb.getSnapshot().customers.find(c => c.id === customerId) };
+  }
+
+  /**
+   * Repair for cards created before currency followed the customer type: an export customer
+   * saved with an EGP card posted its invoices to 1106 but was read from 1105, so the statement
+   * came out empty and the card balance mixed dollars with pounds. Flip the currency to match
+   * the type and restate the card balance from the posted ledger (the single source of truth).
+   * Idempotent; touches only cards whose currency disagrees with their type.
+   */
+  public static normalizeCustomerCurrencies(): number {
+    const wrong = erpDb.getSnapshot().customers.filter(c => c.currency !== currencyForCustomerType(c.customerType));
+    if (wrong.length === 0) return 0;
+    erpDb.mutate(draft => {
+      for (const c of draft.customers) {
+        if (c.currency !== currencyForCustomerType(c.customerType)) c.currency = currencyForCustomerType(c.customerType);
+      }
+    });
+    // Restate balances from the ledger now that the card reads the right control account.
+    const restated = wrong.map(c => ({ id: c.id, balance: LedgerService.buildCustomerStatement({ customerId: c.id }).closingBalance }));
+    erpDb.mutate(draft => {
+      for (const r of restated) {
+        const c = draft.customers.find(x => x.id === r.id);
+        if (c) c.currentBalance = r.balance;
+      }
+    });
+    return wrong.length;
   }
 
   /** Toggle customer active flag without touching their balance or history. */
@@ -187,6 +231,7 @@ export class MasterDataService {
   public static createSupplier(params: {
     code: string; name: string; taxNumber?: string; contactPerson?: string; phone?: string;
     address?: string; paymentTerms?: string; currency?: 'EGP' | 'USD'; openingBalance?: number;
+    openingDate?: string; openingExchangeRate?: number;
     userId?: string; userName?: string; isTest?: boolean;
   }): { success: boolean; supplier?: Supplier; error?: string } {
     const g = guard({ module: 'suppliers', action: 'create' }, params);
@@ -215,10 +260,14 @@ export class MasterDataService {
       address: (params.address || '').trim(),
       paymentTerms: params.paymentTerms || '',
       currency: params.currency || 'EGP',
-      openingBalance: opening,
-      currentBalance: opening,
+      openingBalance: 0,
+      currentBalance: 0,
       active: true,
     };
+    const supRate = Number(params.openingExchangeRate) || (erpDb.getSnapshot().company.currentUsdExchangeRate || 0);
+    if (opening !== 0 && supplier.currency === 'USD' && !(supRate > 0)) {
+      return { success: false, error: 'مورد بالدولار برصيد افتتاحي يتطلب سعر صرف (جنيه للدولار)' };
+    }
 
     erpDb.mutate(draft => {
       draft.suppliers.push(supplier);
@@ -231,7 +280,15 @@ export class MasterDataService {
       });
     });
 
-    return { success: true, supplier };
+    if (opening !== 0) {
+      const ob = OpeningBalanceService.postSupplierOpening({
+        supplierId: supplier.id, amount: opening, date: params.openingDate || new Date().toISOString().split('T')[0],
+        exchangeRate: supRate, userId: g.userId, userName: g.userName, isTest: params.isTest,
+      });
+      if (!ob.success) return { success: false, supplier: erpDb.getSnapshot().suppliers.find(x => x.id === supplier.id), error: `تم إنشاء المورد لكن تعذّر ترحيل الرصيد الافتتاحي: ${ob.error}` };
+    }
+
+    return { success: true, supplier: erpDb.getSnapshot().suppliers.find(x => x.id === supplier.id) || supplier };
   }
 
   public static setSupplierActive(supplierId: string, active: boolean, options?: GuardOptions): { success: boolean; error?: string } {
@@ -351,6 +408,8 @@ export class MasterDataService {
    */
   public static createUser(params: {
     username: string; password: string; name: string; email?: string; role: RoleName;
+    /** Cloud mode: the user signs in with this Supabase account, so no password is kept in the ERP. */
+    authUserId?: string;
     userId?: string; userName?: string; isTest?: boolean;
   }): { success: boolean; user?: User; error?: string } {
     const g = guard({ module: 'users', action: 'create' }, params);
@@ -363,8 +422,12 @@ export class MasterDataService {
 
     if (!username) return { success: false, error: 'اسم الدخول (username) مطلوب' };
     if (!name) return { success: false, error: 'اسم المستخدم مطلوب' };
-    if (!password) return { success: false, error: 'كلمة المرور مطلوبة — لا يوجد كلمة مرور افتراضية' };
-    if (password.length < 6) return { success: false, error: 'كلمة المرور يجب ألا تقل عن 6 أحرف' };
+    if (!params.authUserId) {
+      if (!password) return { success: false, error: 'كلمة المرور مطلوبة — لا يوجد كلمة مرور افتراضية' };
+      if (password.length < 6) return { success: false, error: 'كلمة المرور يجب ألا تقل عن 6 أحرف' };
+    } else if (!(params.email || '').trim()) {
+      return { success: false, error: 'البريد الإلكتروني مطلوب لحساب الدخول' };
+    }
     if (db.users.some(u => u.username.toLowerCase() === username)) {
       return { success: false, error: `اسم الدخول (${username}) مستخدم بالفعل` };
     }
@@ -372,9 +435,9 @@ export class MasterDataService {
     const user: User = {
       id: generateErpId('usr'),
       username,
-      password,
+      ...(params.authUserId ? { authUserId: params.authUserId } : { password }),
       name,
-      email: (params.email || '').trim(),
+      email: (params.email || '').trim().toLowerCase(),
       role: params.role,
       active: true,
       createdAt: new Date().toISOString(),
@@ -392,6 +455,28 @@ export class MasterDataService {
     });
 
     return { success: true, user };
+  }
+
+  /** Cloud mode: attach a Supabase sign-in account to an ERP user that has none (e.g. imported from the old system). */
+  public static linkAuthUser(userId: string, authUserId: string, options?: GuardOptions): { success: boolean; error?: string } {
+    const g = guard({ module: 'users', action: 'edit' }, options);
+    if (!g.allowed) return { success: false, error: g.error };
+    const existing = erpDb.getSnapshot().users.find(u => u.id === userId);
+    if (!existing) return { success: false, error: 'المستخدم غير موجود' };
+    erpDb.mutate(draft => {
+      const u = draft.users.find(x => x.id === userId);
+      if (!u) return;
+      u.authUserId = authUserId;
+      delete u.password;
+      draft.auditLogs.push({
+        id: generateErpId('aud'),
+        timestamp: new Date().toISOString(),
+        userId: g.userId, userName: g.userName,
+        module: 'المستخدمون والصلاحيات', action: 'edit', recordId: userId,
+        description: `إنشاء حساب دخول سحابي للمستخدم ${existing.username} بواسطة ${g.userName}`,
+      });
+    });
+    return { success: true };
   }
 
   public static setUserActive(userId: string, active: boolean, options?: GuardOptions): { success: boolean; error?: string } {
