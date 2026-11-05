@@ -30,7 +30,8 @@
     "qa:cloud-identity": "bun scripts/cloud_identity_test.ts",
     "qa:export-customer": "bun scripts/qa_export_customer_statement.ts",
     "qa:production-issue": "bun scripts/qa_production_issue_and_deviation.ts",
-    "qa:opening": "bun scripts/qa_opening_balances.ts"
+    "qa:opening": "bun scripts/qa_opening_balances.ts",
+    "qa:purchase-return-no-invoice": "bun scripts/qa_purchase_return_no_invoice.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -24,6 +24,17 @@ export const PurchasingView: React.FC = () => {
   const [retError, setRetError] = useState<string | null>(null);
   const [retNotice, setRetNotice] = useState<string | null>(null);
 
+  // Return WITHOUT an invoice (opening-balance stock): supplier + warehouse + item + quantity.
+  const NO_INVOICE = '__none__';
+  const [nvSupplier, setNvSupplier] = useState('');
+  const [nvWarehouse, setNvWarehouse] = useState('wh-raw');
+  const [nvItem, setNvItem] = useState('');
+  const [nvQty, setNvQty] = useState(0);
+  const noInvoiceMode = retInvoiceId === NO_INVOICE;
+  const nvStock = (itemId: string) => db.batches
+    .filter(b => b.itemId === itemId && b.warehouseId === nvWarehouse)
+    .reduce((t, b) => t + (Number(b.quantity) || 0), 0);
+
   const postedInvoices = db.purchaseInvoices.filter(i => i.status === 'posted');
   const retInvoice = postedInvoices.find(i => i.id === retInvoiceId) || null;
   const retInvoiceLines = retInvoice
@@ -41,8 +52,21 @@ export const PurchasingView: React.FC = () => {
   const handlePostPurchaseReturn = () => {
     setRetError(null);
     setRetNotice(null);
-    if (!retInvoice) { setRetError('اختر فاتورة شراء مرحّلة أولاً'); return; }
     if (!retReason.trim()) { setRetError('سبب المرتجع مطلوب'); return; }
+    if (noInvoiceMode) {
+      if (!nvSupplier) { setRetError('اختر المورد'); return; }
+      if (!nvItem) { setRetError('اختر الصنف'); return; }
+      if (!(nvQty > 0)) { setRetError('أدخل كمية المرتجع'); return; }
+      const r = WorkflowService.postPurchaseReturn({
+        supplierId: nvSupplier, warehouseId: nvWarehouse, date: retDate, reason: retReason.trim(),
+        lines: [{ itemId: nvItem, quantity: nvQty }],
+      });
+      if (!r.success) { setRetError(r.error || 'تعذر ترحيل مرتجع المشتريات'); return; }
+      setRetNotice(`تم ترحيل المرتجع ${r.purchaseReturn?.returnNumber} بدون فاتورة: خُصمت الكمية من المخزن بتكلفتها الفعلية وخُفّض رصيد المورد بنفس القيمة.`);
+      setNvQty(0); setRetReason('');
+      return;
+    }
+    if (!retInvoice) { setRetError('اختر فاتورة شراء مرحّلة أولاً'); return; }
     const lines = retInvoiceLines
       .map(l => ({ itemId: l.itemId, quantity: Number(retQtys[l.itemId]) || 0, batchNumber: l.batchNumber }))
       .filter(l => l.quantity > 0);
@@ -394,6 +418,7 @@ export const PurchasingView: React.FC = () => {
                   className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                 >
                   <option value="">— اختر الفاتورة —</option>
+                  <option value={NO_INVOICE}>بدون فاتورة (صنف من رصيد أول المدة)</option>
                   {postedInvoices.map(inv => (
                     <option key={inv.id} value={inv.id}>
                       {inv.invoiceNumber} — {db.suppliers.find(s => s.id === inv.supplierId)?.name} — {inv.date}
@@ -421,6 +446,36 @@ export const PurchasingView: React.FC = () => {
                 />
               </div>
             </div>
+
+            {noInvoiceMode && (
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end p-3 rounded-xl bg-amber-50 border border-amber-200">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">المورد</label>
+                  <select value={nvSupplier} onChange={e => setNvSupplier(e.target.value)} className="w-full p-2 rounded-xl bg-white border border-slate-300 text-xs">
+                    <option value="">— اختر المورد —</option>
+                    {db.suppliers.map(sp => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">المخزن</label>
+                  <select value={nvWarehouse} onChange={e => { setNvWarehouse(e.target.value); setNvItem(''); }} className="w-full p-2 rounded-xl bg-white border border-slate-300 text-xs">
+                    {db.warehouses.filter(w => w.active !== false).map(w => <option key={w.id} value={w.id}>{w.nameAr}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">الصنف (المتاح بالمخزن)</label>
+                  <select value={nvItem} onChange={e => setNvItem(e.target.value)} className="w-full p-2 rounded-xl bg-white border border-slate-300 text-xs">
+                    <option value="">— اختر الصنف —</option>
+                    {db.items.filter(i => nvStock(i.id) > 0).map(i => <option key={i.id} value={i.id}>{i.nameAr} — متاح {nvStock(i.id)}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">كمية الإرجاع</label>
+                  <input type="number" min="0" step="0.001" value={nvQty} onChange={e => setNvQty(Math.max(0, Number(e.target.value)))} className="w-full p-2 rounded-xl bg-white border border-slate-300 text-xs font-mono" />
+                </div>
+                <p className="sm:col-span-4 text-[11px] text-amber-800">الإرجاع بدون فاتورة يتم بتكلفة الصنف الفعلية في المخزن (رصيد أول المدة) وبدون ضريبة، ويخفض رصيد المورد بنفس القيمة.</p>
+              </div>
+            )}
 
             {retInvoice && (
               <div className="border border-slate-200 rounded-xl overflow-x-auto">
@@ -482,7 +537,7 @@ export const PurchasingView: React.FC = () => {
             <div className="flex justify-end">
               <button
                 onClick={handlePostPurchaseReturn}
-                disabled={!retInvoice || !retReason.trim()}
+                disabled={(!retInvoice && !noInvoiceMode) || !retReason.trim()}
                 className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md disabled:opacity-40"
               >
                 ترحيل المرتجع وإخراج المخزون
