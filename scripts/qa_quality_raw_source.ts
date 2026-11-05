@@ -1,0 +1,28 @@
+// Quality inspection of a RAW MATERIAL receipt: source warehouse = wh-raw; value moves 1108 -> 1111 (not from finished goods 1109).
+import { readFileSync } from 'fs';
+import { erpDb, createEmptyDatabase, applyMasterDataMigration, applyUomMigration, applyWithholdingAccountMigration, applyEmployeeCipLoanAccountsMigration } from '../src/services/db';
+import { OpeningBalanceService } from '../src/services/openingBalances';
+import { WorkflowService } from '../src/services/workflows';
+import { InventoryEngine } from '../src/services/inventory';
+const pkg = JSON.parse(readFileSync(process.argv[2] || 'data/snakdip_opening_package_2026-10-31.json', 'utf8'));
+let failed = 0;
+const check = (n: string, ok: boolean, x = '') => { console.log(`${ok ? 'ok  ' : 'FAIL'} - ${n} ${x}`); if (!ok) failed++; };
+const near = (a: number, b: number) => Math.abs(a - b) < 0.01;
+erpDb.restore(JSON.parse(JSON.stringify(applyEmployeeCipLoanAccountsMigration(applyWithholdingAccountMigration(applyUomMigration(applyMasterDataMigration(createEmptyDatabase())))))));
+OpeningBalanceService.importPackage(pkg, { userId: 'usr-admin', userName: 'QA' });
+const bal = (id: string) => erpDb.getSnapshot().accounts.find(a => a.id === id)!.currentBalance;
+const b = erpDb.getSnapshot().batches.find(x => x.warehouseId === 'wh-raw' && x.itemId === 'item-pkg-box-duo')!;
+const q0 = InventoryEngine.getItemBalance('item-pkg-box-duo', 'wh-raw'), fg0 = bal('acc-1109'), raw0 = bal('acc-1108'), dmg0 = bal('acc-1111');
+const r = WorkflowService.recordQualityInspectionWithRouting({ documentType: 'purchase_receipt', documentNumber: 'PINV-X', itemId: 'item-pkg-box-duo', batchNumber: b.batchNumber, inspectedQuantity: 50, date: '2026-11-05', inspectorName: 'QA', result: 'rejected', destination: 'damaged', sourceWarehouseId: 'wh-raw' });
+check('inspection posts', r.success, r.error || '');
+check('raw warehouse reduced by 50', InventoryEngine.getItemBalance('item-pkg-box-duo', 'wh-raw') === q0 - 50);
+check('damaged warehouse received 50', InventoryEngine.getItemBalance('item-pkg-box-duo', 'wh-damaged') === 50);
+const v = 50 * b.unitCost;
+check(`1108 reduced by ${v}`, near(raw0 - bal('acc-1108'), v));
+check('1111 increased', near(bal('acc-1111') - dmg0, v));
+check('finished goods 1109 untouched', near(bal('acc-1109'), fg0));
+const same = WorkflowService.recordQualityInspectionWithRouting({ documentType: 'purchase_receipt', documentNumber: 'PINV-Y', itemId: 'item-pkg-box-duo', batchNumber: b.batchNumber, inspectedQuantity: 10, date: '2026-11-05', inspectorName: 'QA', result: 'rejected', destination: 'raw_materials', sourceWarehouseId: 'wh-raw' });
+check('raw -> raw rejection records without moving stock', same.success && InventoryEngine.getItemBalance('item-pkg-box-duo', 'wh-raw') === q0 - 50, same.error || '');
+check('journals balance', near(erpDb.getSnapshot().journalEntries.reduce((t, j) => t + j.totalDebit - j.totalCredit, 0), 0));
+console.log(failed ? `\n${failed} FAILED` : '\nALL CHECKS PASSED');
+process.exit(failed ? 1 : 0);

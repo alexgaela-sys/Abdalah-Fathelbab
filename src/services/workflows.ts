@@ -4249,7 +4249,7 @@ export class WorkflowService {
     const inspId = generateErpId('qi');
 
     // For rejected/conditional goods: physically move from source warehouse to destination
-    if (params.result !== 'passed' && params.destination !== 'saleable') {
+    if (params.result !== 'passed' && params.destination !== 'saleable' && sourceWh !== routing.warehouseId) {
       const est = InventoryEngine.estimateIssueCost(params.itemId, sourceWh, params.inspectedQuantity, params.batchNumber);
       if (est.available < params.inspectedQuantity) {
         return { success: false, error: `الكمية المتاحة من (${item.nameAr}) بمستودع المصدر هي ${est.available} ولا تكفي لتحويل ${params.inspectedQuantity} بعد الفحص` };
@@ -4291,7 +4291,12 @@ export class WorkflowService {
       if (!inMv.success) return { success: false, error: inMv.error };
 
       // GL reclassification: inventory accounts move value between warehouse accounts
-      const fromAcc = AccountingEngine.getMappedAccountId('inventory_finished_local', 'acc-1109');
+      // The value leaves the inventory account of the SOURCE warehouse (raw materials are not finished goods).
+      const fromAcc = sourceWh === 'wh-raw' ? AccountingEngine.getMappedAccountId('purchase_raw_inventory', 'acc-1108')
+        : sourceWh === 'wh-damaged' ? AccountingEngine.getMappedAccountId('inventory_damaged', 'acc-1111')
+        : sourceWh === 'wh-scrap' ? AccountingEngine.getMappedAccountId('inventory_scrap', 'acc-1112')
+        : sourceWh === 'wh-export' ? AccountingEngine.getMappedAccountId('inventory_finished_export', 'acc-1110')
+        : AccountingEngine.getMappedAccountId('inventory_finished_local', 'acc-1109');
       const toAcc = AccountingEngine.getMappedAccountId(routing.inventoryMappingKey, routing.fallbackAccId);
       const value = params.inspectedQuantity * unitCost;
       if (value > 0 && fromAcc !== toAcc) {
@@ -4303,7 +4308,7 @@ export class WorkflowService {
           sourceDocumentId: inspId,
           lines: [
             jl(toAcc, value, 0, value, 1, 'EGP', `استلام مخزون معاد تصنيفه: ${routing.label}`),
-            jl(fromAcc, 0, value, value, 1, 'EGP', `خصم مخزون معاد تصنيفه من المخزون القابل للبيع`),
+            jl(fromAcc, 0, value, value, 1, 'EGP', `خصم مخزون معاد تصنيفه من مستودع المصدر (${sourceWh})`),
           ],
         }, params.userId, params.userName, params.isTest);
         if (!jv.success) return { success: false, error: jv.error };

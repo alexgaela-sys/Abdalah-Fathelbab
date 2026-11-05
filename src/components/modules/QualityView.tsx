@@ -14,6 +14,7 @@ export const QualityView: React.FC = () => {
 
   // Form State
   const [documentType, setDocumentType] = useState<'purchase_receipt' | 'production_output' | 'sales_return'>('production_output');
+  const [sourceWh, setSourceWh] = useState('wh-local');
   const [documentNumber, setDocumentNumber] = useState('');
   const [itemId, setItemId] = useState('');
   const [batchNumber, setBatchNumber] = useState('');
@@ -28,7 +29,9 @@ export const QualityView: React.FC = () => {
   const whMap = new Map(db.warehouses.map(w => [w.id, w.nameAr]));
 
   const handleOpenAdd = () => {
-    if (items.length > 0) setItemId(items[0].id);
+    const firstItem = items.find(i => documentType === 'purchase_receipt' ? i.itemType !== 'finished_product' : i.itemType === 'finished_product') || items[0];
+    if (firstItem) setItemId(firstItem.id);
+    setSourceWh(documentType === 'purchase_receipt' ? 'wh-raw' : 'wh-local');
     setDocumentNumber(`DOC-${Date.now().toString().slice(-4)}`);
     setBatchNumber(`BATCH-${new Date().toLocaleDateString('en-CA').replace(/-/g, '')}-01`);
     setReason('');
@@ -58,7 +61,7 @@ export const QualityView: React.FC = () => {
       inspectorName,
       result,
       destination,
-      sourceWarehouseId: 'wh-local',
+      sourceWarehouseId: sourceWh,
       reason: reason.trim() || undefined,
       notes: notes.trim() || undefined,
     });
@@ -180,7 +183,16 @@ export const QualityView: React.FC = () => {
                   <label className="block text-xs font-bold text-slate-700 mb-1">نوع المستند المفحوص</label>
                   <select
                     value={documentType}
-                    onChange={(e) => setDocumentType(e.target.value as any)}
+                    onChange={(e) => {
+                      const t = e.target.value as 'purchase_receipt' | 'production_output' | 'sales_return';
+                      setDocumentType(t);
+                      // the source warehouse follows the document: raw-material receipts sit in the raw warehouse
+                      setSourceWh(t === 'purchase_receipt' ? 'wh-raw' : 'wh-local');
+                      if (t === 'purchase_receipt') setDestination('raw_materials');
+                      else if (destination === 'raw_materials') setDestination('saleable');
+                      const first = db.items.find(i => t === 'purchase_receipt' ? i.itemType !== 'finished_product' : i.itemType === 'finished_product');
+                      if (first) setItemId(first.id);
+                    }}
                     className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                   >
                     <option value="production_output">إنتاج خط التصنيع</option>
@@ -200,13 +212,29 @@ export const QualityView: React.FC = () => {
               </div>
 
               <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">مخزن المصدر (الموجود به الكمية المفحوصة)</label>
+                <select
+                  value={sourceWh}
+                  onChange={(e) => setSourceWh(e.target.value)}
+                  className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
+                >
+                  {db.warehouses.filter(w => w.active !== false).map(w => (
+                    <option key={w.id} value={w.id}>{w.nameAr}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  الرصيد المتاح من الصنف المختار بهذا المخزن: <span className="font-mono font-bold">{db.batches.filter(b => b.itemId === itemId && b.warehouseId === sourceWh).reduce((t, b) => t + (Number(b.quantity) || 0), 0)}</span>
+                </p>
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">الصنف المراد فحصه</label>
                 <select
                   value={itemId}
                   onChange={(e) => setItemId(e.target.value)}
                   className="w-full p-2 rounded-xl bg-slate-50 border border-slate-300 text-xs"
                 >
-                  {items.map(i => (
+                  {items.filter(i => documentType === 'purchase_receipt' ? i.itemType !== 'finished_product' : i.itemType === 'finished_product').map(i => (
                     <option key={i.id} value={i.id}>{i.nameAr} [{i.code}]</option>
                   ))}
                 </select>
